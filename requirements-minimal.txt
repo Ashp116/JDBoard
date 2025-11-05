@@ -1,0 +1,25 @@
+# Jetson Edge AI Dashboard - Core Dependencies Only
+# This minimal version focuses on the dashboard functionality
+
+# Core Flask application
+Flask==2.2.5
+Flask-CORS==4.0.0
+Flask-SocketIO==5.3.6
+Werkzeug==2.2.3
+
+# System monitoring
+psutil==5.9.5
+
+# Basic image handling
+Pillow==9.5.0
+numpy==1.24.3
+
+# Web server components
+python-socketio==5.8.0
+python-engineio==4.7.1
+
+# Optional: Jetson-specific monitoring (install separately if on Jetson)
+# jetson-stats>=4.2.0
+
+# Development tools
+requests==2.31.0

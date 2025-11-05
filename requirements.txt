@@ -1,0 +1,48 @@
+# Jetson Edge AI Dashboard - Python Dependencies
+
+# Core Flask application
+Flask==2.2.5
+Flask-CORS==4.0.0
+Flask-SocketIO==5.3.6
+Werkzeug==2.2.3
+
+# System monitoring
+psutil==5.9.5
+GPUtil==1.4.0
+
+# Computer Vision and Image Processing
+opencv-python==4.8.1.78
+Pillow==10.0.1
+numpy==1.24.3
+
+# Machine Learning Frameworks (Python 3.10 compatible)
+# ONNX Runtime
+onnxruntime==1.15.1; platform_machine!="aarch64"
+
+# PyTorch (Python 3.10 compatible)
+torch==2.0.1
+torchvision==0.15.2
+
+# TensorFlow (Python 3.10 compatible)
+tensorflow==2.12.0
+
+# TensorRT (optional, for Jetson devices)
+# tensorrt==8.6.1; platform_machine=="aarch64"
+# pycuda==2022.2.2; platform_machine=="aarch64"
+
+# Data handling and utilities
+requests==2.31.0
+python-dotenv==1.0.0
+
+# Development and testing
+pytest==7.4.2
+pytest-flask==1.2.0
+black==23.9.1
+flake8==6.1.0
+
+# Optional: For advanced monitoring
+nvidia-ml-py3==7.352.0; platform_machine=="aarch64"
+jetson-stats==4.2.6; platform_machine=="aarch64"
+
+# Security
+cryptography==41.0.7
