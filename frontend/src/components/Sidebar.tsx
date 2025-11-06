@@ -145,8 +145,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     { id: 'models', icon: 'fas fa-brain', label: 'Models', shortcut: 'Ctrl+2' },
     { id: 'inference', icon: 'fas fa-rocket', label: 'Inference', shortcut: 'Ctrl+3' },
     { id: 'monitoring', icon: 'fas fa-chart-line', label: 'Monitoring', shortcut: 'Ctrl+4' },
-    { id: 'logs', icon: 'fas fa-file-alt', label: 'Logs', shortcut: 'Ctrl+5' },
-    { id: 'settings', icon: 'fas fa-cog', label: 'Settings', shortcut: 'Ctrl+6' }
+    { id: 'terminal', icon: 'fas fa-terminal', label: 'Terminal', shortcut: 'Ctrl+5' },
+    { id: 'logs', icon: 'fas fa-file-alt', label: 'Logs', shortcut: 'Ctrl+6' },
+    { id: 'settings', icon: 'fas fa-cog', label: 'Settings', shortcut: 'Ctrl+7' }
   ];
 
   return (

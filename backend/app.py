@@ -1004,6 +1004,547 @@ def shutdown_system():
             'error': str(e)
         }), 500
 
+# Terminal session management
+terminal_sessions = {}
+
+def get_or_create_terminal_session(session_id=None):
+    """Get or create a terminal session"""
+    if session_id is None:
+        session_id = 'default'
+    
+    if session_id not in terminal_sessions:
+        terminal_sessions[session_id] = {
+            'cwd': os.path.expanduser('~'),
+            'env': dict(os.environ),
+            'history': [],
+            'command_count': 0,
+            'last_command_time': 0,
+            'rate_limit_violations': 0
+        }
+    
+    return terminal_sessions[session_id]
+
+@app.route('/api/terminal/execute', methods=['POST'])
+def execute_terminal_command():
+    """Execute a terminal command safely with session support"""
+    try:
+        data = request.json
+        command = data.get('command', '').strip()
+        session_id = data.get('session_id', 'default')
+        
+        if not command:
+            return jsonify({'success': False, 'error': 'No command provided'}), 400
+        
+        logger.info(f"Terminal command requested: {command} (session: {session_id})")
+        
+        # Get or create session
+        session = get_or_create_terminal_session(session_id)
+        
+        # Rate limiting check
+        import time
+        current_time = time.time()
+        
+        # Allow max 10 commands per minute
+        if session['last_command_time'] > 0:
+            time_since_last = current_time - session['last_command_time']
+            if time_since_last < 6:  # Less than 6 seconds between commands
+                session['rate_limit_violations'] += 1
+                if session['rate_limit_violations'] > 3:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Rate limit exceeded. Please wait before running more commands.'
+                    }), 429
+            else:
+                # Reset violations if enough time has passed
+                session['rate_limit_violations'] = max(0, session['rate_limit_violations'] - 1)
+        
+        session['last_command_time'] = current_time
+        session['command_count'] += 1
+        
+        # Enhanced Security: Comprehensive command filtering
+        
+        # 1. Blocked dangerous commands
+        dangerous_commands = [
+            # File system destruction
+            'rm -rf', 'rm -r /', 'rm -rf /', 'format', 'mkfs', 'fdisk', 'parted',
+            'dd if=', 'dd of=', '> /dev/sd', '> /dev/nvme', 'shred',
+            
+            # System control
+            'sudo reboot', 'sudo shutdown', 'sudo halt', 'sudo poweroff',
+            'init 0', 'init 6', 'systemctl reboot', 'systemctl poweroff',
+            'systemctl halt', 'reboot', 'shutdown', 'halt', 'poweroff',
+            
+            # Process/system manipulation
+            'killall -9', 'pkill -9', 'kill -9 1', 'sudo kill', 'forkbomb',
+            ':(){ :|:& };:', 'while true', 'for((;;))',
+            
+            # Network/security
+            'iptables -F', 'ufw disable', 'sudo passwd', 'passwd root',
+            'sudo deluser', 'sudo userdel', 'sudo usermod',
+            
+            # File permissions
+            'chmod 777 /', 'chmod -R 777', 'sudo chmod 777',
+            'chown -R root', 'sudo chown -R',
+            
+            # Package management (potentially destructive)
+            'sudo apt remove', 'sudo apt purge', 'sudo apt autoremove',
+            'sudo dpkg -r', 'sudo snap remove', 'pip uninstall',
+            
+            # Redirection to critical files
+            '> /etc/', '> /boot/', '> /sys/', '> /proc/',
+            'mv /* /dev/null', 'cp /dev/zero', 'cat /dev/zero',
+            
+            # Docker/container escapes
+            'docker run --privileged', 'docker exec -it',
+            
+            # Cron/service manipulation
+            'sudo crontab', 'sudo systemctl disable', 'sudo systemctl stop',
+            
+            # Memory/CPU bombs
+            'stress --cpu', 'stress --vm', '/dev/urandom'
+        ]
+        
+        # 2. Restricted sudo commands (only allow specific safe ones)
+        allowed_sudo_commands = [
+            'sudo jtop', 'sudo nvidia-smi', 'sudo jetson_clocks',
+            'sudo tegrastats', 'sudo nvpmodel'
+        ]
+        
+        # 3. Check for blocked patterns
+        command_lower = command.lower().strip()
+        
+        # Block dangerous commands
+        for dangerous_cmd in dangerous_commands:
+            if dangerous_cmd in command_lower:
+                return jsonify({
+                    'success': False,
+                    'error': f'Command blocked for security: "{dangerous_cmd}" not allowed'
+                }), 403
+        
+        # Block sudo commands except allowed ones
+        if command_lower.startswith('sudo '):
+            sudo_allowed = False
+            for allowed_cmd in allowed_sudo_commands:
+                if command_lower.startswith(allowed_cmd.lower()):
+                    sudo_allowed = True
+                    break
+            
+            if not sudo_allowed:
+                return jsonify({
+                    'success': False,
+                    'error': 'Sudo command not allowed. Only specific system monitoring commands are permitted.'
+                }), 403
+        
+        # 4. Block file operations on critical directories
+        critical_dirs = ['/etc/', '/boot/', '/sys/', '/proc/', '/dev/', '/root/', '/usr/bin/', '/usr/sbin/']
+        file_operations = ['rm ', 'mv ', 'cp ', 'chmod ', 'chown ', '> ', '>>', 'dd ']
+        
+        for file_op in file_operations:
+            if file_op in command_lower:
+                for critical_dir in critical_dirs:
+                    if critical_dir in command_lower:
+                        return jsonify({
+                            'success': False,
+                            'error': f'File operations on {critical_dir} are not allowed for security'
+                        }), 403
+        
+        # 5. Block commands with excessive resource usage potential
+        resource_intensive = ['find /', 'grep -r /', 'locate /', 'updatedb', 'mlocate']
+        for intensive_cmd in resource_intensive:
+            if command_lower.startswith(intensive_cmd):
+                return jsonify({
+                    'success': False,
+                    'error': f'Resource-intensive command "{intensive_cmd}" is not allowed'
+                }), 403
+        
+        # 6. Block network operations
+        network_commands = ['wget', 'curl -O', 'curl -o', 'nc -l', 'netcat -l', 'python -m http.server', 'ssh ', 'scp ', 'rsync ']
+        for net_cmd in network_commands:
+            if command_lower.startswith(net_cmd):
+                return jsonify({
+                    'success': False,
+                    'error': f'Network command "{net_cmd}" is not allowed'
+                }), 403
+        
+        # 7. Command length limitation
+        if len(command) > 500:
+            return jsonify({
+                'success': False,
+                'error': 'Command too long. Maximum 500 characters allowed.'
+            }), 403
+        
+        # 8. Allowed commands whitelist (basic safe commands)
+        # Extract the base command (first word)
+        base_command = command.split()[0] if command.split() else ''
+        
+        # Safe commands that are generally allowed
+        safe_commands = [
+            # Basic file operations (limited)
+            'ls', 'cat', 'head', 'tail', 'less', 'more', 'file', 'stat', 'du', 'df',
+            # Directory operations
+            'pwd', 'cd', 'mkdir', 'tree',
+            # Text processing
+            'echo', 'grep', 'awk', 'sed', 'sort', 'uniq', 'wc', 'cut',
+            # System information
+            'ps', 'top', 'htop', 'free', 'uptime', 'who', 'whoami', 'id', 'uname',
+            'lscpu', 'lsusb', 'lspci', 'lsblk', 'mount', 'lsof', 'netstat',
+            # NVIDIA/Jetson specific
+            'nvidia-smi', 'jtop', 'tegrastats', 'jetson_clocks', 'nvpmodel',
+            # Development tools
+            'python3', 'python', 'node', 'npm', 'git', 'which', 'whereis',
+            # Archive operations (read-only)
+            'tar -tf', 'tar -tzf', 'unzip -l', 'zip -sf',
+            # Network info (read-only)
+            'ping', 'curl', 'wget', 'nslookup', 'dig',
+            # Text editors (safe)
+            'nano', 'vim', 'vi',
+            # Help commands
+            'man', 'help', 'history', 'clear', 'date', 'cal'
+        ]
+        
+        # Allow sudo only for specific whitelisted commands
+        if base_command == 'sudo':
+            # This is handled above in the allowed_sudo_commands check
+            pass
+        elif base_command not in safe_commands and not command.startswith(tuple(safe_commands)):
+            return jsonify({
+                'success': False,
+                'error': f'Command "{base_command}" is not in the allowed command list. Use "help" to see available commands.'
+            }), 403
+
+        # Handle cd command specially to maintain session state
+        if command.startswith('cd '):
+            try:
+                # Extract the target directory
+                target_dir = command[3:].strip()
+                
+                # Handle special cases
+                if not target_dir or target_dir == '~':
+                    target_dir = os.path.expanduser('~')
+                elif target_dir == '-':
+                    # cd - functionality (go to previous directory)
+                    if 'prev_cwd' in session:
+                        prev_cwd = session['prev_cwd']
+                        session['prev_cwd'] = session['cwd']
+                        session['cwd'] = prev_cwd
+                    else:
+                        return jsonify({
+                            'success': True,
+                            'output': f"bash: cd: OLDPWD not set\n",
+                            'error': '',
+                            'return_code': 1,
+                            'cwd': session['cwd']
+                        })
+                    
+                    return jsonify({
+                        'success': True,
+                        'output': f"{session['cwd']}\n",
+                        'error': '',
+                        'return_code': 0,
+                        'cwd': session['cwd']
+                    })
+                elif target_dir.startswith('/'):
+                    # Absolute path
+                    pass
+                else:
+                    # Relative path
+                    target_dir = os.path.join(session['cwd'], target_dir)
+                
+                # Normalize and validate the path
+                target_dir = os.path.abspath(target_dir)
+                
+                if os.path.isdir(target_dir):
+                    # Store previous directory for cd -
+                    session['prev_cwd'] = session['cwd']
+                    session['cwd'] = target_dir
+                    
+                    return jsonify({
+                        'success': True,
+                        'output': '',
+                        'error': '',
+                        'return_code': 0,
+                        'cwd': session['cwd']
+                    })
+                else:
+                    return jsonify({
+                        'success': True,
+                        'output': '',
+                        'error': f"bash: cd: {target_dir}: No such file or directory\n",
+                        'return_code': 1,
+                        'cwd': session['cwd']
+                    })
+                    
+            except Exception as cd_error:
+                return jsonify({
+                    'success': True,
+                    'output': '',
+                    'error': f"bash: cd: {str(cd_error)}\n",
+                    'return_code': 1,
+                    'cwd': session['cwd']
+                })
+        
+        # Handle pwd command
+        if command.strip() == 'pwd':
+            return jsonify({
+                'success': True,
+                'output': f"{session['cwd']}\n",
+                'error': '',
+                'return_code': 0,
+                'cwd': session['cwd']
+            })
+        
+        # Handle help command
+        if command.strip() in ['help', 'jetsonboard-help']:
+            help_text = """
+JetsonBoard Terminal - Available Commands:
+
+File & Directory Operations:
+  ls, cat, head, tail, less, more, file, stat, du, df
+  pwd, cd, mkdir, tree
+
+Text Processing:
+  echo, grep, awk, sed, sort, uniq, wc, cut
+
+System Information:
+  ps, top, htop, free, uptime, who, whoami, id, uname
+  lscpu, lsusb, lspci, lsblk, mount, lsof, netstat
+
+NVIDIA/Jetson Specific:
+  nvidia-smi, jtop, tegrastats, jetson_clocks, nvpmodel
+  sudo jtop, sudo nvidia-smi, sudo jetson_clocks, sudo tegrastats
+
+Development Tools:
+  python3, python, node, npm, git, which, whereis
+  nano, vim, vi
+
+Network (Read-only):
+  ping, curl, wget, nslookup, dig
+
+Other:
+  man, help, history, clear, date, cal
+
+Security Notes:
+- Destructive operations are blocked for safety
+- Sudo is limited to system monitoring commands only
+- File operations on system directories are restricted
+- Network servers and file transfers are disabled
+
+Use 'man <command>' for detailed help on specific commands.
+"""
+            return jsonify({
+                'success': True,
+                'output': help_text,
+                'error': '',
+                'return_code': 0,
+                'cwd': session['cwd']
+            })
+
+        # Execute other commands with current working directory
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,  # 30-second timeout
+                cwd=session['cwd'],  # Use session's current directory
+                env=session['env']   # Use session's environment
+            )
+            
+            output = result.stdout
+            error = result.stderr
+            
+            # Limit output size to prevent memory issues
+            max_output_size = 10000  # 10KB limit
+            if len(output) > max_output_size:
+                output = output[:max_output_size] + "\n... (output truncated)"
+            if len(error) > max_output_size:
+                error = error[:max_output_size] + "\n... (error output truncated)"
+            
+            return jsonify({
+                'success': True,
+                'output': output,
+                'error': error,
+                'return_code': result.returncode,
+                'cwd': session['cwd']
+            })
+            
+        except subprocess.TimeoutExpired:
+            return jsonify({
+                'success': False,
+                'error': 'Command timed out (30 seconds limit)',
+                'cwd': session['cwd']
+            }), 408
+            
+        except Exception as cmd_error:
+            return jsonify({
+                'success': False,
+                'error': f'Command execution failed: {str(cmd_error)}',
+                'cwd': session['cwd']
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"Error executing terminal command: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/terminal/complete', methods=['POST'])
+def tab_complete():
+    """Handle tab completion for terminal commands"""
+    try:
+        data = request.json
+        partial_command = data.get('partial_command', '').strip()
+        session_id = data.get('session_id', 'default')
+        
+        if not partial_command:
+            return jsonify({'success': True, 'completions': []})
+        
+        # Get session for current working directory
+        session = get_or_create_terminal_session(session_id)
+        cwd = session['cwd']
+        
+        logger.info(f"Tab completion requested: '{partial_command}' in {cwd}")
+        
+        # Split command into parts
+        parts = partial_command.split()
+        
+        if not parts:
+            return jsonify({'success': True, 'completions': []})
+        
+        # Get the last part (what we're trying to complete)
+        last_part = parts[-1] if partial_command.endswith(' ') else parts[-1]
+        
+        completions = []
+        
+        # If it's the first word, complete commands
+        if len(parts) == 1 and not partial_command.endswith(' '):
+            # Complete executable commands from PATH
+            try:
+                # Get commands from PATH
+                path_dirs = os.environ.get('PATH', '').split(':')
+                commands = set()
+                
+                for path_dir in path_dirs[:10]:  # Limit to first 10 PATH dirs for performance
+                    if os.path.isdir(path_dir):
+                        try:
+                            for cmd in os.listdir(path_dir):
+                                if cmd.startswith(last_part) and os.access(os.path.join(path_dir, cmd), os.X_OK):
+                                    commands.add(cmd)
+                        except (PermissionError, OSError):
+                            continue
+                
+                # Add common built-in commands
+                builtins = ['cd', 'pwd', 'ls', 'cat', 'grep', 'find', 'echo', 'which', 'man', 'history', 'clear']
+                for builtin in builtins:
+                    if builtin.startswith(last_part):
+                        commands.add(builtin)
+                
+                completions = sorted(list(commands)[:20])  # Limit to 20 results
+                
+            except Exception as e:
+                logger.error(f"Error completing commands: {str(e)}")
+        
+        # Complete file/directory paths
+        else:
+            try:
+                # Determine the directory to search in
+                if os.path.isabs(last_part):
+                    # Absolute path
+                    search_dir = os.path.dirname(last_part) or '/'
+                    prefix = os.path.basename(last_part)
+                elif last_part.startswith('~'):
+                    # Home directory path
+                    expanded = os.path.expanduser(last_part)
+                    search_dir = os.path.dirname(expanded) or os.path.expanduser('~')
+                    prefix = os.path.basename(expanded)
+                else:
+                    # Relative path
+                    if '/' in last_part:
+                        search_dir = os.path.join(cwd, os.path.dirname(last_part))
+                        prefix = os.path.basename(last_part)
+                    else:
+                        search_dir = cwd
+                        prefix = last_part
+                
+                # Get matching files/directories
+                if os.path.isdir(search_dir):
+                    try:
+                        entries = []
+                        for entry in os.listdir(search_dir):
+                            if entry.startswith(prefix) and not entry.startswith('.'):  # Skip hidden files by default
+                                full_path = os.path.join(search_dir, entry)
+                                if os.path.isdir(full_path):
+                                    entries.append(entry + '/')
+                                else:
+                                    entries.append(entry)
+                        
+                        # Also include hidden files if prefix starts with .
+                        if prefix.startswith('.'):
+                            for entry in os.listdir(search_dir):
+                                if entry.startswith(prefix) and entry.startswith('.'):
+                                    full_path = os.path.join(search_dir, entry)
+                                    if os.path.isdir(full_path):
+                                        entries.append(entry + '/')
+                                    else:
+                                        entries.append(entry)
+                        
+                        completions = sorted(entries[:20])  # Limit to 20 results
+                        
+                    except (PermissionError, OSError) as e:
+                        logger.warning(f"Permission denied accessing {search_dir}: {str(e)}")
+                        
+            except Exception as e:
+                logger.error(f"Error completing paths: {str(e)}")
+        
+        return jsonify({
+            'success': True,
+            'completions': completions,
+            'partial': last_part
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in tab completion: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'completions': []
+        }), 500
+
+@app.route('/api/terminal/userinfo', methods=['GET'])
+def get_terminal_user_info():
+    """Get current user and hostname information for terminal display"""
+    try:
+        import getpass
+        import socket
+        
+        # Get current username
+        username = getpass.getuser()
+        
+        # Get hostname
+        hostname = socket.gethostname()
+        
+        # Get user's home directory
+        home_dir = os.path.expanduser('~')
+        
+        return jsonify({
+            'success': True,
+            'username': username,
+            'hostname': hostname,
+            'home_dir': home_dir
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting terminal user info: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'username': 'user',
+            'hostname': 'jetsonboard',
+            'home_dir': '/home/user'
+        }), 500
+
 def get_jetpack_version():
     """Get JetPack version"""
     with jtop() as jt:

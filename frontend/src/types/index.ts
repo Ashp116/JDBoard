@@ -255,3 +255,8 @@ export interface InferenceSectionProps extends ComponentProps {}
 export interface LogsSectionProps extends ComponentProps {}
 
 export interface ModelsSectionProps extends ComponentProps {}
+
+export interface TerminalSectionProps {
+  socket: any;
+  isConnected: boolean;
+}

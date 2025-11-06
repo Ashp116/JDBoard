@@ -7,6 +7,7 @@ import Dashboard from './components/Dashboard';
 import ModelsSection from './components/ModelsSection';
 import InferenceSection from './components/InferenceSection';
 import MonitoringSection from './components/MonitoringSection';
+import TerminalSection from './components/TerminalSection';
 import LogsSection from './components/LogsSection';
 import SettingsSection from './components/SettingsSection';
 import { useSocket } from './hooks/useSocket';
@@ -31,7 +32,7 @@ const ContentSection = styled.section<{ $active: boolean }>`
   animation: fadeIn ${(props: any) => props.theme.transitions.medium};
 `;
 
-type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'logs' | 'settings';
+type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'terminal' | 'logs' | 'settings';
 
 function App(): JSX.Element {
   const [activeSection, setActiveSection] = useState<SectionKey>('dashboard');
@@ -49,6 +50,7 @@ function App(): JSX.Element {
     models: ModelsSection,
     inference: InferenceSection,
     monitoring: MonitoringSection,
+    terminal: TerminalSection,
     logs: LogsSection,
     settings: SettingsSection
   };
@@ -67,6 +69,16 @@ function App(): JSX.Element {
           getBufferedData={getBufferedData}
           getBufferStats={getBufferStats}
           clearDataBuffer={clearDataBuffer}
+        />
+      );
+    }
+    
+    // Pass specific props to TerminalSection
+    if (activeSection === 'terminal') {
+      return (
+        <SectionComponent 
+          socket={socket}
+          isConnected={isConnected}
         />
       );
     }
