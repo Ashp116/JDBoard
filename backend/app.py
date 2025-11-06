@@ -227,10 +227,10 @@ def upload_model():
             
             file.save(file_path)
             
-            # Register the model
+            # Register the model with absolute path
             model_info = ai_manager.register_model(
                 model_name=model_name,
-                file_path=file_path,
+                file_path=os.path.abspath(file_path),
                 model_type=model_type,
                 description=description,
                 original_filename=filename

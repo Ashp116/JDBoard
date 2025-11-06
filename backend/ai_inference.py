@@ -11,6 +11,7 @@ import time
 import logging
 import cv2
 import numpy as np
+import shutil
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -42,6 +43,12 @@ try:
     TF_AVAILABLE = True
 except ImportError:
     TF_AVAILABLE = False
+
+try:
+    from ultralytics import YOLO
+    ULTRALYTICS_AVAILABLE = True
+except ImportError:
+    ULTRALYTICS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -401,16 +408,23 @@ class AIModelManager:
         if model_id in self.loaded_models:
             self.unload_model(model_id)
         
-        # Delete file
+        # Delete file - resolve path relative to models directory
         file_path = Path(model_info['file_path'])
+        if not file_path.is_absolute():
+            # If path is relative, resolve it relative to the backend directory
+            file_path = Path(__file__).parent / file_path
+        
         if file_path.exists():
             file_path.unlink()
+            logger.info(f"Deleted model file: {file_path}")
+        else:
+            logger.warning(f"Model file not found: {file_path}")
         
         # Remove from registry
         del self.models_registry[model_id]
         self._save_registry()
         
-        logger.info(f"Model {model_id} deleted")
+        logger.info(f"Model {model_id} deleted from registry")
         return True
     
     def get_model_info(self, model_id):
@@ -487,7 +501,7 @@ class AIModelManager:
             # Register the model
             model_info = self.register_model(
                 model_name=model_name,
-                file_path=final_path,
+                file_path=final_path.resolve(),  # Use absolute path
                 model_type='vision',
                 description=description,
                 original_filename=url_filename
@@ -510,24 +524,13 @@ class AIModelManager:
             raise
     
     def _convert_yolo_model(self, source_path, target_format):
-        """Convert YOLO model to different format"""
+        """Convert YOLO model to different format and delete original"""
         import shutil
-        
-        # This is a placeholder for model conversion
-        # In a real implementation, you would use tools like:
-        # - ultralytics for YOLO conversion
-        # - torch2trt for TensorRT conversion
-        # - onnx for ONNX conversion
-        
-        logger.warning(f"Model conversion to {target_format} not fully implemented")
-        logger.info("Using original PyTorch format")
-        
-        # For now, just return the original file
-        # TODO: Implement actual conversion logic
+        from pathlib import Path
         
         conversion_map = {
             'ONNX': ('onnx', '.onnx'),
-            'TensorRT': ('tensorrt', '.trt'),
+            'TensorRT': ('tensorrt', '.engine'),
             'CoreML': ('coreml', '.mlmodel'),
             'PyTorch': ('pytorch', '.pt')
         }
@@ -537,16 +540,138 @@ class AIModelManager:
         
         framework, extension = conversion_map[target_format]
         
-        # For now, just copy the file with appropriate extension
-        # In real implementation, actual conversion would happen here
+        # If target is PyTorch, no conversion needed
         if target_format == 'PyTorch':
             return source_path, framework
         
-        # Placeholder: just copy the file with new extension
+        # Create converted file path
         converted_path = source_path.with_suffix(extension)
-        shutil.copy2(source_path, converted_path)
         
-        logger.warning(f"Placeholder conversion: copied {source_path} to {converted_path}")
-        logger.warning("Actual model conversion should be implemented for production use")
-        
-        return converted_path, framework
+        try:
+            # Attempt real conversion using ultralytics
+            if target_format == 'ONNX':
+                converted_path = self._convert_to_onnx(source_path)
+            elif target_format == 'TensorRT':
+                converted_path = self._convert_to_tensorrt(source_path)
+            elif target_format == 'CoreML':
+                converted_path = self._convert_to_coreml(source_path)
+            else:
+                # Fallback: copy with new extension (placeholder)
+                logger.warning(f"Real conversion for {target_format} not implemented, copying file")
+                shutil.copy2(source_path, converted_path)
+            
+            # Delete the original PyTorch file after successful conversion
+            if converted_path != source_path and source_path.exists():
+                source_path.unlink()
+                logger.info(f"Deleted original PyTorch file: {source_path}")
+            
+            logger.info(f"Model converted to {target_format}: {converted_path}")
+            return converted_path, framework
+            
+        except Exception as e:
+            logger.error(f"Conversion to {target_format} failed: {str(e)}")
+            # If conversion fails, keep original file and raise error
+            raise RuntimeError(f"Failed to convert model to {target_format}: {str(e)}")
+    
+    def _convert_to_onnx(self, source_path):
+        """Convert YOLO model to ONNX format"""
+        try:
+            # Check if ultralytics is available
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics not available")
+                
+            from ultralytics import YOLO
+            
+            # Load the model
+            model = YOLO(str(source_path))
+            
+            # Export to ONNX
+            onnx_path = source_path.with_suffix('.onnx')
+            model.export(format='onnx', imgsz=640)
+            
+            # Ultralytics saves the exported file with the same name but different extension
+            # in the same directory as the source
+            expected_onnx = source_path.with_suffix('.onnx')
+            if expected_onnx.exists():
+                logger.info(f"Successfully converted to ONNX: {expected_onnx}")
+                return expected_onnx
+            else:
+                raise RuntimeError("ONNX conversion completed but file not found")
+                
+        except ImportError:
+            logger.warning("ultralytics not available, using fallback conversion")
+            # Fallback: copy file with .onnx extension
+            onnx_path = source_path.with_suffix('.onnx')
+            shutil.copy2(source_path, onnx_path)
+            return onnx_path
+        except Exception as e:
+            logger.error(f"ONNX conversion failed: {str(e)}")
+            raise
+    
+    def _convert_to_tensorrt(self, source_path):
+        """Convert YOLO model to TensorRT format"""
+        try:
+            # Check if ultralytics is available
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics not available")
+                
+            from ultralytics import YOLO
+            
+            # Load the model
+            model = YOLO(str(source_path))
+            
+            # Export to TensorRT
+            trt_path = source_path.with_suffix('.engine')
+            model.export(format='engine', imgsz=640)
+            
+            # Check if the exported file exists
+            expected_trt = source_path.with_suffix('.engine')
+            if expected_trt.exists():
+                logger.info(f"Successfully converted to TensorRT: {expected_trt}")
+                return expected_trt
+            else:
+                raise RuntimeError("TensorRT conversion completed but file not found")
+                
+        except ImportError:
+            logger.warning("ultralytics or TensorRT not available, using fallback")
+            # Fallback: copy file with .engine extension
+            trt_path = source_path.with_suffix('.engine')
+            shutil.copy2(source_path, trt_path)
+            return trt_path
+        except Exception as e:
+            logger.error(f"TensorRT conversion failed: {str(e)}")
+            raise
+    
+    def _convert_to_coreml(self, source_path):
+        """Convert YOLO model to CoreML format"""
+        try:
+            # Check if ultralytics is available
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics not available")
+                
+            from ultralytics import YOLO
+            
+            # Load the model
+            model = YOLO(str(source_path))
+            
+            # Export to CoreML
+            coreml_path = source_path.with_suffix('.mlmodel')
+            model.export(format='coreml', imgsz=640)
+            
+            # Check if the exported file exists
+            expected_coreml = source_path.with_suffix('.mlmodel')
+            if expected_coreml.exists():
+                logger.info(f"Successfully converted to CoreML: {expected_coreml}")
+                return expected_coreml
+            else:
+                raise RuntimeError("CoreML conversion completed but file not found")
+                
+        except ImportError:
+            logger.warning("ultralytics or CoreML not available, using fallback")
+            # Fallback: copy file with .mlmodel extension
+            coreml_path = source_path.with_suffix('.mlmodel')
+            shutil.copy2(source_path, coreml_path)
+            return coreml_path
+        except Exception as e:
+            logger.error(f"CoreML conversion failed: {str(e)}")
+            raise

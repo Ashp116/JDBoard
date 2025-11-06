@@ -23,6 +23,9 @@ onnxruntime==1.15.1; platform_machine!="aarch64"
 torch==2.0.1
 torchvision==0.15.2
 
+# YOLO model management
+ultralytics>=8.0.0
+
 # TensorFlow (Python 3.10 compatible)
 tensorflow==2.12.0
 
