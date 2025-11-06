@@ -79,6 +79,7 @@ After installation, you may need to reboot your system.
             'jetson_module': 'Unknown',
             'jetpack_version': 'Unknown',
             'kernel_version': 'Unknown',
+            'jetson_clocks': False,
             'system_logs': {'recent_logs': [], 'log_count': 0, 'last_updated': None},
             'last_updated': None
         }
@@ -466,6 +467,17 @@ After installation, you may need to reboot your system.
                     kernel_version = 'Unknown'
             
             self.system_data['kernel_version'] = kernel_version
+            
+            # Get jetson_clocks status
+            jetson_clocks_status = False
+            try:
+                if jt and hasattr(jt, 'jetson_clocks'):
+                    jetson_clocks_status = bool(jt.jetson_clocks)
+                    logger.debug(f"Got jetson_clocks status from jtop: {jetson_clocks_status}")
+            except Exception as clocks_e:
+                logger.debug(f"Error getting jetson_clocks status: {clocks_e}")
+            
+            self.system_data['jetson_clocks'] = jetson_clocks_status
                     
         except Exception as e:
             logger.debug(f"Error updating system info: {e}")

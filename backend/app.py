@@ -11,6 +11,7 @@ import os
 import json
 import time
 import logging
+import subprocess
 from datetime import datetime
 import uuid
 import threading
@@ -454,6 +455,55 @@ def handle_system_data_request():
         })
 
 # System Settings API Endpoints
+@app.route('/api/auth/sudo', methods=['POST'])
+def authenticate_sudo():
+    """Authenticate sudo password"""
+    try:
+        data = request.json
+        password = data.get('password', '')
+        
+        if not password:
+            return jsonify({'success': False, 'error': 'Password required'}), 400
+        
+        # Test sudo password by running a simple command
+        import subprocess
+        result = subprocess.run(
+            ['sudo', '-S', '-k', 'true'],
+            input=password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            # Store password hash for session management (in production, use secure storage)
+            session_id = str(uuid.uuid4())
+            # In a real implementation, store this securely with encryption
+            logger.info(f"Sudo authentication successful for session {session_id}")
+            return jsonify({
+                'success': True,
+                'session_id': session_id,
+                'message': 'Authentication successful'
+            })
+        else:
+            logger.warning("Failed sudo authentication attempt")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid sudo password'
+            }), 401
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Authentication timeout'
+        }), 408
+    except Exception as e:
+        logger.error(f"Error during sudo authentication: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'Authentication failed'
+        }), 500
+
 @app.route('/api/system/info')
 def get_system_info():
     """Get comprehensive system information"""
@@ -503,8 +553,32 @@ def get_settings():
                 'debugMode': False,
                 'jetsonClocks': False,
                 'powerMode': 'MAXN',
-                'fanMode': 'auto'
+                'fanMode': 'quiet'
             }
+        
+        # Override jetsonClocks, powerMode, and fanMode with real system status from system monitor
+        try:
+            system_data = system_monitor.get_system_data()
+            if 'jetson_clocks' in system_data:
+                settings['jetsonClocks'] = system_data['jetson_clocks']
+            if 'nvp_model' in system_data:
+                settings['powerMode'] = system_data['nvp_model']
+                
+            # Get current fan mode from nvfancontrol
+            try:
+                result = subprocess.run(['sudo', 'nvfancontrol', '--query'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    for line in result.stdout.strip().split('\n'):
+                        if 'FAN_PROFILE:' in line:
+                            profile = line.split(':')[-1].strip()
+                            settings['fanMode'] = profile  # Return actual profile (quiet or cool)
+                            break
+            except:
+                pass  # Keep default fanMode if query fails
+                
+        except Exception as monitor_e:
+            logger.debug(f"Could not get system status from monitor: {monitor_e}")
         
         return jsonify(settings)
     except Exception as e:
@@ -543,24 +617,84 @@ def toggle_jetson_clocks():
     try:
         data = request.json
         enabled = data.get('enabled', False)
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         if enabled:
+            # Store current configuration before enabling (if not already stored)
+            store_file = f'{os.path.expanduser("~")}/l4t_dfs.conf'
+            if not os.path.exists(store_file):
+                # Store current configuration first
+                store_result = subprocess.run(
+                    ['sudo', '-S', 'jetson_clocks', '--store', store_file],
+                    input=sudo_password + '\n',
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+                if store_result.returncode == 0:
+                    logger.info(f"Current configuration stored to {store_file}")
+            
             # Enable Jetson Clocks
-            result = os.system('sudo jetson_clocks')
-            if result == 0:
+            result = subprocess.run(
+                ['sudo', '-S', 'jetson_clocks'],
+                input=sudo_password + '\n',
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
                 logger.info("Jetson Clocks enabled")
                 return jsonify({'success': True, 'status': 'enabled'})
             else:
-                return jsonify({'success': False, 'error': 'Failed to enable Jetson Clocks'}), 500
+                error_msg = result.stderr.strip() if result.stderr else 'Failed to enable Jetson Clocks'
+                return jsonify({'success': False, 'error': error_msg}), 500
         else:
             # Disable Jetson Clocks (restore normal governors)
-            result = os.system('sudo jetson_clocks --restore')
-            if result == 0:
+            # First try to use the system default config file, fallback to user home
+            restore_configs = [
+                '/usr/local/jtop/l4t_dfs.conf',  # System default from jtop
+                f'{os.path.expanduser("~")}/l4t_dfs.conf'  # User home directory
+            ]
+            
+            restore_file = None
+            for config_file in restore_configs:
+                if os.path.exists(config_file):
+                    restore_file = config_file
+                    break
+            
+            if restore_file:
+                result = subprocess.run(
+                    ['sudo', '-S', 'jetson_clocks', '--restore', restore_file],
+                    input=sudo_password + '\n',
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            else:
+                # Fallback: try restore without specifying file (uses default)
+                result = subprocess.run(
+                    ['sudo', '-S', 'jetson_clocks', '--restore'],
+                    input=sudo_password + '\n',
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            
+            if result.returncode == 0:
                 logger.info("Jetson Clocks disabled")
                 return jsonify({'success': True, 'status': 'disabled'})
             else:
-                return jsonify({'success': False, 'error': 'Failed to disable Jetson Clocks'}), 500
+                error_msg = result.stderr.strip() if result.stderr else 'Failed to disable Jetson Clocks'
+                return jsonify({'success': False, 'error': error_msg}), 500
                 
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Command timeout'
+        }), 408
     except Exception as e:
         logger.error(f"Error toggling Jetson Clocks: {str(e)}")
         return jsonify({
@@ -568,31 +702,89 @@ def toggle_jetson_clocks():
             'error': str(e)
         }), 500
 
+@app.route('/api/system/power-modes', methods=['GET'])
+def get_power_modes():
+    """Get available power modes from jtop"""
+    try:
+        from jtop import jtop
+        
+        with jtop() as jetson:
+            if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
+                # Get available power modes
+                available_modes = jetson.nvpmodel.models if hasattr(jetson.nvpmodel, 'models') else []
+                current_mode = jetson.nvpmodel.name if hasattr(jetson.nvpmodel, 'name') else 'Unknown'
+                
+                return jsonify({
+                    'success': True,
+                    'available_modes': available_modes,
+                    'current_mode': current_mode
+                })
+            else:
+                # Fallback to default modes if jtop is not available
+                return jsonify({
+                    'success': True,
+                    'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
+                    'current_mode': 'MAXN_SUPER'
+                })
+                
+    except Exception as e:
+        logger.error(f"Error getting power modes: {str(e)}")
+        # Fallback to default modes
+        return jsonify({
+            'success': True,
+            'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
+            'current_mode': 'MAXN_SUPER'
+        })
+
 @app.route('/api/system/power-mode', methods=['POST'])
 def set_power_mode():
     """Set system power mode"""
     try:
         data = request.json
-        mode = data.get('mode', 'MAXN')
+        mode = data.get('mode', 'MAXN_SUPER')
+        sudo_password = data.get('sudo_password', '')
         
-        # Map mode names to nvpmodel numbers
-        mode_map = {
-            'MAXN': 0,
-            'MODE_15W': 1,
-            'MODE_30W': 2,
-            'MODE_50W': 3
-        }
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        # Get available modes from jtop to create dynamic mapping
+        try:
+            from jtop import jtop
+            
+            with jtop() as jetson:
+                if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
+                    available_modes = jetson.nvpmodel.models
+                    # Create mode to ID mapping based on array index
+                    mode_map = {mode_name: idx for idx, mode_name in enumerate(available_modes)}
+                else:
+                    # Fallback mapping
+                    mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
+        except:
+            # Fallback mapping if jtop fails
+            mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
         
         if mode in mode_map:
-            result = os.system(f'sudo nvpmodel -m {mode_map[mode]}')
-            if result == 0:
+            result = subprocess.run(
+                ['sudo', '-S', 'nvpmodel', '-m', str(mode_map[mode])],
+                input=sudo_password + '\n',
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
                 logger.info(f"Power mode set to {mode}")
                 return jsonify({'success': True, 'mode': mode})
             else:
-                return jsonify({'success': False, 'error': f'Failed to set power mode to {mode}'}), 500
+                error_msg = result.stderr.strip() if result.stderr else f'Failed to set power mode to {mode}'
+                return jsonify({'success': False, 'error': error_msg}), 500
         else:
-            return jsonify({'success': False, 'error': 'Invalid power mode'}), 400
+            return jsonify({'success': False, 'error': f'Invalid power mode: {mode}. Available modes: {list(mode_map.keys())}'}), 400
             
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Command timeout'
+        }), 408
     except Exception as e:
         logger.error(f"Error setting power mode: {str(e)}")
         return jsonify({
@@ -600,36 +792,144 @@ def set_power_mode():
             'error': str(e)
         }), 500
 
+@app.route('/api/system/fan-mode', methods=['GET'])
+def get_fan_mode():
+    """Get current fan profile"""
+    try:
+        # Query nvfancontrol for current profile
+        result = subprocess.run(
+            ['sudo', 'nvfancontrol', '--query'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            # Parse output: "FAN1:FAN_PROFILE:quiet"
+            lines = result.stdout.strip().split('\n')
+            current_profile = 'quiet'  # default
+            
+            for line in lines:
+                if 'FAN_PROFILE:' in line:
+                    profile = line.split(':')[-1].strip()
+                    current_profile = profile  # Return actual profile (quiet or cool)
+                    break
+            
+            return jsonify({
+                'success': True,
+                'current_mode': current_profile,
+                'available_modes': ['quiet', 'cool']
+            })
+        else:
+            # Fallback if query fails
+            return jsonify({
+                'success': True,
+                'current_mode': 'quiet',
+                'available_modes': ['quiet', 'cool']
+            })
+            
+    except Exception as e:
+        logger.error(f"Error getting fan mode: {str(e)}")
+        return jsonify({
+            'success': True,
+            'current_mode': 'quiet',
+            'available_modes': ['quiet', 'cool']
+        })
+
 @app.route('/api/system/fan-mode', methods=['POST'])
 def set_fan_mode():
-    """Set fan control mode"""
+    """Set fan control mode according to NVIDIA documentation"""
     try:
         data = request.json
-        mode = data.get('mode', 'auto')
+        fan_mode = data.get('mode', 'auto')
+        sudo_password = data.get('sudo_password', '')
         
-        # Fan control implementation depends on your specific Jetson model
-        # This is a placeholder - you may need to adjust based on your hardware
-        if mode == 'auto':
-            # Enable automatic fan control
-            result = os.system('sudo sh -c "echo 0 > /sys/devices/pwm-fan/target_pwm"')
-        elif mode == 'quiet':
-            # Set fan to quiet mode (30% speed)
-            result = os.system('sudo sh -c "echo 80 > /sys/devices/pwm-fan/target_pwm"')
-        elif mode == 'cool':
-            # Set fan to cooling mode (70% speed)
-            result = os.system('sudo sh -c "echo 180 > /sys/devices/pwm-fan/target_pwm"')
-        elif mode == 'manual':
-            # Manual mode - user can control via other interface
-            result = 0  # Just acknowledge the setting
-        else:
-            return jsonify({'success': False, 'error': 'Invalid fan mode'}), 400
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
-        if result == 0:
-            logger.info(f"Fan mode set to {mode}")
-            return jsonify({'success': True, 'mode': mode})
+        if fan_mode in ['auto', 'quiet']:
+            # Set to quiet profile (auto mode uses quiet profile)
+            profile = 'quiet'
+        elif fan_mode == 'cool':
+            # Set to cool profile
+            profile = 'cool'
         else:
-            return jsonify({'success': False, 'error': f'Failed to set fan mode to {mode}'}), 500
+            return jsonify({'success': False, 'error': 'Invalid fan mode. Use auto, quiet, or cool'}), 400
+        
+        # Change fan profile according to NVIDIA documentation
+        # Step 1: Stop nvfancontrol service
+        result1 = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'stop', 'nvfancontrol'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result1.returncode != 0:
+            error_msg = result1.stderr.strip() if result1.stderr else 'Failed to stop nvfancontrol'
+            return jsonify({'success': False, 'error': f'Stop service failed: {error_msg}'}), 500
+        
+        # Step 2: Update FAN_DEFAULT_PROFILE in config file
+        config_update_cmd = f"sed -i 's/FAN_DEFAULT_PROFILE .*/FAN_DEFAULT_PROFILE {profile}/' /etc/nvfancontrol.conf"
+        result2 = subprocess.run(
+            ['sudo', '-S', 'sh', '-c', config_update_cmd],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result2.returncode != 0:
+            # Try to restart service even if config update fails
+            subprocess.run(['sudo', '-S', 'systemctl', 'start', 'nvfancontrol'], 
+                         input=sudo_password + '\n', capture_output=True, text=True)
+            error_msg = result2.stderr.strip() if result2.stderr else 'Failed to update config'
+            return jsonify({'success': False, 'error': f'Config update failed: {error_msg}'}), 500
+        
+        # Step 3: Remove status file
+        result3 = subprocess.run(
+            ['sudo', '-S', 'rm', '-f', '/var/lib/nvfancontrol/status'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        # Don't fail if status file removal fails - it might not exist
+        
+        # Step 4: Start nvfancontrol service
+        result4 = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'start', 'nvfancontrol'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=15
+        )
+        
+        if result4.returncode != 0:
+            error_msg = result4.stderr.strip() if result4.stderr else 'Failed to start nvfancontrol'
+            return jsonify({'success': False, 'error': f'Start service failed: {error_msg}'}), 500
+        
+        logger.info(f"Fan profile changed to {profile} (mode: {fan_mode})")
+        return jsonify({'success': True, 'mode': fan_mode, 'profile': profile})
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Command timeout'
+        }), 408
+    except Exception as e:
+        logger.error(f"Error setting fan mode: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
             
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Command timeout'
+        }), 408
     except Exception as e:
         logger.error(f"Error setting fan mode: {str(e)}")
         return jsonify({
@@ -641,22 +941,28 @@ def set_fan_mode():
 def reboot_system():
     """Reboot the system"""
     try:
-        logger.warning("System reboot requested")
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
         
-        # Schedule reboot in 5 seconds to allow response to be sent
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        # Use a background process to delay reboot slightly to allow response
         def delayed_reboot():
-            time.sleep(5)
-            os.system('sudo reboot')
+            time.sleep(2)
+            subprocess.run(
+                ['sudo', '-S', 'reboot'],
+                input=sudo_password + '\n',
+                capture_output=True,
+                text=True
+            )
         
         threading.Thread(target=delayed_reboot, daemon=True).start()
-        
-        return jsonify({
-            'success': True,
-            'message': 'System reboot scheduled in 5 seconds'
-        })
+        logger.info("System reboot initiated")
+        return jsonify({'success': True, 'message': 'System rebooting...'})
         
     except Exception as e:
-        logger.error(f"Error rebooting system: {str(e)}")
+        logger.error(f"Error initiating reboot: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -666,12 +972,23 @@ def reboot_system():
 def shutdown_system():
     """Shutdown the system"""
     try:
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
         logger.warning("System shutdown requested")
         
         # Schedule shutdown in 5 seconds to allow response to be sent
         def delayed_shutdown():
             time.sleep(5)
-            os.system('sudo shutdown -h now')
+            subprocess.run(
+                ['sudo', '-S', 'shutdown', '-h', 'now'],
+                input=sudo_password + '\n',
+                capture_output=True,
+                text=True
+            )
         
         threading.Thread(target=delayed_shutdown, daemon=True).start()
         

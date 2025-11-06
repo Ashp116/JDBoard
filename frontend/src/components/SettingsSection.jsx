@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { getBackendUrl } from '../utils/api';
 
 const Container = styled.div`
   padding: 30px;
@@ -144,6 +145,72 @@ const Button = styled.button`
   }
 `;
 
+const Modal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+`;
+
+const ModalContent = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+
+  h3 {
+    color: ${props => props.theme.colors.text.primary};
+    margin: 0 0 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+
+  p {
+    color: ${props => props.theme.colors.text.secondary};
+    margin: 0 0 16px 0;
+    line-height: 1.5;
+  }
+`;
+
+const PasswordInput = styled.input`
+  width: 100%;
+  background: ${props => props.theme.colors.background.tertiary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  color: ${props => props.theme.colors.text.primary};
+  padding: 12px;
+  font-size: 14px;
+  margin-bottom: 16px;
+
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &::placeholder {
+    color: ${props => props.theme.colors.text.secondary};
+  }
+`;
+
+const ModalButtons = styled.div`
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+`;
+
 const InfoCard = styled.div`
   background: ${props => props.theme.colors.background.secondary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
@@ -187,13 +254,12 @@ const InfoItem = styled.div`
 const SettingsSection = ({ systemData, socket, isConnected }) => {
   const [settings, setSettings] = useState({
     jetsonClocks: false,
-    fanMode: 'auto',
-    powerMode: 'MAXN',
+    fanMode: 'quiet',
+    powerMode: 'MAXN_SUPER',
     autoStartDashboard: true,
     dataRetention: '24h',
     updateInterval: '1s',
-    enableNotifications: true,
-    darkMode: true
+    enableNotifications: true
   });
 
   const [systemInfo, setSystemInfo] = useState({
@@ -204,6 +270,73 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
     uptime: '00:00:00',
     kernelVersion: 'Unknown'
   });
+
+  const [availablePowerModes, setAvailablePowerModes] = useState(['MAXN_SUPER', '15W', '25W', '7W']);
+
+  const [loading, setLoading] = useState({
+    jetsonClocks: false,
+    powerMode: false,
+    fanMode: false,
+    reboot: false,
+    shutdown: false
+  });
+
+  const [sudoModal, setSudoModal] = useState({
+    show: false,
+    action: null,
+    password: '',
+    error: ''
+  });
+
+  const [sudoSession, setSudoSession] = useState({
+    isValid: false,
+    lastUsed: null
+  });
+
+  // Fetch current settings from backend
+  const fetchSettings = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/settings`);
+      if (response.ok) {
+        const settingsData = await response.json();
+        setSettings(prev => ({
+          ...prev,
+          jetsonClocks: settingsData.jetsonClocks || false,
+          powerMode: settingsData.powerMode || 'MAXN',
+          fanMode: settingsData.fanMode || 'quiet'
+        }));
+        console.log('Settings loaded from backend:', settingsData);
+      }
+    } catch (error) {
+      console.error('Error fetching settings:', error);
+    }
+  };
+
+  // Fetch current fan mode directly from the fan-mode endpoint
+  const fetchCurrentFanMode = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/system/fan-mode`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.current_mode) {
+          setSettings(prev => ({
+            ...prev,
+            fanMode: data.current_mode
+          }));
+          console.log('Current fan mode:', data.current_mode);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching current fan mode:', error);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch settings on component mount
+    fetchSettings();
+    // Also fetch current fan mode to ensure accuracy
+    fetchCurrentFanMode();
+  }, []);
 
   useEffect(() => {
     if (systemData) {
@@ -221,11 +354,134 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
       if (systemData?.jetson_clocks !== undefined) {
         setSettings(prev => ({
           ...prev,
-          jetsonClocks: systemData.jetson_clocks === 'ON'
+          jetsonClocks: Boolean(systemData.jetson_clocks)
         }));
       }
     }
   }, [systemData]);
+
+  // Fetch available power modes on component mount
+  useEffect(() => {
+    const fetchPowerModes = async () => {
+      try {
+        const response = await fetch(`${getBackendUrl()}/api/system/power-modes`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success) {
+            setAvailablePowerModes(data.available_modes);
+            // Update current power mode if provided
+            if (data.current_mode) {
+              setSettings(prev => ({
+                ...prev,
+                powerMode: data.current_mode
+              }));
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch power modes:', error);
+        // Keep default fallback modes
+      }
+    };
+
+    fetchPowerModes();
+  }, []);
+
+  // Sudo authentication functions
+  const requestSudoPassword = (action) => {
+    return new Promise((resolve, reject) => {
+      setSudoModal({
+        show: true,
+        action,
+        password: '',
+        error: '',
+        resolve,
+        reject
+      });
+    });
+  };
+
+  const handleSudoSubmit = async () => {
+    try {
+      const backendUrl = getBackendUrl();
+      
+      // Verify sudo password
+      const response = await fetch(`${backendUrl}/api/auth/sudo`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: sudoModal.password }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update sudo session
+        setSudoSession({
+          isValid: true,
+          lastUsed: Date.now()
+        });
+        
+        // Close modal and resolve promise
+        setSudoModal(prev => ({ ...prev, show: false }));
+        sudoModal.resolve && sudoModal.resolve(sudoModal.password);
+      } else {
+        setSudoModal(prev => ({ 
+          ...prev, 
+          error: result.error || 'Invalid sudo password'
+        }));
+      }
+    } catch (error) {
+      setSudoModal(prev => ({ 
+        ...prev, 
+        error: `Authentication error: ${error.message}`
+      }));
+    }
+  };
+
+  const handleSudoCancel = () => {
+    setSudoModal(prev => ({ ...prev, show: false }));
+    sudoModal.reject && sudoModal.reject(new Error('User cancelled sudo authentication'));
+  };
+
+  const requireSudo = async (action) => {
+    // Check if sudo session is still valid (15 minutes timeout)
+    const currentTime = Date.now();
+    const sudoTimeout = 15 * 60 * 1000; // 15 minutes
+    
+    if (sudoSession.isValid && sudoSession.lastUsed && 
+        (currentTime - sudoSession.lastUsed) < sudoTimeout) {
+      // Session is still valid, refresh the timestamp
+      setSudoSession(prev => ({ ...prev, lastUsed: currentTime }));
+      return sudoSession.password || 'session_valid';
+    }
+    
+    // Need to request password
+    return await requestSudoPassword(action);
+  };
+
+  const executeSudoCommand = async (endpoint, data, actionName) => {
+    try {
+      const password = await requireSudo(actionName);
+      const backendUrl = getBackendUrl();
+      
+      const response = await fetch(`${backendUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...data, sudo_password: password }),
+      });
+      
+      return await response.json();
+    } catch (error) {
+      if (error.message === 'User cancelled sudo authentication') {
+        throw error;
+      }
+      throw new Error(`Failed to execute ${actionName}: ${error.message}`);
+    }
+  };
 
   const handleToggle = (setting) => {
     setSettings(prev => ({
@@ -241,23 +497,155 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
     }));
   };
 
-  const handleJetsonClocksToggle = () => {
-    // In a real implementation, this would send a command to the backend
-    console.log('Toggling Jetson Clocks:', !settings.jetsonClocks);
-    handleToggle('jetsonClocks');
-  };
-
-  const handleReboot = () => {
-    if (window.confirm('Are you sure you want to reboot the system?')) {
-      console.log('Rebooting system...');
-      // In a real implementation, this would send a reboot command to the backend
+  const handleJetsonClocksToggle = async () => {
+    setLoading(prev => ({ ...prev, jetsonClocks: true }));
+    
+    try {
+      const newState = !settings.jetsonClocks;
+      
+      const result = await executeSudoCommand(
+        '/api/system/jetson-clocks',
+        { enabled: newState },
+        'Toggle Jetson Clocks'
+      );
+      
+      if (result.success) {
+        setSettings(prev => ({
+          ...prev,
+          jetsonClocks: newState
+        }));
+        console.log(`Jetson Clocks ${newState ? 'enabled' : 'disabled'} successfully`);
+      } else {
+        console.error('Failed to toggle Jetson Clocks:', result.error);
+        alert(`Failed to toggle Jetson Clocks: ${result.error}`);
+      }
+    } catch (error) {
+      if (error.message !== 'User cancelled sudo authentication') {
+        console.error('Error toggling Jetson Clocks:', error);
+        alert(`Error toggling Jetson Clocks: ${error.message}`);
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, jetsonClocks: false }));
     }
   };
 
-  const handleShutdown = () => {
-    if (window.confirm('Are you sure you want to shutdown the system?')) {
-      console.log('Shutting down system...');
-      // In a real implementation, this would send a shutdown command to the backend
+  const handlePowerModeChange = async (mode) => {
+    setLoading(prev => ({ ...prev, powerMode: true }));
+    
+    try {
+      const result = await executeSudoCommand(
+        '/api/system/power-mode',
+        { mode },
+        'Change Power Mode'
+      );
+      
+      if (result.success) {
+        setSettings(prev => ({
+          ...prev,
+          powerMode: mode
+        }));
+        console.log(`Power mode set to ${mode} successfully`);
+      } else {
+        console.error('Failed to set power mode:', result.error);
+        alert(`Failed to set power mode: ${result.error}`);
+      }
+    } catch (error) {
+      if (error.message !== 'User cancelled sudo authentication') {
+        console.error('Error setting power mode:', error);
+        alert(`Error setting power mode: ${error.message}`);
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, powerMode: false }));
+    }
+  };
+
+  const handleFanModeChange = async (mode) => {
+    setLoading(prev => ({ ...prev, fanMode: true }));
+    
+    try {
+      const result = await executeSudoCommand(
+        '/api/system/fan-mode',
+        { mode },
+        'Change Fan Mode'
+      );
+      
+      if (result.success) {
+        setSettings(prev => ({
+          ...prev,
+          fanMode: mode
+        }));
+        console.log(`Fan mode set to ${mode} successfully`);
+        // Refresh the current fan mode to ensure accuracy
+        setTimeout(() => fetchCurrentFanMode(), 1000);
+      } else {
+        console.error('Failed to set fan mode:', result.error);
+        alert(`Failed to set fan mode: ${result.error}`);
+      }
+    } catch (error) {
+      if (error.message !== 'User cancelled sudo authentication') {
+        console.error('Error setting fan mode:', error);
+        alert(`Error setting fan mode: ${error.message}`);
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, fanMode: false }));
+    }
+  };
+
+  const handleReboot = async () => {
+    if (window.confirm('Are you sure you want to reboot the system? This will restart the Jetson device.')) {
+      setLoading(prev => ({ ...prev, reboot: true }));
+      
+      try {
+        const result = await executeSudoCommand(
+          '/api/system/reboot',
+          {},
+          'Reboot System'
+        );
+        
+        if (result.success) {
+          alert('System reboot initiated. The device will restart in 5 seconds.');
+          console.log('System reboot initiated');
+        } else {
+          console.error('Failed to reboot system:', result.error);
+          alert(`Failed to reboot system: ${result.error}`);
+        }
+      } catch (error) {
+        if (error.message !== 'User cancelled sudo authentication') {
+          console.error('Error rebooting system:', error);
+          alert(`Error rebooting system: ${error.message}`);
+        }
+      } finally {
+        setLoading(prev => ({ ...prev, reboot: false }));
+      }
+    }
+  };
+
+  const handleShutdown = async () => {
+    if (window.confirm('Are you sure you want to shutdown the system? This will power off the Jetson device.')) {
+      setLoading(prev => ({ ...prev, shutdown: true }));
+      
+      try {
+        const result = await executeSudoCommand(
+          '/api/system/shutdown',
+          {},
+          'Shutdown System'
+        );
+        
+        if (result.success) {
+          alert('System shutdown initiated. The device will power off in 5 seconds.');
+          console.log('System shutdown initiated');
+        } else {
+          console.error('Failed to shutdown system:', result.error);
+          alert(`Failed to shutdown system: ${result.error}`);
+        }
+      } catch (error) {
+        if (error.message !== 'User cancelled sudo authentication') {
+          console.error('Error shutting down system:', error);
+          alert(`Error shutting down system: ${error.message}`);
+        }
+      } finally {
+        setLoading(prev => ({ ...prev, shutdown: false }));
+      }
     }
   };
 
@@ -326,6 +714,8 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
             <Toggle 
               $active={settings.jetsonClocks} 
               onClick={handleJetsonClocksToggle}
+              disabled={loading.jetsonClocks}
+              style={{ opacity: loading.jetsonClocks ? 0.6 : 1 }}
             />
           </SettingItem>
 
@@ -336,12 +726,13 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
             </div>
             <Select 
               value={settings.powerMode}
-              onChange={(e) => handleSelectChange('powerMode', e.target.value)}
+              onChange={(e) => handlePowerModeChange(e.target.value)}
+              disabled={loading.powerMode}
+              style={{ opacity: loading.powerMode ? 0.6 : 1 }}
             >
-              <option value="MAXN">MAXN</option>
-              <option value="15W">15W</option>
-              <option value="30W">30W</option>
-              <option value="50W">50W</option>
+              {availablePowerModes.map(mode => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
             </Select>
           </SettingItem>
 
@@ -352,12 +743,12 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
             </div>
             <Select 
               value={settings.fanMode}
-              onChange={(e) => handleSelectChange('fanMode', e.target.value)}
+              onChange={(e) => handleFanModeChange(e.target.value)}
+              disabled={loading.fanMode}
+              style={{ opacity: loading.fanMode ? 0.6 : 1 }}
             >
-              <option value="auto">Auto</option>
               <option value="quiet">Quiet</option>
               <option value="cool">Cool</option>
-              <option value="manual">Manual</option>
             </Select>
           </SettingItem>
         </SettingsCard>
@@ -366,7 +757,7 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
         <SettingsCard>
           <h3>
             <i className="fas fa-desktop"></i>
-            Dashboard Settings
+            Dashboard Settings [Not working, fix this later bro]
           </h3>
 
           <SettingItem>
@@ -436,8 +827,13 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
               <div className="label">Restart System</div>
               <div className="description">Reboot the Jetson device</div>
             </div>
-            <Button onClick={handleReboot}>
-              <i className="fas fa-redo"></i> Reboot
+            <Button 
+              onClick={handleReboot}
+              disabled={loading.reboot}
+              style={{ opacity: loading.reboot ? 0.6 : 1 }}
+            >
+              <i className={loading.reboot ? "fas fa-spinner fa-spin" : "fas fa-redo"}></i>  
+              {loading.reboot ? ' Rebooting...' : ' Reboot'}
             </Button>
           </SettingItem>
 
@@ -446,31 +842,68 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
               <div className="label">Shutdown System</div>
               <div className="description">Power off the device</div>
             </div>
-            <Button $variant="danger" onClick={handleShutdown}>
-              <i className="fas fa-power-off"></i> Shutdown
+            <Button 
+              $variant="danger" 
+              onClick={handleShutdown}
+              disabled={loading.shutdown}
+              style={{ opacity: loading.shutdown ? 0.6 : 1 }}
+            >
+              <i className={loading.shutdown ? "fas fa-spinner fa-spin" : "fas fa-power-off"}></i> 
+              {loading.shutdown ? ' Shutting down...' : ' Shutdown'}
             </Button>
           </SettingItem>
         </SettingsCard>
-
-        {/* Appearance Settings */}
-        <SettingsCard>
-          <h3>
-            <i className="fas fa-palette"></i>
-            Appearance
-          </h3>
-
-          <SettingItem>
-            <div>
-              <div className="label">Dark Mode</div>
-              <div className="description">Use dark theme</div>
-            </div>
-            <Toggle 
-              $active={settings.darkMode} 
-              onClick={() => handleToggle('darkMode')}
-            />
-          </SettingItem>
-        </SettingsCard>
       </SettingsGrid>
+
+      {/* Sudo Password Modal */}
+      {sudoModal.show && (
+        <Modal>
+          <ModalContent>
+            <h3>
+              <i className="fas fa-lock"></i>
+              Administrator Authentication Required
+            </h3>
+            <p>
+              To {sudoModal.action}, please enter your sudo password:
+            </p>
+            
+            <PasswordInput
+              type="password"
+              placeholder="Enter sudo password"
+              value={sudoModal.password}
+              onChange={(e) => setSudoModal(prev => ({ 
+                ...prev, 
+                password: e.target.value,
+                error: '' 
+              }))}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleSudoSubmit();
+                }
+              }}
+              autoFocus
+            />
+            
+            {sudoModal.error && (
+              <p style={{ color: '#FF6B6B', fontSize: '14px', margin: '0 0 16px 0' }}>
+                {sudoModal.error}
+              </p>
+            )}
+            
+            <ModalButtons>
+              <Button onClick={handleSudoCancel}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleSudoSubmit}
+                disabled={!sudoModal.password.trim()}
+              >
+                Authenticate
+              </Button>
+            </ModalButtons>
+          </ModalContent>
+        </Modal>
+      )}
     </Container>
   );
 };
