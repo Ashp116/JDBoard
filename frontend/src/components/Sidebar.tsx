@@ -44,10 +44,22 @@ const SidebarLogo = styled.div`
   overflow: hidden;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
 
   i {
     font-size: 1.5rem;
+    min-width: 24px;
+  }
+
+  .brand-text {
+    opacity: 0;
+    transition: opacity ${props => props.theme.transitions.medium};
+    font-size: 1rem;
+  }
+
+  ${SidebarContainer}:hover & .brand-text {
+    opacity: 1;
   }
 `;
 
@@ -103,6 +115,7 @@ const SidebarFooter = styled.div`
 const ConnectionStatus = styled.div<StyledConnectionProps>`
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   font-size: 11px;
   color: ${props => props.theme.colors.text.secondary};
@@ -113,6 +126,16 @@ const ConnectionStatus = styled.div<StyledConnectionProps>`
     font-size: 8px;
     animation: pulse 2s infinite;
     color: ${props => props.$connected ? props.theme.colors.nvidia.green : props.theme.colors.status.error};
+  }
+
+  span {
+    opacity: 0;
+    transition: opacity ${props => props.theme.transitions.medium};
+    white-space: nowrap;
+  }
+
+  ${SidebarContainer}:hover & span {
+    opacity: 1;
   }
 `;
 
@@ -130,8 +153,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     <SidebarContainer>
       <SidebarBrand>
         <SidebarLogo>
-          <i className="fas fa-microchip"></i>
-          <span>NVIDIA</span>
+          <span className="brand-text">JetsonBoard</span>
         </SidebarLogo>
       </SidebarBrand>
 

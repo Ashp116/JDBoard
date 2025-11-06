@@ -1,4 +1,4 @@
-// TypeScript type definitions for the Jetson Edge AI Dashboard
+// TypeScript type definitions for JetsonBoard
 
 export interface CPUData {
   usage: number;

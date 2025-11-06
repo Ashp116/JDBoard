@@ -200,7 +200,7 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
     <DashboardContainer>
       <ContentHeader>
         <HeaderInfo>
-          <h1>NVIDIA Edge AI Dashboard</h1>
+          <h1>JetsonBoard</h1>
           <HeaderMeta>
             <span>Jetson Edge Computing Platform</span>
             <span className="separator">•</span>

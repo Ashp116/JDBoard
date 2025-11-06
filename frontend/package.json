@@ -1,7 +1,7 @@
 {
-  "name": "nvidia-jetson-dashboard",
+  "name": "jetsonboard",
   "version": "1.0.0",
-  "description": "NVIDIA Edge AI Dashboard - React Frontend",
+  "description": "JetsonBoard - React Frontend for Jetson Edge Computing Dashboard",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
