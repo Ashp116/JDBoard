@@ -195,7 +195,7 @@ const PauseButton = styled.button`
   }
 `;
 
-const MonitoringSection = ({ systemData, socket, isConnected }) => {
+const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, getBufferStats, clearDataBuffer }) => {
   const [refreshTime, setRefreshTime] = useState(new Date());
   const [activeTab, setActiveTab] = useState('cpu');
   const [lastDataUpdate, setLastDataUpdate] = useState(0);
@@ -207,15 +207,9 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
     network: { labels: [], datasets: [] },
     fan: { labels: [], datasets: [] }
   });
-  const [realtimeData, setRealtimeData] = useState({
-    cpu: [],
-    gpu: [],
-    memory: [],
-    network: [],
-    fan: []
-  });
-  const maxDataPoints = 20;
-  const updateInterval = 1000; // 1 second
+  const [bufferedDataStats, setBufferedDataStats] = useState(null);
+  const maxDataPoints = 50; // Increased since we have buffered data
+  const updateInterval = 2000; // Update charts every 2 seconds
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -225,188 +219,170 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // Update charts with buffered data periodically
   useEffect(() => {
-    if (systemData && !isPaused) {
-      const now = Date.now();
-      
-      // Only update data every 10 seconds
-      if (now - lastDataUpdate < updateInterval) {
-        return;
-      }
-      
-      setLastDataUpdate(now);
-      const timeLabel = new Date().toLocaleTimeString();
-
-      // Update realtime data arrays
-      setRealtimeData(prev => {
-        const newData = { ...prev };
-        
-        // CPU data
-        newData.cpu = [...prev.cpu, {
-          time: timeLabel,
-          overall: systemData?.cpu?.usage || 0,
-          cores: systemData?.cpu?.cores || [],
-          temperature: systemData?.cpu?.temperature || 0,
-          load: systemData?.cpu?.load_avg || 0
-        }].slice(-maxDataPoints);
-
-        // GPU data  
-        newData.gpu = [...prev.gpu, {
-          time: timeLabel,
-          usage: systemData?.gpu?.usage || 0,
-          memory: systemData?.gpu?.memory?.used || 0,
-          temperature: systemData?.gpu?.temperature || 0
-        }].slice(-maxDataPoints);
-
-        // Memory data
-        newData.memory = [...prev.memory, {
-          time: timeLabel,
-          used: systemData?.memory?.used || 0,
-          total: systemData?.memory?.total || 0,
-          percent: systemData?.memory?.percent || 0,
-          available: systemData?.memory?.available || 0
-        }].slice(-maxDataPoints);
-
-        // Network data
-        newData.network = [...prev.network, {
-          time: timeLabel,
-          sent: systemData?.network?.bytes_sent || 0,
-          received: systemData?.network?.bytes_recv || 0,
-          packets_sent: systemData?.network?.packets_sent || 0,
-          packets_recv: systemData?.network?.packets_recv || 0
-        }].slice(-maxDataPoints);
-
-        // Fan data
-        newData.fan = [...prev.fan, {
-          time: timeLabel,
-          rpm: systemData?.fan?.rpm || 0,
-          speed: systemData?.fan?.speed || 0,
-          cpu_temp: systemData?.fan?.cpu_temp || 0,
-          gpu_temp: systemData?.fan?.gpu_temp || 0,
-          total_power: systemData?.fan?.total_power || 0
-        }].slice(-maxDataPoints);
-
-        return newData;
-      });
-
-      // Update chart data
-      setHistoricalData(prev => {
-        const newHistorical = { ...prev };
-        
-        // CPU Chart
-        newHistorical.cpu = {
-          labels: realtimeData.cpu.map(d => d.time).slice(-maxDataPoints),
-          datasets: [
-            {
-              label: 'CPU Usage (%)',
-              data: realtimeData.cpu.map(d => d.overall).slice(-maxDataPoints),
-              borderColor: '#76B900',
-              backgroundColor: 'rgba(118, 185, 0, 0.1)',
-              fill: true,
-              tension: 0.4
-            },
-            {
-              label: 'Temperature (°C)',
-              data: realtimeData.cpu.map(d => d.temperature).slice(-maxDataPoints),
-              borderColor: '#FFA500',
-              backgroundColor: 'rgba(255, 165, 0, 0.1)',
-              fill: false,
-              tension: 0.4,
-              yAxisID: 'y1'
-            }
-          ]
-        };
-
-        // GPU Chart
-        newHistorical.gpu = {
-          labels: realtimeData.gpu.map(d => d.time).slice(-maxDataPoints),
-          datasets: [
-            {
-              label: 'GPU Usage (%)',
-              data: realtimeData.gpu.map(d => d.usage).slice(-maxDataPoints),
-              borderColor: '#00BFFF',
-              backgroundColor: 'rgba(0, 191, 255, 0.1)',
-              fill: true,
-              tension: 0.4
-            },
-            {
-              label: 'GPU Temperature (°C)',
-              data: realtimeData.gpu.map(d => d.temperature).slice(-maxDataPoints),
-              borderColor: '#FF4444',
-              backgroundColor: 'rgba(255, 68, 68, 0.1)',
-              fill: false,
-              tension: 0.4,
-              yAxisID: 'y1'
-            }
-          ]
-        };
-
-        // Memory Chart
-        newHistorical.memory = {
-          labels: realtimeData.memory.map(d => d.time).slice(-maxDataPoints),
-          datasets: [
-            {
-              label: 'Memory Usage (%)',
-              data: realtimeData.memory.map(d => d.percent).slice(-maxDataPoints),
-              borderColor: '#9DD922',
-              backgroundColor: 'rgba(157, 217, 34, 0.1)',
-              fill: true,
-              tension: 0.4
-            }
-          ]
-        };
-
-        // Network Chart
-        newHistorical.network = {
-          labels: realtimeData.network.map(d => d.time).slice(-maxDataPoints),
-          datasets: [
-            {
-              label: 'Bytes Sent',
-              data: realtimeData.network.map(d => d.sent).slice(-maxDataPoints),
-              borderColor: '#76B900',
-              backgroundColor: 'rgba(118, 185, 0, 0.1)',
-              fill: false,
-              tension: 0.4
-            },
-            {
-              label: 'Bytes Received',
-              data: realtimeData.network.map(d => d.received).slice(-maxDataPoints),
-              borderColor: '#00BFFF',
-              backgroundColor: 'rgba(0, 191, 255, 0.1)',
-              fill: false,
-              tension: 0.4
-            }
-          ]
-        };
-
-        // Fan Chart
-        newHistorical.fan = {
-          labels: realtimeData.fan.map(d => d.time).slice(-maxDataPoints),
-          datasets: [
-            {
-              label: 'Fan RPM',
-              data: realtimeData.fan.map(d => d.rpm).slice(-maxDataPoints),
-              borderColor: '#FF6B6B',
-              backgroundColor: 'rgba(255, 107, 107, 0.1)',
-              fill: true,
-              tension: 0.4
-            },
-            {
-              label: 'Fan Speed (%)',
-              data: realtimeData.fan.map(d => d.speed).slice(-maxDataPoints),
-              borderColor: '#4ECDC4',
-              backgroundColor: 'rgba(78, 205, 196, 0.1)',
-              fill: false,
-              tension: 0.4,
-              yAxisID: 'y1'
-            }
-          ]
-        };
-
-        return newHistorical;
-      });
+    if (!getBufferedData || isPaused) {
+      return;
     }
-  }, [systemData, realtimeData.cpu, realtimeData.gpu, realtimeData.memory, realtimeData.network]);
+
+    // Initial load
+    const bufferedData = getBufferedData();
+    const stats = getBufferStats();
+    
+    console.log('Initial buffered data:', bufferedData);
+    console.log('Initial buffer stats:', stats);
+    
+    setBufferedDataStats(stats);
+    
+    if (bufferedData && bufferedData.size > 0) {
+      updateChartsWithBufferedData(bufferedData);
+    }
+
+    const interval = setInterval(() => {
+      const bufferedData = getBufferedData();
+      const stats = getBufferStats();
+      
+      console.log('Updating charts with buffered data:', bufferedData);
+      console.log('Buffer stats:', stats);
+      
+      setBufferedDataStats(stats);
+      
+      if (bufferedData && bufferedData.size > 0) {
+        updateChartsWithBufferedData(bufferedData);
+      }
+    }, updateInterval);
+    
+    return () => clearInterval(interval);
+  }, [getBufferedData, getBufferStats, isPaused, updateInterval]);
+
+  const updateChartsWithBufferedData = (bufferedData) => {
+    // CPU Chart
+    const cpuChart = {
+      labels: bufferedData.cpu.map(d => d.time).slice(-maxDataPoints),
+      datasets: [
+        {
+          label: 'CPU Usage (%)',
+          data: bufferedData.cpu.map(d => d.overall).slice(-maxDataPoints),
+          borderColor: '#76B900',
+          backgroundColor: 'rgba(118, 185, 0, 0.1)',
+          fill: true,
+          tension: 0.4
+        },
+        {
+          label: 'Temperature (°C)',
+          data: bufferedData.cpu.map(d => d.temperature).slice(-maxDataPoints),
+          borderColor: '#FFA500',
+          backgroundColor: 'rgba(255, 165, 0, 0.1)',
+          fill: false,
+          tension: 0.4,
+          yAxisID: 'y1'
+        }
+      ]
+    };
+
+    // GPU Chart
+    const gpuChart = {
+      labels: bufferedData.gpu.map(d => d.time).slice(-maxDataPoints),
+      datasets: [
+        {
+          label: 'GPU Usage (%)',
+          data: bufferedData.gpu.map(d => d.usage).slice(-maxDataPoints),
+          borderColor: '#00BFFF',
+          backgroundColor: 'rgba(0, 191, 255, 0.1)',
+          fill: true,
+          tension: 0.4
+        },
+        {
+          label: 'GPU Temperature (°C)',
+          data: bufferedData.gpu.map(d => d.temperature).slice(-maxDataPoints),
+          borderColor: '#FF4444',
+          backgroundColor: 'rgba(255, 68, 68, 0.1)',
+          fill: false,
+          tension: 0.4,
+          yAxisID: 'y1'
+        }
+      ]
+    };
+
+    // Memory Chart
+    const memoryChart = {
+      labels: bufferedData.memory.map(d => d.time).slice(-maxDataPoints),
+      datasets: [
+        {
+          label: 'Memory Usage (%)',
+          data: bufferedData.memory.map(d => d.percent).slice(-maxDataPoints),
+          borderColor: '#9DD922',
+          backgroundColor: 'rgba(157, 217, 34, 0.1)',
+          fill: true,
+          tension: 0.4
+        }
+      ]
+    };
+
+    // Network Chart (showing deltas for better visualization)
+    const networkChart = {
+      labels: bufferedData.network.map(d => d.time).slice(-maxDataPoints),
+      datasets: [
+        {
+          label: 'Sent (Δ bytes/s)',
+          data: bufferedData.network.map(d => d.sent_delta || 0).slice(-maxDataPoints),
+          borderColor: '#76B900',
+          backgroundColor: 'rgba(118, 185, 0, 0.1)',
+          fill: false,
+          tension: 0.4
+        },
+        {
+          label: 'Received (Δ bytes/s)',
+          data: bufferedData.network.map(d => d.received_delta || 0).slice(-maxDataPoints),
+          borderColor: '#00BFFF',
+          backgroundColor: 'rgba(0, 191, 255, 0.1)',
+          fill: false,
+          tension: 0.4
+        }
+      ]
+    };
+
+    // Fan Chart
+    const fanChart = {
+      labels: bufferedData.fan.map(d => d.time).slice(-maxDataPoints),
+      datasets: [
+        {
+          label: 'Fan RPM',
+          data: bufferedData.fan.map(d => d.rpm).slice(-maxDataPoints),
+          borderColor: '#FF6B6B',
+          backgroundColor: 'rgba(255, 107, 107, 0.1)',
+          fill: true,
+          tension: 0.4
+        },
+        {
+          label: 'Fan Speed (%)',
+          data: bufferedData.fan.map(d => d.speed).slice(-maxDataPoints),
+          borderColor: '#4ECDC4',
+          backgroundColor: 'rgba(78, 205, 196, 0.1)',
+          fill: false,
+          tension: 0.4,
+          yAxisID: 'y1'
+        },
+        {
+          label: 'Total Power (W)',
+          data: bufferedData.fan.map(d => d.total_power).slice(-maxDataPoints),
+          borderColor: '#FFD700',
+          backgroundColor: 'rgba(255, 215, 0, 0.1)',
+          fill: false,
+          tension: 0.4,
+          yAxisID: 'y2'
+        }
+      ]
+    };
+
+    setHistoricalData({
+      cpu: cpuChart,
+      gpu: gpuChart,
+      memory: memoryChart,
+      network: networkChart,
+      fan: fanChart
+    });
+  };
 
   const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -561,18 +537,6 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
           <span className="value">{(systemData?.gpu?.usage || 0).toFixed(1)}%</span>
         </MetricRow>
         <MetricRow>
-          <span className="label">Memory Usage</span>
-          <span className="value">{(systemData?.gpu?.memory?.percent || 0).toFixed(1)}%</span>
-        </MetricRow>
-        <MetricRow>
-          <span className="label">Memory Used</span>
-          <span className="value">{formatBytes(systemData?.gpu?.memory?.used)}</span>
-        </MetricRow>
-        <MetricRow>
-          <span className="label">Memory Total</span>
-          <span className="value">{formatBytes(systemData?.gpu?.memory?.total)}</span>
-        </MetricRow>
-        <MetricRow>
           <span className="label">Temperature</span>
           <span className="value">{systemData?.gpu?.temperature ? `${systemData.gpu.temperature.toFixed(1)}°C` : 'N/A'}</span>
         </MetricRow>
@@ -682,51 +646,48 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
     </>
   );
 
-  const renderFanChart = () => {
-    const latestData = realtimeData.fan[realtimeData.fan.length - 1] || { rpm: 0, speed: 0, temperature: 0, power: 0 };
-    
-    return (
+  const renderFanChart = () => (
+    <>
       <ChartSection>
         <ChartHeader>
-          <h3>Fan Monitoring</h3>
-          <StatusIndicator $connected={isConnected}>
-            {isConnected ? 'Live' : 'Offline'}
-          </StatusIndicator>
+          <h3><i className="fas fa-fan"></i>Fan Performance</h3>
         </ChartHeader>
-        
         <ChartContainer>
           <Line 
             data={historicalData.fan}
-            options={getChartOptions('Fan Performance', true, true, 5000)} // Dual axis, start from 0, max 5000 RPM
+            options={getChartOptions('Fan Performance', true, true, 5000)} 
           />
         </ChartContainer>
-        
-        <DetailCard>
-          <h4>Fan Details</h4>
-          <MetricRow>
-            <span>Fan Speed:</span>
-            <strong>{latestData.speed ? `${latestData.speed.toFixed(1)}%` : 'N/A'}</strong>
-          </MetricRow>
-          <MetricRow>
-            <span>Est. RPM:</span>
-            <strong>{latestData.rpm ? `${latestData.rpm.toFixed(0)} RPM` : 'N/A'}</strong>
-          </MetricRow>
-          <MetricRow>
-            <span>CPU Temp:</span>
-            <strong>{latestData.cpu_temp ? `${latestData.cpu_temp.toFixed(1)}°C` : 'N/A'}</strong>
-          </MetricRow>
-          <MetricRow>
-            <span>GPU Temp:</span>
-            <strong>{latestData.gpu_temp ? `${latestData.gpu_temp.toFixed(1)}°C` : 'N/A'}</strong>
-          </MetricRow>
-          <MetricRow>
-            <span>Total Power:</span>
-            <strong>{latestData.total_power ? `${latestData.total_power.toFixed(1)}W` : 'N/A'}</strong>
-          </MetricRow>
-        </DetailCard>
       </ChartSection>
-    );
-  };
+      
+      <DetailCard>
+        <h3>
+          <i className="fas fa-fan"></i>
+          Fan Details
+        </h3>
+        <MetricRow>
+          <span className="label">Fan Speed</span>
+          <span className="value">{(systemData?.fan?.speed || 0).toFixed(1)}%</span>
+        </MetricRow>
+        <MetricRow>
+          <span className="label">RPM</span>
+          <span className="value">{(systemData?.fan?.rpm || 0).toFixed(0)} RPM</span>
+        </MetricRow>
+        <MetricRow>
+          <span className="label">CPU Temperature</span>
+          <span className="value">{(systemData?.fan?.cpu_temp || 0).toFixed(1)}°C</span>
+        </MetricRow>
+        <MetricRow>
+          <span className="label">GPU Temperature</span>
+          <span className="value">{(systemData?.fan?.gpu_temp || 0).toFixed(1)}°C</span>
+        </MetricRow>
+        <MetricRow>
+          <span className="label">Total Power</span>
+          <span className="value">{(systemData?.fan?.total_power || 0).toFixed(1)}W</span>
+        </MetricRow>
+      </DetailCard>
+    </>
+  );
 
   const renderActiveChart = () => {
     switch (activeTab) {
@@ -751,19 +712,50 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
       <StatusIndicator $connected={isConnected}>
         <div className="status-dot"></div>
         <div className="status-text">
-          {isConnected ? (isPaused ? 'Paused - Updates stopped' : 'Connected - Real-time monitoring active') : 'Disconnected - Data may be stale'}
+          {isConnected ? (isPaused ? 'Paused - Chart updates stopped' : 'Connected - Background monitoring active') : 'Disconnected - Data may be stale'}
         </div>
-        <div style={{fontSize: '12px', color: '#888'}}>
+        <div style={{fontSize: '12px', color: '#888', flex: 1}}>
           Last update: {refreshTime.toLocaleTimeString()}
+          {bufferedDataStats && (
+            <span style={{marginLeft: '15px'}}>
+              Buffer: {bufferedDataStats.totalDataPoints} points 
+              {bufferedDataStats.isCollecting && <span style={{color: '#76B900'}}> (recording)</span>}
+            </span>
+          )}
         </div>
-        <PauseButton 
-          $paused={isPaused} 
-          onClick={() => setIsPaused(!isPaused)}
-          style={{marginLeft: 'auto'}}
-        >
-          <i className={`fas ${isPaused ? 'fa-play' : 'fa-pause'}`}></i>
-          {isPaused ? 'Resume' : 'Pause'}
-        </PauseButton>
+        <div style={{display: 'flex', gap: '10px', marginLeft: 'auto'}}>
+          <PauseButton 
+            $paused={isPaused} 
+            onClick={() => setIsPaused(!isPaused)}
+          >
+            <i className={`fas ${isPaused ? 'fa-play' : 'fa-pause'}`}></i>
+            {isPaused ? 'Resume Charts' : 'Pause Charts'}
+          </PauseButton>
+          {clearDataBuffer && (
+            <PauseButton 
+              onClick={() => {
+                clearDataBuffer();
+                setBufferedDataStats(null);
+              }}
+              style={{
+                backgroundColor: '#dc3545', 
+                borderColor: '#dc3545',
+                color: '#ffffff'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#c82333';
+                e.target.style.borderColor = '#bd2130';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#dc3545';
+                e.target.style.borderColor = '#dc3545';
+              }}
+            >
+              <i className="fas fa-trash"></i>
+              Clear Buffer
+            </PauseButton>
+          )}
+        </div>
       </StatusIndicator>
 
       {/* Tabulated Charts Section */}
@@ -804,7 +796,7 @@ const MonitoringSection = ({ systemData, socket, isConnected }) => {
         {renderActiveChart()}
       </TabContainer>
     </Container>
-    );
-  };
+  );
+};
 
 export default MonitoringSection;

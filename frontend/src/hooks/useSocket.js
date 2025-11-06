@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import dataCollectionService from '../services/dataCollectionService';
 
 export const useSocket = (serverPath) => {
   const [socket, setSocket] = useState(null);
@@ -47,6 +48,9 @@ export const useSocket = (serverPath) => {
       setIsConnected(true);
       setError(null);
       
+      // Start data collection service when connected
+      dataCollectionService.start();
+      
       // Clear any reconnection timeout
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -57,6 +61,9 @@ export const useSocket = (serverPath) => {
     newSocket.on('disconnect', (reason) => {
       console.log('Disconnected from server:', reason);
       setIsConnected(false);
+      
+      // Stop data collection service when disconnected
+      dataCollectionService.stop();
       
       // Handle different disconnect reasons
       if (reason === 'parse error') {
@@ -97,6 +104,10 @@ export const useSocket = (serverPath) => {
         if (data && data.success && data.data) {
           setSystemData(data.data);
           setError(null); // Clear any previous errors
+          
+          // Always add data to the background collection service
+          // This runs regardless of which page is active
+          dataCollectionService.addDataPoint(data.data);
         } else if (data && !data.success) {
           console.error('System update error:', data.error);
           setError(data.error || 'System update failed');
@@ -178,6 +189,18 @@ export const useSocket = (serverPath) => {
     emit('get_logs', { count });
   };
 
+  const getBufferedData = () => {
+    return dataCollectionService.getBufferedData();
+  };
+
+  const getBufferStats = () => {
+    return dataCollectionService.getBufferStats();
+  };
+
+  const clearDataBuffer = () => {
+    dataCollectionService.clearBuffer();
+  };
+
   return {
     socket,
     isConnected,
@@ -189,6 +212,9 @@ export const useSocket = (serverPath) => {
     unloadModel,
     runInference,
     getModelList,
-    getLogs
+    getLogs,
+    getBufferedData,
+    getBufferStats,
+    clearDataBuffer
   };
 };

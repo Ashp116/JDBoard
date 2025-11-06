@@ -33,7 +33,14 @@ const ContentSection = styled.section`
 
 function App() {
   const [activeSection, setActiveSection] = useState('dashboard');
-  const { socket, isConnected, systemData } = useSocket();
+  const { 
+    socket, 
+    isConnected, 
+    systemData, 
+    getBufferedData, 
+    getBufferStats, 
+    clearDataBuffer 
+  } = useSocket();
 
   const sections = {
     dashboard: Dashboard,
@@ -46,13 +53,29 @@ function App() {
 
   const renderSection = () => {
     const SectionComponent = sections[activeSection];
-    return SectionComponent ? (
+    if (!SectionComponent) return null;
+    
+    // Pass additional props to MonitoringSection
+    if (activeSection === 'monitoring') {
+      return (
+        <SectionComponent 
+          systemData={systemData} 
+          socket={socket}
+          isConnected={isConnected}
+          getBufferedData={getBufferedData}
+          getBufferStats={getBufferStats}
+          clearDataBuffer={clearDataBuffer}
+        />
+      );
+    }
+    
+    return (
       <SectionComponent 
         systemData={systemData} 
         socket={socket}
         isConnected={isConnected}
       />
-    ) : null;
+    );
   };
 
   return (

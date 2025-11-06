@@ -242,27 +242,6 @@ After installation, you may need to reboot your system.
                 gpu_usage = safe_float(stats['GPU'])
                 self.system_data['gpu']['usage'] = gpu_usage
             
-            # GPU memory - for Jetson, GPU shares system RAM
-            if 'RAM' in stats:
-                ram_percentage = safe_float(stats['RAM'])
-                
-                # Get total system memory for GPU memory calculation
-                try:
-                    import psutil
-                    memory_info = psutil.virtual_memory()
-                    total_bytes = memory_info.total
-                    # For integrated GPU, estimate GPU memory as portion of system RAM
-                    gpu_mem_total = int(total_bytes * 0.5)  # Estimate 50% can be used by GPU
-                    gpu_mem_used = int(total_bytes * ram_percentage * 0.3)  # Rough estimate of GPU usage
-                    
-                    self.system_data['gpu']['memory_total'] = gpu_mem_total
-                    self.system_data['gpu']['memory_used'] = gpu_mem_used
-                except ImportError:
-                    # Fallback estimates
-                    estimated_total = 8 * 1024 * 1024 * 1024  # 8GB
-                    self.system_data['gpu']['memory_total'] = int(estimated_total * 0.5)
-                    self.system_data['gpu']['memory_used'] = int(estimated_total * ram_percentage * 0.3)
-            
             # GPU temperature - directly available
             if 'Temp gpu' in stats:
                 temp_val = safe_float(stats['Temp gpu'])
