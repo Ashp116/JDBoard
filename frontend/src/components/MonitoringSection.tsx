@@ -13,6 +13,20 @@ import {
   Filler
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
+import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
+
+// Styled component interfaces
+interface StyledConnectionProps {
+  $connected: boolean;
+}
+
+interface StyledActiveProps {
+  $active: boolean;
+}
+
+interface StyledPausedProps {
+  $paused: boolean;
+}
 
 // Register Chart.js components
 ChartJS.register(
@@ -51,7 +65,7 @@ const SectionHeader = styled.div`
   }
 `;
 
-const StatusIndicator = styled.div`
+const StatusIndicator = styled.div<StyledConnectionProps>`
   display: flex;
   align-items: center;
   gap: 8px;
@@ -155,7 +169,7 @@ const TabButtons = styled.div`
   margin-bottom: 20px;
 `;
 
-const TabButton = styled.button`
+const TabButton = styled.button<StyledActiveProps>`
   background: ${props => props.$active ? props.theme.colors.nvidia.green : props.theme.colors.background.tertiary};
   color: ${props => props.$active ? props.theme.colors.nvidia.black : props.theme.colors.text.primary};
   border: 1px solid ${props => props.$active ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
@@ -172,7 +186,7 @@ const TabButton = styled.button`
   }
 `;
 
-const PauseButton = styled.button`
+const PauseButton = styled.button<StyledPausedProps>`
   background: ${props => props.$paused ? props.theme.colors.status.warning : props.theme.colors.nvidia.green};
   color: ${props => props.theme.colors.text.primary};
   border: 1px solid ${props => props.$paused ? props.theme.colors.status.warning : props.theme.colors.nvidia.green};
@@ -195,19 +209,25 @@ const PauseButton = styled.button`
   }
 `;
 
-const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, getBufferStats, clearDataBuffer }) => {
+const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socket, isConnected, getBufferedData, getBufferStats, clearDataBuffer }) => {
   const [refreshTime, setRefreshTime] = useState(new Date());
   const [activeTab, setActiveTab] = useState('cpu');
   const [lastDataUpdate, setLastDataUpdate] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [historicalData, setHistoricalData] = useState({
+  const [historicalData, setHistoricalData] = useState<{
+    cpu: { labels: string[]; datasets: any[] };
+    gpu: { labels: string[]; datasets: any[] };
+    memory: { labels: string[]; datasets: any[] };
+    network: { labels: string[]; datasets: any[] };
+    fan: { labels: string[]; datasets: any[] };
+  }>({
     cpu: { labels: [], datasets: [] },
     gpu: { labels: [], datasets: [] },
     memory: { labels: [], datasets: [] },
     network: { labels: [], datasets: [] },
     fan: { labels: [], datasets: [] }
   });
-  const [bufferedDataStats, setBufferedDataStats] = useState(null);
+  const [bufferedDataStats, setBufferedDataStats] = useState<BufferStats | null>(null);
   const maxDataPoints = 50; // Increased since we have buffered data
   const updateInterval = 2000; // Update charts every 2 seconds
 
@@ -222,7 +242,7 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
   // Update charts with buffered data periodically
   useEffect(() => {
     if (!getBufferedData || isPaused) {
-      return;
+      return undefined;
     }
 
     // Initial load
@@ -255,7 +275,7 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
     return () => clearInterval(interval);
   }, [getBufferedData, getBufferStats, isPaused, updateInterval]);
 
-  const updateChartsWithBufferedData = (bufferedData) => {
+  const updateChartsWithBufferedData = (bufferedData: BufferedData): void => {
     // CPU Chart
     const cpuChart = {
       labels: bufferedData.cpu.map(d => d.time).slice(-maxDataPoints),
@@ -399,12 +419,12 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
     return systemData.cpu.cores;
   };
 
-  const getChartOptions = (title, hasSecondaryAxis = false, startFromZero = false, maxValue = null) => ({
+  const getChartOptions = (title: string, hasSecondaryAxis: boolean = false, startFromZero: boolean = false, maxValue: number | null = null): any => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'top',
+        position: 'top' as const,
         labels: {
           color: '#FFFFFF',
           font: {
@@ -418,7 +438,7 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
         color: '#76B900',
         font: {
           size: 16,
-          weight: 'bold'
+          weight: 'bold' as const
         }
       }
     },
@@ -733,6 +753,7 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
           </PauseButton>
           {clearDataBuffer && (
             <PauseButton 
+              $paused={false}
               onClick={() => {
                 clearDataBuffer();
                 setBufferedDataStats(null);
@@ -743,12 +764,14 @@ const MonitoringSection = ({ systemData, socket, isConnected, getBufferedData, g
                 color: '#ffffff'
               }}
               onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#c82333';
-                e.target.style.borderColor = '#bd2130';
+                const target = e.target as HTMLButtonElement;
+                target.style.backgroundColor = '#c82333';
+                target.style.borderColor = '#bd2130';
               }}
               onMouseLeave={(e) => {
-                e.target.style.backgroundColor = '#dc3545';
-                e.target.style.borderColor = '#dc3545';
+                const target = e.target as HTMLButtonElement;
+                target.style.backgroundColor = '#dc3545';
+                target.style.borderColor = '#dc3545';
               }}
             >
               <i className="fas fa-trash"></i>

@@ -11,7 +11,8 @@ export const nvidiaTheme = {
       darkGray: '#222222',
       gray: '#333333',
       lightGray: '#666666',
-      white: '#FFFFFF'
+      white: '#FFFFFF',
+      blue: '#00BFFF'
     },
     
     // Status Colors
@@ -82,7 +83,8 @@ export const nvidiaTheme = {
   transitions: {
     fast: '0.2s ease',
     medium: '0.3s ease',
-    slow: '0.5s ease'
+    slow: '0.5s ease',
+    standard: '0.3s ease'
   },
   
   // Z-indices

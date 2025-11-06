@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import { InferenceSectionProps } from '../types';
 
 const Container = styled.div`
   padding: 30px;
@@ -43,7 +44,7 @@ const EmptyState = styled.div`
   }
 `;
 
-const InferenceSection = ({ systemData, socket, isConnected }) => {
+const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket, isConnected }) => {
   return (
     <Container>
       <SectionHeader>

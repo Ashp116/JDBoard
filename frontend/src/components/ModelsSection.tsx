@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import { ModelsSectionProps } from '../types';
 
 const Container = styled.div`
   padding: 30px;
@@ -43,7 +44,7 @@ const EmptyState = styled.div`
   }
 `;
 
-const ModelsSection = ({ systemData, socket, isConnected }) => {
+const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isConnected }) => {
   return (
     <Container>
       <SectionHeader>

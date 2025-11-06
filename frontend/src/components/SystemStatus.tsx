@@ -1,5 +1,10 @@
 import React from 'react';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
+import { SystemStatusProps } from '../types';
+
+interface StyledProps {
+  $connected: boolean;
+}
 
 const StatusContainer = styled.div`
   display: flex;
@@ -7,7 +12,7 @@ const StatusContainer = styled.div`
   gap: 20px;
 `;
 
-const StatusIndicator = styled.div`
+const StatusIndicator = styled.div<StyledProps>`
   display: flex;
   align-items: center;
   gap: 8px;
@@ -23,7 +28,7 @@ const StatusIndicator = styled.div`
   }
 `;
 
-const StatusDot = styled.div`
+const StatusDot = styled.div<StyledProps>`
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -31,7 +36,7 @@ const StatusDot = styled.div`
   animation: pulse 2s infinite;
 `;
 
-const SystemStatus = ({ isConnected }) => {
+const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected }) => {
   return (
     <StatusContainer>
       <StatusIndicator $connected={isConnected}>

@@ -1,5 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
+import { DashboardProps } from '../types';
 import MetricCard from './MetricCard';
 import SystemStatus from './SystemStatus';
 
@@ -121,7 +122,7 @@ const StatLabel = styled.div`
   text-transform: uppercase;
 `;
 
-const Dashboard = ({ systemData, isConnected }) => {
+const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
   const currentTime = new Date().toLocaleString();
 
   const getMetricCards = () => {
@@ -187,7 +188,7 @@ const Dashboard = ({ systemData, isConnected }) => {
     return {
       uptime: systemData.uptime || '--',
       processes: systemData.processes || '--',
-      models: systemData.models?.loaded || 0,
+      models: Array.isArray(systemData.models) ? systemData.models.length : 0,
       inferences: systemData.stats?.totalInferences || 0
     };
   };
@@ -224,7 +225,7 @@ const Dashboard = ({ systemData, isConnected }) => {
             value={metric.value}
             unit={metric.unit}
             icon={metric.icon}
-            status={metric.status}
+            status={metric.status as 'normal' | 'warning' | 'danger' | 'critical'}
           />
         ))}
       </MetricsGrid>

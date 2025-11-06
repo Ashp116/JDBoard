@@ -1,8 +1,31 @@
 // Background Data Collection Service
 // This service runs continuously and buffers system data regardless of page visibility
 
+import type { 
+  SystemData, 
+  BufferedData, 
+  BufferStats, 
+  BufferedCPUData, 
+  BufferedGPUData, 
+  BufferedMemoryData, 
+  BufferedNetworkData, 
+  BufferedFanData 
+} from '../types';
+
 class DataCollectionService {
-  constructor(maxDataPoints = 100) {
+  private maxDataPoints: number;
+  private isCollecting: boolean;
+  private buffer: {
+    cpu: BufferedCPUData[];
+    gpu: BufferedGPUData[];
+    memory: BufferedMemoryData[];
+    network: BufferedNetworkData[];
+    fan: BufferedFanData[];
+    timestamps: Array<{ time: string; timestamp: number }>;
+  };
+  private lastNetworkData: { bytes_sent: number; bytes_recv: number } | null;
+
+  constructor(maxDataPoints: number = 100) {
     this.maxDataPoints = maxDataPoints;
     this.isCollecting = false;
     this.buffer = {
@@ -31,7 +54,7 @@ class DataCollectionService {
   }
 
   // Add new system data to the buffer
-  addDataPoint(systemData) {
+  addDataPoint(systemData: SystemData): void {
     if (!this.isCollecting || !systemData) {
       return;
     }
@@ -123,7 +146,7 @@ class DataCollectionService {
   }
 
   // Get all buffered data
-  getBufferedData() {
+  getBufferedData(): BufferedData {
     return {
       ...this.buffer,
       size: this.buffer.cpu.length,
@@ -132,7 +155,7 @@ class DataCollectionService {
   }
 
   // Get data for a specific metric
-  getMetricData(metric) {
+  getMetricData(metric: keyof typeof this.buffer): any[] {
     return this.buffer[metric] || [];
   }
 
@@ -151,21 +174,38 @@ class DataCollectionService {
   }
 
   // Get summary statistics
-  getBufferStats() {
-    const stats = {};
-    
-    Object.keys(this.buffer).forEach(key => {
-      if (Array.isArray(this.buffer[key])) {
-        stats[key] = {
-          count: this.buffer[key].length,
-          latest: this.buffer[key][this.buffer[key].length - 1] || null,
-          oldest: this.buffer[key][0] || null
-        };
-      }
-    });
-
+  getBufferStats(): BufferStats {
     return {
-      ...stats,
+      cpu: {
+        count: this.buffer.cpu.length,
+        latest: this.buffer.cpu[this.buffer.cpu.length - 1] || null,
+        oldest: this.buffer.cpu[0] || null
+      },
+      gpu: {
+        count: this.buffer.gpu.length,
+        latest: this.buffer.gpu[this.buffer.gpu.length - 1] || null,
+        oldest: this.buffer.gpu[0] || null
+      },
+      memory: {
+        count: this.buffer.memory.length,
+        latest: this.buffer.memory[this.buffer.memory.length - 1] || null,
+        oldest: this.buffer.memory[0] || null
+      },
+      network: {
+        count: this.buffer.network.length,
+        latest: this.buffer.network[this.buffer.network.length - 1] || null,
+        oldest: this.buffer.network[0] || null
+      },
+      fan: {
+        count: this.buffer.fan.length,
+        latest: this.buffer.fan[this.buffer.fan.length - 1] || null,
+        oldest: this.buffer.fan[0] || null
+      },
+      timestamps: {
+        count: this.buffer.timestamps.length,
+        latest: this.buffer.timestamps[this.buffer.timestamps.length - 1] || null,
+        oldest: this.buffer.timestamps[0] || null
+      },
       totalDataPoints: this.buffer.cpu.length,
       isCollecting: this.isCollecting,
       maxDataPoints: this.maxDataPoints

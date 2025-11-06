@@ -20,8 +20,8 @@ export const createApiClient = () => {
   const baseURL = getBackendUrl();
   
   // If axios is available, create instance
-  if (typeof window !== 'undefined' && window.axios) {
-    return window.axios.create({
+  if (typeof window !== 'undefined' && (window as any).axios) {
+    return (window as any).axios.create({
       baseURL,
       timeout: 10000,
       headers: {

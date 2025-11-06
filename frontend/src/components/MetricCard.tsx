@@ -1,7 +1,16 @@
 import React from 'react';
 import styled from 'styled-components';
+import { MetricCardProps } from '../types';
 
-const Card = styled.div`
+interface StatusStyleProps {
+  $status: 'normal' | 'warning' | 'danger' | 'critical';
+}
+
+interface ProgressStyleProps {
+  $value: number;
+}
+
+const Card = styled.div<StatusStyleProps>`
   background: ${props => props.theme.gradients.card};
   border: 1px solid ${props => props.theme.colors.border.secondary};
   border-radius: 8px;
@@ -56,7 +65,7 @@ const MetricValue = styled.div`
   margin-bottom: 15px;
 `;
 
-const PrimaryValue = styled.span`
+const PrimaryValue = styled.span<StatusStyleProps>`
   font-size: 32px;
   font-weight: bold;
   color: ${props => {
@@ -81,7 +90,7 @@ const ProgressBarContainer = styled.div`
   margin-bottom: 10px;
 `;
 
-const ProgressBar = styled.div`
+const ProgressBar = styled.div<ProgressStyleProps>`
   height: 100%;
   background: linear-gradient(90deg, ${props => props.theme.colors.nvidia.green}, ${props => props.theme.colors.nvidia.lightGreen});
   border-radius: 4px;
@@ -114,7 +123,7 @@ const DetailItem = styled.div`
   color: ${props => props.theme.colors.text.secondary};
 `;
 
-const MetricCard = ({ title, value, unit, icon, status = 'normal', details }) => {
+const MetricCard: React.FC<MetricCardProps> = ({ title, value, unit, icon, status = 'normal', details }) => {
   const numericValue = typeof value === 'string' ? parseFloat(value) || 0 : value;
   
   return (

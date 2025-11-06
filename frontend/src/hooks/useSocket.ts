@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 import dataCollectionService from '../services/dataCollectionService';
+import type { SystemData, UseSocketReturn } from '../types';
 
-export const useSocket = (serverPath) => {
-  const [socket, setSocket] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [systemData, setSystemData] = useState(null);
-  const [error, setError] = useState(null);
-  const reconnectTimeoutRef = useRef(null);
+export const useSocket = (serverPath?: string): UseSocketReturn => {
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [systemData, setSystemData] = useState<SystemData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Automatically determine the best server path
   const getServerPath = () => {
@@ -34,7 +35,7 @@ export const useSocket = (serverPath) => {
       reconnection: true,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
-      maxReconnectionAttempts: 5,
+      reconnectionAttempts: 5,
       timeout: 15000,
       forceNew: false,
       transports: ['polling', 'websocket'],
@@ -121,28 +122,28 @@ export const useSocket = (serverPath) => {
       }
     });
 
-    newSocket.on('model_update', (data) => {
+    newSocket.on('model_update', (data: any) => {
       console.log('Received model update:', data);
-      setSystemData(prevData => ({
+      setSystemData(prevData => prevData ? ({
         ...prevData,
         models: data
-      }));
+      }) : null);
     });
 
-    newSocket.on('inference_result', (data) => {
+    newSocket.on('inference_result', (data: any) => {
       console.log('Received inference result:', data);
-      setSystemData(prevData => ({
+      setSystemData(prevData => prevData ? ({
         ...prevData,
         lastInference: data
-      }));
+      }) : null);
     });
 
-    newSocket.on('log_entry', (data) => {
+    newSocket.on('log_entry', (data: any) => {
       console.log('Received log entry:', data);
-      setSystemData(prevData => ({
+      setSystemData(prevData => prevData ? ({
         ...prevData,
-        logs: prevData?.logs ? [...prevData.logs, data] : [data]
-      }));
+        logs: prevData.logs ? [...prevData.logs, data] : [data]
+      }) : null);
     });
 
     setSocket(newSocket);
@@ -157,7 +158,7 @@ export const useSocket = (serverPath) => {
   }, [serverPath]);
 
   // Socket utility functions
-  const emit = (event, data) => {
+  const emit = (event: string, data?: any): void => {
     if (socket && isConnected) {
       socket.emit(event, data);
     } else {
@@ -165,27 +166,27 @@ export const useSocket = (serverPath) => {
     }
   };
 
-  const requestSystemInfo = () => {
+  const requestSystemInfo = (): void => {
     emit('get_system_info');
   };
 
-  const loadModel = (modelName) => {
+  const loadModel = (modelName: string): void => {
     emit('load_model', { model: modelName });
   };
 
-  const unloadModel = (modelName) => {
+  const unloadModel = (modelName: string): void => {
     emit('unload_model', { model: modelName });
   };
 
-  const runInference = (imageData, modelName) => {
+  const runInference = (imageData: any, modelName: string): void => {
     emit('run_inference', { image: imageData, model: modelName });
   };
 
-  const getModelList = () => {
+  const getModelList = (): void => {
     emit('get_models');
   };
 
-  const getLogs = (count = 100) => {
+  const getLogs = (count: number = 100): void => {
     emit('get_logs', { count });
   };
 

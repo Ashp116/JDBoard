@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { LogsSectionProps } from '../types';
 
 const Container = styled.div`
   padding: 30px;
@@ -97,7 +98,7 @@ const EmptyState = styled.div`
   }
 `;
 
-const LogsSection = ({ systemData, socket, isConnected }) => {
+const LogsSection: React.FC<LogsSectionProps> = ({ systemData, socket, isConnected }) => {
   const [logs, setLogs] = useState([]);
   const [lastUpdated, setLastUpdated] = useState(null);
   

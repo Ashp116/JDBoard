@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import styled, { ThemeProvider } from 'styled-components';
 import { GlobalStyles } from './styles/GlobalStyles';
 import { nvidiaTheme } from './styles/theme';
@@ -14,25 +14,27 @@ import { useSocket } from './hooks/useSocket';
 const AppContainer = styled.div`
   display: flex;
   min-height: 100vh;
-  background: ${props => props.theme.colors.background.primary};
+  background: ${(props: any) => props.theme.colors.background.primary};
 `;
 
 const MainContent = styled.main`
   margin-left: 80px;
   flex: 1;
   min-height: 100vh;
-  transition: margin-left ${props => props.theme.transitions.medium};
-  background: ${props => props.theme.colors.background.primary};
+  transition: margin-left ${(props: any) => props.theme.transitions.medium};
+  background: ${(props: any) => props.theme.colors.background.primary};
 `;
 
-const ContentSection = styled.section`
+const ContentSection = styled.section<{ $active: boolean }>`
   display: ${props => props.$active ? 'block' : 'none'};
   padding: 20px;
-  animation: fadeIn ${props => props.theme.transitions.medium};
+  animation: fadeIn ${(props: any) => props.theme.transitions.medium};
 `;
 
-function App() {
-  const [activeSection, setActiveSection] = useState('dashboard');
+type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'logs' | 'settings';
+
+function App(): JSX.Element {
+  const [activeSection, setActiveSection] = useState<SectionKey>('dashboard');
   const { 
     socket, 
     isConnected, 
@@ -42,7 +44,7 @@ function App() {
     clearDataBuffer 
   } = useSocket();
 
-  const sections = {
+  const sections: Record<SectionKey, any> = {
     dashboard: Dashboard,
     models: ModelsSection,
     inference: InferenceSection,
@@ -78,13 +80,17 @@ function App() {
     );
   };
 
+  const handleSectionChange = (section: string) => {
+    setActiveSection(section as SectionKey);
+  };
+
   return (
     <ThemeProvider theme={nvidiaTheme}>
       <GlobalStyles />
       <AppContainer>
         <Sidebar 
           activeSection={activeSection}
-          onSectionChange={setActiveSection}
+          onSectionChange={handleSectionChange}
           isConnected={isConnected}
         />
         <MainContent>

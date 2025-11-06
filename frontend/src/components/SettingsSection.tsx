@@ -1,6 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+
+// Styled component interfaces
+interface StyledActiveProps {
+  $active: boolean;
+}
+
+interface StyledVariantProps {
+  $variant: string;
+}
+
+// State interfaces
+interface SudoModalState {
+  show: boolean;
+  action: any;
+  password: string;
+  error: string;
+  resolve?: (password: string) => void;
+  reject?: (error: Error) => void;
+}
+
+interface SudoSessionState {
+  isValid: boolean;
+  lastUsed: number | null;
+  password?: string;
+}
 
 const Container = styled.div`
   padding: 30px;
@@ -82,7 +108,7 @@ const SettingItem = styled.div`
   }
 `;
 
-const Toggle = styled.button`
+const Toggle = styled.button<StyledActiveProps>`
   position: relative;
   width: 50px;
   height: 24px;
@@ -124,7 +150,7 @@ const Select = styled.select`
   }
 `;
 
-const Button = styled.button`
+const Button = styled.button<StyledVariantProps>`
   background: ${props => props.$variant === 'danger' ? props.theme.colors.status.error : props.theme.colors.nvidia.green};
   color: ${props => props.theme.colors.text.primary};
   border: none;
@@ -226,7 +252,7 @@ const InfoCard = styled.div`
     margin: 0 0 16px 0;
 
     i {
-      color: ${props => props.theme.colors.nvidia.blue};
+      color: ${props => props.theme.colors.nvidia.green};
     }
   }
 `;
@@ -251,7 +277,7 @@ const InfoItem = styled.div`
   }
 `;
 
-const SettingsSection = ({ systemData, socket, isConnected }) => {
+const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected }) => {
   const [settings, setSettings] = useState({
     jetsonClocks: false,
     fanMode: 'quiet',
@@ -281,14 +307,14 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
     shutdown: false
   });
 
-  const [sudoModal, setSudoModal] = useState({
+  const [sudoModal, setSudoModal] = useState<SudoModalState>({
     show: false,
     action: null,
     password: '',
     error: ''
   });
 
-  const [sudoSession, setSudoSession] = useState({
+  const [sudoSession, setSudoSession] = useState<SudoSessionState>({
     isValid: false,
     lastUsed: null
   });
@@ -388,7 +414,7 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
   }, []);
 
   // Sudo authentication functions
-  const requestSudoPassword = (action) => {
+  const requestSudoPassword = (action: any): Promise<string> => {
     return new Promise((resolve, reject) => {
       setSudoModal({
         show: true,
@@ -420,7 +446,8 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
         // Update sudo session
         setSudoSession({
           isValid: true,
-          lastUsed: Date.now()
+          lastUsed: Date.now(),
+          password: sudoModal.password
         });
         
         // Close modal and resolve promise
@@ -828,6 +855,7 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
               <div className="description">Reboot the Jetson device</div>
             </div>
             <Button 
+              $variant="danger"
               onClick={handleReboot}
               disabled={loading.reboot}
               style={{ opacity: loading.reboot ? 0.6 : 1 }}
@@ -891,10 +919,11 @@ const SettingsSection = ({ systemData, socket, isConnected }) => {
             )}
             
             <ModalButtons>
-              <Button onClick={handleSudoCancel}>
+              <Button $variant="normal" onClick={handleSudoCancel}>
                 Cancel
               </Button>
               <Button 
+                $variant="normal"
                 onClick={handleSudoSubmit}
                 disabled={!sudoModal.password.trim()}
               >

@@ -1,5 +1,15 @@
 import React from 'react';
 import styled from 'styled-components';
+import { SidebarProps } from '../types';
+
+// Styled component interfaces
+interface StyledActiveProps {
+  $active: boolean;
+}
+
+interface StyledConnectionProps {
+  $connected: boolean;
+}
 
 const SidebarContainer = styled.nav`
   width: 80px;
@@ -45,7 +55,7 @@ const SidebarNav = styled.div`
   padding: 20px 0;
 `;
 
-const NavItem = styled.div`
+const NavItem = styled.div<StyledActiveProps>`
   display: flex;
   align-items: center;
   padding: 15px 20px;
@@ -90,7 +100,7 @@ const SidebarFooter = styled.div`
   text-align: center;
 `;
 
-const ConnectionStatus = styled.div`
+const ConnectionStatus = styled.div<StyledConnectionProps>`
   display: flex;
   align-items: center;
   gap: 8px;
@@ -106,7 +116,7 @@ const ConnectionStatus = styled.div`
   }
 `;
 
-const Sidebar = ({ activeSection, onSectionChange, isConnected }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isConnected }) => {
   const navItems = [
     { id: 'dashboard', icon: 'fas fa-tachometer-alt', label: 'Dashboard', shortcut: 'Ctrl+1' },
     { id: 'models', icon: 'fas fa-brain', label: 'Models', shortcut: 'Ctrl+2' },
