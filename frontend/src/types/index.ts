@@ -75,6 +75,12 @@ export interface SystemData {
     recent_logs?: any[];
     last_updated?: string;
   };
+  error?: {
+    type: string;
+    message: string;
+    command?: string;
+    timestamp: string;
+  } | null;
 }
 
 // Buffered data types for the data collection service

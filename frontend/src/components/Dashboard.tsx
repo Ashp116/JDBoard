@@ -122,6 +122,49 @@ const StatLabel = styled.div`
   text-transform: uppercase;
 `;
 
+const ErrorBanner = styled.div`
+  background: ${props => props.theme.colors.status.error};
+  color: white;
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #ff4444;
+  
+  .error-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-weight: bold;
+    font-size: 16px;
+    
+    i {
+      font-size: 18px;
+    }
+  }
+  
+  .error-message {
+    margin-bottom: 12px;
+    line-height: 1.4;
+  }
+  
+  .error-command {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    margin-bottom: 8px;
+    word-break: break-all;
+  }
+  
+  .error-timestamp {
+    font-size: 12px;
+    opacity: 0.8;
+  }
+`;
+
 const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
   const currentTime = new Date().toLocaleString();
 
@@ -209,6 +252,27 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
         </HeaderInfo>
         <SystemStatus isConnected={isConnected} />
       </ContentHeader>
+
+      {/* Error Banner for jtop service issues */}
+      {systemData?.error && (
+        <ErrorBanner>
+          <div className="error-header">
+            <i className="fas fa-exclamation-triangle"></i>
+            Jetson Stats Service Error
+          </div>
+          <div className="error-message">
+            {systemData.error.message}
+          </div>
+          {systemData.error.command && (
+            <div className="error-command">
+              {systemData.error.command}
+            </div>
+          )}
+          <div className="error-timestamp">
+            Error occurred: {new Date(systemData.error.timestamp).toLocaleString()}
+          </div>
+        </ErrorBanner>
+      )}
 
       <SectionHeader>
         <h2>

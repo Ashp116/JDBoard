@@ -81,6 +81,7 @@ After installation, you may need to reboot your system.
             'kernel_version': 'Unknown',
             'jetson_clocks': False,
             'system_logs': {'recent_logs': [], 'log_count': 0, 'last_updated': None},
+            'error': None,  # Add error field to track jtop service issues
             'last_updated': None
         }
         
@@ -148,9 +149,36 @@ After installation, you may need to reboot your system.
                 # Update timestamp
                 self.system_data['last_updated'] = datetime.now().isoformat()
                 
+                # Clear any previous errors on successful update
+                self.system_data['error'] = None
+                
         except Exception as e:
+            error_str = str(e)
             logger.error(f"Failed to update system data from jetson-stats: {e}")
             print(f"ERROR: Failed to read from jetson-stats: {e}")
+            
+            # Check for specific jtop service error
+            if "jtop.service is not active" in error_str or "jtop service" in error_str.lower():
+                self.system_data['error'] = {
+                    'type': 'jtop_service_inactive',
+                    'message': 'The jtop.service is not active. Please run: sudo jtop --install-service',
+                    'command': 'sudo jtop --install-service',
+                    'timestamp': datetime.now().isoformat()
+                }
+            elif "permission" in error_str.lower() or "access" in error_str.lower():
+                self.system_data['error'] = {
+                    'type': 'permission_error',
+                    'message': f'Permission error accessing jetson-stats: {error_str}',
+                    'command': 'sudo jtop --install-service',
+                    'timestamp': datetime.now().isoformat()
+                }
+            else:
+                self.system_data['error'] = {
+                    'type': 'jetson_stats_error',
+                    'message': f'Error reading from jetson-stats: {error_str}',
+                    'command': 'sudo jtop --install-service',
+                    'timestamp': datetime.now().isoformat()
+                }
     
     def _update_cpu_data(self, stats):
         """Update CPU data from jetson-stats"""
