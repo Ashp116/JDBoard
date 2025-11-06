@@ -428,3 +428,125 @@ class AIModelManager:
             }
         
         return model_info
+
+    def get_detailed_models_list(self):
+        """Get detailed list of all models with status information"""
+        detailed_models = []
+        for model_id, model_info in self.models_registry.items():
+            # Check if file still exists
+            if Path(model_info['file_path']).exists():
+                detailed_info = model_info.copy()
+                detailed_info['id'] = model_id
+                detailed_info['loaded'] = model_id in self.loaded_models
+                
+                if model_id in self.loaded_models:
+                    load_info = self.loaded_models[model_id]
+                    detailed_info['load_info'] = {
+                        'loaded_at': load_info['loaded_at'],
+                        'load_time': load_info['load_time']
+                    }
+                
+                detailed_models.append(detailed_info)
+            else:
+                logger.warning(f"Model file missing: {model_info['file_path']}")
+        
+        return detailed_models
+
+    def download_yolo_model(self, model_url, model_name, description='', target_format='PyTorch'):
+        """Download a YOLO model and optionally convert it to different format"""
+        import urllib.request
+        import shutil
+        from pathlib import Path
+        
+        try:
+            # Create downloads directory
+            download_dir = self.models_dir / 'downloads'
+            download_dir.mkdir(exist_ok=True)
+            
+            # Generate filename
+            url_filename = model_url.split('/')[-1]
+            download_path = download_dir / url_filename
+            
+            logger.info(f"Downloading YOLO model from {model_url}")
+            
+            # Download the model
+            with urllib.request.urlopen(model_url) as response:
+                with open(download_path, 'wb') as f:
+                    shutil.copyfileobj(response, f)
+            
+            logger.info(f"Downloaded model to {download_path}")
+            
+            # Handle format conversion if needed
+            final_path = download_path
+            final_format = 'pytorch'  # Default for .pt files
+            
+            if target_format != 'PyTorch':
+                logger.info(f"Converting model to {target_format}")
+                final_path, final_format = self._convert_yolo_model(download_path, target_format)
+            
+            # Register the model
+            model_info = self.register_model(
+                model_name=model_name,
+                file_path=final_path,
+                model_type='vision',
+                description=description,
+                original_filename=url_filename
+            )
+            
+            logger.info(f"YOLO model {model_name} successfully downloaded and registered")
+            
+            return {
+                'model_id': model_info['id'],
+                'model_info': model_info,
+                'download_path': str(final_path),
+                'format': final_format
+            }
+            
+        except Exception as e:
+            logger.error(f"Error downloading YOLO model: {str(e)}")
+            # Clean up partial download
+            if download_path.exists():
+                download_path.unlink()
+            raise
+    
+    def _convert_yolo_model(self, source_path, target_format):
+        """Convert YOLO model to different format"""
+        import shutil
+        
+        # This is a placeholder for model conversion
+        # In a real implementation, you would use tools like:
+        # - ultralytics for YOLO conversion
+        # - torch2trt for TensorRT conversion
+        # - onnx for ONNX conversion
+        
+        logger.warning(f"Model conversion to {target_format} not fully implemented")
+        logger.info("Using original PyTorch format")
+        
+        # For now, just return the original file
+        # TODO: Implement actual conversion logic
+        
+        conversion_map = {
+            'ONNX': ('onnx', '.onnx'),
+            'TensorRT': ('tensorrt', '.trt'),
+            'CoreML': ('coreml', '.mlmodel'),
+            'PyTorch': ('pytorch', '.pt')
+        }
+        
+        if target_format not in conversion_map:
+            raise ValueError(f"Unsupported target format: {target_format}")
+        
+        framework, extension = conversion_map[target_format]
+        
+        # For now, just copy the file with appropriate extension
+        # In real implementation, actual conversion would happen here
+        if target_format == 'PyTorch':
+            return source_path, framework
+        
+        # Placeholder: just copy the file with new extension
+        converted_path = source_path.with_suffix(extension)
+        shutil.copy2(source_path, converted_path)
+        
+        logger.warning(f"Placeholder conversion: copied {source_path} to {converted_path}")
+        logger.warning("Actual model conversion should be implemented for production use")
+        
+        return converted_path, framework

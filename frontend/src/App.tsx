@@ -10,6 +10,9 @@ import MonitoringSection from './components/MonitoringSection';
 import TerminalSection from './components/TerminalSection';
 import LogsSection from './components/LogsSection';
 import SettingsSection from './components/SettingsSection';
+import GlobalNotifications from './components/GlobalNotifications';
+import SystemErrorDetector from './components/SystemErrorDetector';
+import { NotificationProvider } from './contexts/NotificationContext';
 import { useSocket } from './hooks/useSocket';
 
 const AppContainer = styled.div`
@@ -34,7 +37,7 @@ const ContentSection = styled.section<{ $active: boolean }>`
 
 type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'terminal' | 'logs' | 'settings';
 
-function App(): JSX.Element {
+const AppContent: React.FC = () => {
   const [activeSection, setActiveSection] = useState<SectionKey>('dashboard');
   const { 
     socket, 
@@ -97,8 +100,7 @@ function App(): JSX.Element {
   };
 
   return (
-    <ThemeProvider theme={nvidiaTheme}>
-      <GlobalStyles />
+    <SystemErrorDetector>
       <AppContainer>
         <Sidebar 
           activeSection={activeSection}
@@ -110,7 +112,20 @@ function App(): JSX.Element {
             {renderSection()}
           </ContentSection>
         </MainContent>
+        <GlobalNotifications />
       </AppContainer>
+    </SystemErrorDetector>
+  );
+};
+
+function App(): JSX.Element {
+
+  return (
+    <ThemeProvider theme={nvidiaTheme}>
+      <NotificationProvider>
+        <GlobalStyles />
+        <AppContent />
+      </NotificationProvider>
     </ThemeProvider>
   );
 }

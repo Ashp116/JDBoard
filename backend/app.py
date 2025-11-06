@@ -285,6 +285,145 @@ def load_model(model_id):
             'error': str(e)
         }), 500
 
+@app.route('/api/models/<model_id>/unload', methods=['POST'])
+def unload_model(model_id):
+    """Unload a model from memory"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/api/models/{model_id}/unload',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        result = ai_manager.unload_model(model_id)
+        logger.info(f"Model {model_id} unloaded by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'message': f'Model {model_id} unloaded successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error unloading model {model_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/<model_id>', methods=['DELETE'])
+def delete_model(model_id):
+    """Delete a model from the system"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/api/models/{model_id}',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        result = ai_manager.delete_model(model_id)
+        logger.info(f"Model {model_id} deleted by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'message': f'Model {model_id} deleted successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error deleting model {model_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/download-yolo', methods=['POST'])
+def download_yolo_model():
+    """Download and optionally convert a YOLO model"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({
+            'success': False,
+            'error': 'No JSON data provided'
+        }), 400
+    
+    request_logger.log_request(
+        endpoint='/api/models/download-yolo',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method,
+        data=data
+    )
+    
+    model_url = data.get('model_url')
+    model_name = data.get('model_name')
+    description = data.get('description', '')
+    target_format = data.get('target_format', 'PyTorch')
+    
+    if not model_url or not model_name:
+        return jsonify({
+            'success': False,
+            'error': 'model_url and model_name are required'
+        }), 400
+    
+    try:
+        result = ai_manager.download_yolo_model(
+            model_url=model_url,
+            model_name=model_name,
+            description=description,
+            target_format=target_format
+        )
+        
+        logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'message': f'YOLO model {model_name} downloaded successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error downloading YOLO model: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/list')
+def list_models_detailed():
+    """List all models with detailed information"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/models/list',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        models = ai_manager.get_detailed_models_list()
+        return jsonify({
+            'success': True,
+            'models': models,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error listing models: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/inference', methods=['POST'])
 def run_inference():
     """Run inference on uploaded image"""
