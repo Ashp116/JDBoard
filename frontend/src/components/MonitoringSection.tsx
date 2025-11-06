@@ -603,10 +603,6 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           <span className="label">Total</span>
           <span className="value">{formatBytes(systemData?.memory?.total)}</span>
         </MetricRow>
-        <MetricRow>
-          <span className="label">Free</span>
-          <span className="value">{formatBytes(systemData?.memory?.free)}</span>
-        </MetricRow>
       </DetailCard>
     </>
   );
