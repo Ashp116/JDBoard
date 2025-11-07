@@ -27,5 +27,9 @@ echo "📡 Backend: http://localhost:5000"
 echo "🔄 Press Ctrl+C to stop"
 echo ""
 
+# Set Flask environment variables (Flask 2.3+ compatible)
+# Override .env file for development mode
+export FLASK_DEBUG=1
+
 cd backend
 $PYTHON app.py

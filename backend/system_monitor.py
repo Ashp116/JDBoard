@@ -225,7 +225,7 @@ After installation, you may need to reboot your system.
         """Update memory data from jetson-stats"""
         try:
             if 'RAM' in stats:
-                ram_percentage = safe_float(stats['RAM'])
+                ram_percentage = safe_float(stats['RAM'], decimal_places=3)
                 
                 # Get total system memory (we need to estimate this)
                 # For Jetson devices, we can make reasonable estimates or get from system
@@ -243,7 +243,7 @@ After installation, you may need to reboot your system.
                         'total': int(total_bytes),
                         'used': int(used_bytes),
                         'available': int(available_bytes),
-                        'percent': round(ram_percentage * 100, 1)
+                        'percent': ram_percentage * 100
                     }
                 except ImportError:
                     # If psutil is not available, make reasonable estimates

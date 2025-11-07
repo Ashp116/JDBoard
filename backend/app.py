@@ -30,6 +30,7 @@ from jtop import jtop
 app = Flask(__name__, 
            template_folder='../frontend',
            static_folder='../static')
+
 CORS(app)
 
 # Initialize SocketIO for real-time communication
@@ -1772,4 +1773,5 @@ if __name__ == '__main__':
     socketio.start_background_task(background_system_updates)
     
     logger.info("Starting Jetson Edge AI Dashboard with WebSocket support...")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    # Use app.config['DEBUG'] instead of hardcoded debug=True
+    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'])

@@ -13,25 +13,26 @@ GPUtil==1.4.0
 # Computer Vision and Image Processing
 opencv-python==4.8.1.78
 Pillow==10.0.1
-numpy==1.24.3
+# Numpy version that works with TensorFlow 2.12.0
+numpy>=1.21.0,<1.24.0
 
 # Machine Learning Frameworks (Python 3.10 compatible)
-# ONNX Runtime
-onnxruntime==1.15.1; platform_machine!="aarch64"
+# ONNX Runtime - different versions for different architectures
+# onnxruntime==1.15.1; platform_machine!="aarch64"
+# onnxruntime-gpu==1.15.1; platform_machine=="aarch64"
 
 # PyTorch (Python 3.10 compatible)
 torch==2.0.1
 torchvision==0.15.2
 
+# TensorFlow (Python 3.10 compatible) - compatible with numpy range
+tensorflow==2.12.0
+
 # YOLO model management
 ultralytics>=8.0.0
 
-# TensorFlow (Python 3.10 compatible)
-tensorflow==2.12.0
-
-# TensorRT (optional, for Jetson devices)
-# tensorrt==8.6.1; platform_machine=="aarch64"
-# pycuda==2022.2.2; platform_machine=="aarch64"
+# TensorRT and CUDA support (for Jetson devices)
+pycuda>=2022.1; platform_machine=="aarch64"
 
 # Data handling and utilities
 requests==2.31.0
@@ -43,9 +44,7 @@ pytest-flask==1.2.0
 black==23.9.1
 flake8==6.1.0
 
-# Optional: For advanced monitoring
-nvidia-ml-py3==7.352.0; platform_machine=="aarch64"
-jetson-stats==4.2.6; platform_machine=="aarch64"
-
 # Security
 cryptography==41.0.7
+
+git+https://github.com/rbonghi/jetson_stats.git
