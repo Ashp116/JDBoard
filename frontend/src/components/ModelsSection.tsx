@@ -11,7 +11,6 @@ interface ModelInfo {
   framework: string;
   file_path: string;
   file_size: number;
-  description?: string;
   loaded?: boolean;
   status?: string;
   upload_date?: string;
@@ -758,7 +757,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   // File upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState('');
-  const [modelDescription, setModelDescription] = useState('');
   const [modelType, setModelType] = useState('vision');
   
   // YOLO download states
@@ -766,7 +764,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [selectedYOLO, setSelectedYOLO] = useState<YOLOModelOption | null>(null);
   const [selectedFormat, setSelectedFormat] = useState('PyTorch');
   const [yoloModelName, setYoloModelName] = useState('');
-  const [yoloDescription, setYoloDescription] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -836,9 +833,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
-      formData.append('name', modelName.trim());
-      formData.append('description', modelDescription.trim());
-      formData.append('type', modelType);
+      formData.append('model_name', modelName.trim());
+      formData.append('model_type', modelType);
 
       const response = await fetch(`${getBackendUrl()}/api/models/upload`, {
         method: 'POST',
@@ -880,7 +876,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         body: JSON.stringify({
           model_url: selectedYOLO.url,
           model_name: yoloModelName.trim(),
-          description: yoloDescription.trim() || selectedYOLO.description,
           target_format: selectedFormat,
           original_format: 'PyTorch'
         })
@@ -917,7 +912,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const resetUploadForm = () => {
     setSelectedFile(null);
     setModelName('');
-    setModelDescription('');
     setModelType('vision');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -928,7 +922,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     setSelectedYOLO(null);
     setSelectedFormat('PyTorch');
     setYoloModelName('');
-    setYoloDescription('');
   };
 
   const handleLoadModel = async (modelId: string) => {
@@ -1049,11 +1042,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <span className="value">{new Date(model.upload_date).toLocaleDateString()}</span>
                   </div>
                 )}
-                {model.description && (
-                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#888' }}>
-                    {model.description}
-                  </div>
-                )}
               </div>
 
               <div className="model-actions">
@@ -1164,15 +1152,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </select>
               </FormGroup>
 
-              <FormGroup>
-                <label>Description</label>
-                <textarea
-                  value={modelDescription}
-                  onChange={(e) => setModelDescription(e.target.value)}
-                  placeholder="Optional description of the model's purpose and capabilities"
-                />
-              </FormGroup>
-
               <ActionButtons>
                 <Button variant="secondary" onClick={() => setShowModal(false)}>
                   Cancel
@@ -1199,7 +1178,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     setSelectedVersion(version || null);
                     setSelectedYOLO(null); // Reset model selection when version changes
                     setYoloModelName('');
-                    setYoloDescription('');
                   }}
                 >
                   <option value="">Select YOLO Version</option>
@@ -1224,9 +1202,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                             setSelectedYOLO(model);
                             if (!yoloModelName) {
                               setYoloModelName(model.name);
-                            }
-                            if (!yoloDescription) {
-                              setYoloDescription(model.description);
                             }
                           }}
                         >
@@ -1254,15 +1229,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       value={yoloModelName}
                       onChange={(e) => setYoloModelName(e.target.value)}
                       placeholder="Enter a name for this model instance"
-                    />
-                  </FormGroup>
-
-                  <FormGroup>
-                    <label>Description</label>
-                    <textarea
-                      value={yoloDescription}
-                      onChange={(e) => setYoloDescription(e.target.value)}
-                      placeholder="Optional description"
                     />
                   </FormGroup>
 

@@ -88,7 +88,7 @@ class AIModelManager:
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
     
-    def register_model(self, model_name, file_path, model_type='vision', description='', original_filename=''):
+    def register_model(self, model_name, file_path, model_type='vision', original_filename=''):
         """Register a new model in the system"""
         model_id = str(uuid.uuid4())
         file_path = Path(file_path)
@@ -105,7 +105,6 @@ class AIModelManager:
             'id': model_id,
             'name': model_name,
             'type': model_type,
-            'description': description,
             'file_path': str(file_path),
             'original_filename': original_filename or file_path.name,
             'file_size': file_size,
@@ -466,7 +465,7 @@ class AIModelManager:
         
         return detailed_models
 
-    def download_yolo_model(self, model_url, model_name, description='', target_format='PyTorch'):
+    def download_yolo_model(self, model_url, model_name, target_format='PyTorch'):
         """Download a YOLO model and optionally convert it to different format"""
         import urllib.request
         import shutil
@@ -503,7 +502,6 @@ class AIModelManager:
                 model_name=model_name,
                 file_path=final_path.resolve(),  # Use absolute path
                 model_type='vision',
-                description=description,
                 original_filename=url_filename
             )
             

@@ -208,7 +208,6 @@ def upload_model():
     file = request.files['file']
     model_name = request.form.get('model_name', '')
     model_type = request.form.get('model_type', 'vision')
-    description = request.form.get('description', '')
     
     if file.filename == '':
         return jsonify({
@@ -233,7 +232,6 @@ def upload_model():
                 model_name=model_name,
                 file_path=os.path.abspath(file_path),
                 model_type=model_type,
-                description=description,
                 original_filename=filename
             )
             
@@ -367,7 +365,6 @@ def download_yolo_model():
     
     model_url = data.get('model_url')
     model_name = data.get('model_name')
-    description = data.get('description', '')
     target_format = data.get('target_format', 'PyTorch')
     
     if not model_url or not model_name:
@@ -380,7 +377,6 @@ def download_yolo_model():
         result = ai_manager.download_yolo_model(
             model_url=model_url,
             model_name=model_name,
-            description=description,
             target_format=target_format
         )
         
