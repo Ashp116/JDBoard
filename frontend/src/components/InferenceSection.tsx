@@ -164,6 +164,265 @@ const PreviewImage = styled.img`
   margin: 10px 0;
 `;
 
+const ImagePreviewContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin: 15px 0;
+`;
+
+const ImagePreviewCard = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 12px;
+  padding: 15px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+`;
+
+const ImageThumbnail = styled.img`
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  flex-shrink: 0;
+`;
+
+const ImageDetails = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ImageName = styled.div`
+  font-weight: 600;
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  word-break: break-all;
+`;
+
+const ImageMeta = styled.div`
+  display: flex;
+  gap: 15px;
+  font-size: 12px;
+  color: ${props => props.theme.colors.text.secondary};
+`;
+
+const ImageActions = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const ActionButton = styled.button<{ variant?: 'primary' | 'secondary' | 'danger' }>`
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  
+  ${props => {
+    switch (props.variant) {
+      case 'primary':
+        return `
+          background: ${props.theme.colors.nvidia.green};
+          border-color: ${props.theme.colors.nvidia.green};
+          color: white;
+          
+          &:hover {
+            background: ${props.theme.colors.nvidia.green}dd;
+            transform: translateY(-1px);
+          }
+        `;
+      case 'danger':
+        return `
+          background: #ff4757;
+          border-color: #ff4757;
+          color: white;
+          
+          &:hover {
+            background: #ff3742;
+            transform: translateY(-1px);
+          }
+        `;
+      default:
+        return `
+          background: ${props.theme.colors.background.primary};
+          border-color: ${props.theme.colors.border.secondary};
+          color: ${props.theme.colors.text.primary};
+          
+          &:hover {
+            background: ${props.theme.colors.background.tertiary};
+            border-color: ${props.theme.colors.nvidia.green};
+          }
+        `;
+    }
+  }}
+`;
+
+const CompactUploadArea = styled.div<{ isDragOver: boolean }>`
+  border: 2px dashed ${props => props.isDragOver ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  background: ${props => props.isDragOver ? `${props.theme.colors.nvidia.green}10` : 'transparent'};
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+    background: ${props => props.theme.colors.nvidia.green}10;
+  }
+
+  .upload-icon {
+    font-size: 24px;
+    color: ${props => props.theme.colors.nvidia.green};
+    margin-bottom: 8px;
+    opacity: 0.6;
+  }
+
+  .upload-text {
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+
+  .upload-hint {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 12px;
+  }
+`;
+
+const ImageCacheSection = styled.div`
+  margin: 20px 0;
+  padding: 15px;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+`;
+
+const CacheHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  
+  h4 {
+    margin: 0;
+    font-size: 14px;
+    color: ${props => props.theme.colors.text.primary};
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
+const CacheCount = styled.span`
+  font-size: 12px;
+  color: ${props => props.theme.colors.text.secondary};
+  background: ${props => props.theme.colors.background.primary};
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid ${props => props.theme.colors.border.primary};
+`;
+
+const CacheGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+`;
+
+const CacheImageCard = styled.div<{ isSelected: boolean }>`
+  position: relative;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid ${props => props.isSelected ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  transition: all 0.2s ease;
+  background: ${props => props.theme.colors.background.primary};
+  
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  }
+`;
+
+const CacheImage = styled.img`
+  width: 100%;
+  height: 60px;
+  object-fit: cover;
+  display: block;
+`;
+
+const CacheImageInfo = styled.div`
+  padding: 4px;
+  background: ${props => props.theme.colors.background.tertiary};
+  
+  .name {
+    font-size: 10px;
+    color: ${props => props.theme.colors.text.primary};
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .meta {
+    font-size: 9px;
+    color: ${props => props.theme.colors.text.secondary};
+    margin-top: 2px;
+  }
+`;
+
+const CacheImageRemove = styled.button`
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: rgba(255, 71, 87, 0.9);
+  border: none;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  color: white;
+  font-size: 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  
+  &:hover {
+    background: #ff4757;
+  }
+  
+  ${CacheImageCard}:hover & {
+    opacity: 1;
+  }
+`;
+
+const EmptyCacheMessage = styled.div`
+  text-align: center;
+  padding: 20px;
+  color: ${props => props.theme.colors.text.secondary};
+  font-size: 12px;
+  font-style: italic;
+`;
+
 const AnnotatedImageContainer = styled.div`
   position: relative;
   display: inline-block;
@@ -851,6 +1110,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [classColors, setClassColors] = useState<{[key: string]: string}>({});
   const [selectedClasses, setSelectedClasses] = useState<Set<string>>(new Set());
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+  
+  // Image cache state
+  const [cachedImages, setCachedImages] = useState<Array<{
+    id: string;
+    file: File;
+    preview: string;
+    name: string;
+    size: number;
+    dimensions: { width: number; height: number };
+  }>>([]);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Generate unique colors for classes
@@ -874,6 +1144,76 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     setSelectedClasses(new Set(uniqueClasses));
     
     return colors;
+  };
+
+  // Helper function to format file size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  // Helper function to get image dimensions text
+  const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
+  // Image cache management functions
+  const addToImageCache = async (file: File, preview: string) => {
+    const id = Date.now().toString();
+    const dimensions = await getImageDimensions(file);
+    
+    const newCachedImage = {
+      id,
+      file,
+      preview,
+      name: file.name,
+      size: file.size,
+      dimensions
+    };
+    
+    setCachedImages(prev => {
+      // Check if image already exists (by name and size)
+      const exists = prev.some(img => img.name === file.name && img.size === file.size);
+      if (exists) return prev;
+      
+      // Add new image, keep max 10 images
+      const updated = [newCachedImage, ...prev];
+      return updated.slice(0, 10);
+    });
+  };
+
+  const selectCachedImage = (cachedImage: typeof cachedImages[0]) => {
+    setSelectedImage(cachedImage.file);
+    setImagePreview(cachedImage.preview);
+    setAnnotatedImageUrl(cachedImage.preview);
+    setImageNaturalDimensions(cachedImage.dimensions);
+    setResults(null); // Clear previous results
+  };
+
+  const removeCachedImage = (id: string) => {
+    setCachedImages(prev => prev.filter(img => img.id !== id));
+    
+    // If the removed image was the currently selected one, clear selection
+    const removedImage = cachedImages.find(img => img.id === id);
+    if (removedImage && selectedImage && removedImage.name === selectedImage.name) {
+      setSelectedImage(null);
+      setImagePreview('');
+      setAnnotatedImageUrl('');
+      setResults(null);
+    }
+  };
+
+  const clearImageCache = () => {
+    setCachedImages([]);
   };
 
   // Toggle class selection
@@ -986,6 +1326,19 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       const imageUrl = e.target?.result as string;
       setImagePreview(imageUrl);
       setAnnotatedImageUrl(imageUrl); // Initially use original image
+      
+      // Add to cache
+      addToImageCache(file, imageUrl);
+      
+      // Get image dimensions for metadata display
+      const img = new Image();
+      img.onload = () => {
+        setImageNaturalDimensions({
+          width: img.naturalWidth,
+          height: img.naturalHeight
+        });
+      };
+      img.src = imageUrl;
     };
     reader.readAsDataURL(file);
   };
@@ -1178,24 +1531,77 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             Image Input
           </PanelTitle>
 
-          <ImageUploadArea
-            isDragOver={isDragOver}
-            onClick={() => fileInputRef.current?.click()}
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-            onDragEnter={() => setIsDragOver(true)}
-            onDragLeave={() => setIsDragOver(false)}
-          >
-            <div className="upload-icon">
-              <i className="fas fa-cloud-upload-alt"></i>
-            </div>
-            <div className="upload-text">
-              {selectedImage ? selectedImage.name : 'Drop image here or click to browse'}
-            </div>
-            <div className="upload-hint">
-              Supports JPG, PNG, WEBP formats
-            </div>
-          </ImageUploadArea>
+          {!selectedImage ? (
+            // No image selected - show full upload area
+            <ImageUploadArea
+              isDragOver={isDragOver}
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              onDragEnter={() => setIsDragOver(true)}
+              onDragLeave={() => setIsDragOver(false)}
+            >
+              <div className="upload-icon">
+                <i className="fas fa-cloud-upload-alt"></i>
+              </div>
+              <div className="upload-text">
+                Drop image here or click to browse
+              </div>
+              <div className="upload-hint">
+                Supports JPG, PNG, WEBP formats
+              </div>
+            </ImageUploadArea>
+          ) : (
+            // Image selected - show compact preview with actions
+            <ImagePreviewContainer>
+              <ImagePreviewCard>
+                <ImageThumbnail src={imagePreview} alt="Preview" />
+                <ImageDetails>
+                  <ImageName>{selectedImage.name}</ImageName>
+                  <ImageMeta>
+                    <span>{formatFileSize(selectedImage.size)}</span>
+                    <span>{selectedImage.type}</span>
+                    {imageNaturalDimensions.width > 0 && (
+                      <span>{imageNaturalDimensions.width} × {imageNaturalDimensions.height}</span>
+                    )}
+                  </ImageMeta>
+                </ImageDetails>
+                <ImageActions>
+                  <ActionButton
+                    variant="danger"
+                    onClick={() => {
+                      setSelectedImage(null);
+                      setImagePreview('');
+                      setResults(null);
+                      setAnnotatedImageUrl('');
+                    }}
+                  >
+                    <i className="fas fa-trash"></i> Remove
+                  </ActionButton>
+                </ImageActions>
+              </ImagePreviewCard>
+              
+              {/* Compact upload area for quick replacement */}
+              <CompactUploadArea
+                isDragOver={isDragOver}
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={(e) => e.preventDefault()}
+                onDragEnter={() => setIsDragOver(true)}
+                onDragLeave={() => setIsDragOver(false)}
+              >
+                <div className="upload-icon">
+                  <i className="fas fa-plus"></i>
+                </div>
+                <div className="upload-text">
+                  Upload Another Image
+                </div>
+                <div className="upload-hint">
+                  Or drag & drop here
+                </div>
+              </CompactUploadArea>
+            </ImagePreviewContainer>
+          )}
 
           <input
             type="file"
@@ -1204,10 +1610,6 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             accept="image/*"
             style={{ display: 'none' }}
           />
-
-          {imagePreview && (
-            <PreviewImage src={imagePreview} alt="Preview" />
-          )}
 
           <ModelSelector
             value={selectedModel}
@@ -1220,7 +1622,6 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
               </option>
             ))}
           </ModelSelector>
-
           <RunButton
             onClick={runInference}
             disabled={!selectedImage || !selectedModel || isRunning}
@@ -1228,6 +1629,56 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           >
             {isRunning ? 'Running Inference...' : 'Run Inference'}
           </RunButton>
+          
+          {/* Image Cache Section */}
+          {cachedImages.length > 0 && (
+            <ImageCacheSection>
+              <CacheHeader>
+                <h4>
+                  <i className="fas fa-history"></i>
+                  Recent Images
+                </h4>
+                <div>
+                  <CacheCount>{cachedImages.length}/10</CacheCount>
+                  <ActionButton
+                    variant="secondary"
+                    onClick={clearImageCache}
+                    style={{ marginLeft: '8px', fontSize: '10px', padding: '4px 8px' }}
+                  >
+                    <i className="fas fa-trash"></i> Clear
+                  </ActionButton>
+                </div>
+              </CacheHeader>
+              
+              <CacheGrid>
+                {cachedImages.map((cachedImage) => (
+                  <CacheImageCard
+                    key={cachedImage.id}
+                    isSelected={selectedImage?.name === cachedImage.name}
+                    onClick={() => selectCachedImage(cachedImage)}
+                  >
+                    <CacheImage src={cachedImage.preview} alt={cachedImage.name} />
+                    <CacheImageRemove
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeCachedImage(cachedImage.id);
+                      }}
+                    >
+                      <i className="fas fa-times"></i>
+                    </CacheImageRemove>
+                    <CacheImageInfo>
+                      <div className="name">{cachedImage.name}</div>
+                      <div className="meta">
+                        {formatFileSize(cachedImage.size)} • {cachedImage.dimensions.width}×{cachedImage.dimensions.height}
+                      </div>
+                    </CacheImageInfo>
+                  </CacheImageCard>
+                ))}
+              </CacheGrid>
+            </ImageCacheSection>
+          )}
+
+
         </InferencePanel>
 
         {/* Results Panel */}
