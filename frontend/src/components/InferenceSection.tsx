@@ -284,51 +284,198 @@ const DetailedStatItem = styled.div`
   }
 `;
 
-const ConfidenceDistribution = styled.div`
-  background: ${props => props.theme.colors.background.primary};
-  padding: 15px;
-  border-radius: 8px;
-  border: 1px solid ${props => props.theme.colors.border.primary};
-  margin-bottom: 20px;
+const ToggleButton = styled.button`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  color: ${props => props.theme.colors.text.primary};
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 15px 0;
 
-  .dist-title {
-    color: ${props => props.theme.colors.text.primary};
-    font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 12px;
+  &:hover {
+    background: ${props => props.theme.colors.background.tertiary};
+    border-color: ${props => props.theme.colors.nvidia.green};
   }
 
-  .confidence-bar {
+  i {
+    transition: transform 0.3s ease;
+  }
+
+  &.expanded i {
+    transform: rotate(180deg);
+  }
+`;
+
+const DetailsSection = styled.div<{ isExpanded: boolean }>`
+  max-height: ${props => props.isExpanded ? '1000px' : '0'};
+  overflow: hidden;
+  transition: max-height 0.4s ease-in-out;
+`;
+
+const QuickStatsBar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: ${props => props.theme.colors.background.secondary};
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 15px 0;
+  font-size: 14px;
+
+  .quick-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+
+    .stat-value {
+      color: ${props => props.theme.colors.nvidia.green};
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .stat-label {
+      color: ${props => props.theme.colors.text.secondary};
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+  }
+
+  @media (max-width: 768px) {
+    flex-wrap: wrap;
+    gap: 10px;
+    
+    .quick-stat {
+      flex: 1;
+      min-width: 80px;
+    }
+  }
+`;
+
+const DetectionsList = styled.div`
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  background: ${props => props.theme.colors.background.secondary};
+
+  /* Custom scrollbar */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: ${props => props.theme.colors.background.primary};
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: ${props => props.theme.colors.nvidia.green};
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: ${props => props.theme.colors.nvidia.lightGreen};
+  }
+`;
+
+const DetectionHeader = styled.div`
+  padding: 12px 16px;
+  background: ${props => props.theme.colors.background.tertiary};
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  font-weight: 600;
+  font-size: 14px;
+  color: ${props => props.theme.colors.text.primary};
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .count-badge {
+    background: ${props => props.theme.colors.nvidia.green};
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+`;
+
+const ScrollableDetectionContent = styled.div`
+  padding: 8px;
+`;
+
+const DetectionItem = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 6px;
+  background: ${props => props.theme.colors.background.primary};
+  border-radius: 6px;
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+    transform: translateX(2px);
+  }
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  .detection-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .detection-label {
+    color: ${props => props.theme.colors.text.primary};
+    font-weight: 500;
+    font-size: 14px;
+  }
+
+  .detection-coords {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 10px;
+    font-family: monospace;
+  }
+
+  .detection-confidence {
+    color: ${props => props.theme.colors.nvidia.green};
+    font-weight: 600;
+    font-size: 14px;
+    min-width: 60px;
+    text-align: right;
+  }
+`;
+
+const ImageOnlyContainer = styled.div`
+  text-align: center;
+  
+  h4 {
+    color: ${props => props.theme.colors.text.primary};
+    margin: 0 0 15px 0;
+    font-size: 16px;
     display: flex;
     align-items: center;
-    margin-bottom: 8px;
-    font-size: 12px;
+    justify-content: center;
+    gap: 8px;
 
-    .bar-label {
-      width: 80px;
-      color: ${props => props.theme.colors.text.secondary};
-    }
-
-    .bar-container {
-      flex: 1;
-      height: 20px;
-      background: ${props => props.theme.colors.background.secondary};
-      border-radius: 10px;
-      overflow: hidden;
-      margin: 0 10px;
-    }
-
-    .bar-fill {
-      height: 100%;
-      border-radius: 10px;
-      transition: width 0.3s ease;
-    }
-
-    .bar-count {
-      width: 30px;
-      text-align: right;
-      color: ${props => props.theme.colors.text.primary};
-      font-weight: 600;
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
     }
   }
 `;
@@ -423,6 +570,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [isDragOver, setIsDragOver] = useState(false);
   const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string>('');
   const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
+  const [showDetails, setShowDetails] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch available models
@@ -701,166 +849,302 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
           {results ? (
             <>
-              {/* Annotated Image */}
-              {annotatedImageUrl && (
-                <AnnotatedImageContainer>
-                  <AnnotatedImage 
-                    src={annotatedImageUrl} 
-                    alt="Annotated Result"
-                    onLoad={handleImageLoad}
-                  />
-                  
-                  {/* Render bounding boxes */}
-                  {getPredictions(results).map((pred: any, index: number) => {
-                    const bbox = convertBboxToPercentage(
-                      pred.bbox, 
-                      imageNaturalDimensions.width, 
-                      imageNaturalDimensions.height
-                    );
+              {/* Annotated Image - Main Focus */}
+              <ImageOnlyContainer>
+                <h4>
+                  <i className="fas fa-eye"></i>
+                  Detection Results
+                </h4>
+                
+                {annotatedImageUrl && (
+                  <AnnotatedImageContainer>
+                    <AnnotatedImage 
+                      src={annotatedImageUrl} 
+                      alt="Annotated Result"
+                      onLoad={handleImageLoad}
+                    />
                     
-                    if (!bbox) return null;
-                    
-                    return (
-                      <BoundingBox
-                        key={index}
-                        x={bbox.x}
-                        y={bbox.y}
-                        width={bbox.width}
-                        height={bbox.height}
-                        confidence={pred.confidence || pred.score || 0}
-                      >
-                        <BoundingBoxLabel confidence={pred.confidence || pred.score || 0}>
-                          {pred.class || pred.label || `Class ${index}`} {formatConfidence(pred.confidence || pred.score || 0)}
-                        </BoundingBoxLabel>
-                      </BoundingBox>
-                    );
-                  })}
-                </AnnotatedImageContainer>
-              )}
+                    {/* Render bounding boxes */}
+                    {getPredictions(results).map((pred: any, index: number) => {
+                      const bbox = convertBboxToPercentage(
+                        pred.bbox, 
+                        imageNaturalDimensions.width, 
+                        imageNaturalDimensions.height
+                      );
+                      
+                      if (!bbox) return null;
+                      
+                      return (
+                        <BoundingBox
+                          key={index}
+                          x={bbox.x}
+                          y={bbox.y}
+                          width={bbox.width}
+                          height={bbox.height}
+                          confidence={pred.confidence || pred.score || 0}
+                        >
+                          <BoundingBoxLabel confidence={pred.confidence || pred.score || 0}>
+                            {pred.class || pred.label || `Class ${index}`} {formatConfidence(pred.confidence || pred.score || 0)}
+                          </BoundingBoxLabel>
+                        </BoundingBox>
+                      );
+                    })}
+                  </AnnotatedImageContainer>
+                )}
+              </ImageOnlyContainer>
 
-              {/* Detailed Statistics */}
-              <DetailedStatsGrid>
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-clock"></i></div>
-                  <div className="stat-label">Inference Time</div>
-                  <div className="stat-value">{getInferenceTime(results).toFixed(3)}</div>
-                  <div className="stat-unit">seconds</div>
-                </DetailedStatItem>
-                
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-search"></i></div>
-                  <div className="stat-label">Detections</div>
+              {/* Quick Stats Bar */}
+              <QuickStatsBar>
+                <div className="quick-stat">
                   <div className="stat-value">{getPredictions(results).length}</div>
-                  <div className="stat-unit">objects</div>
-                </DetailedStatItem>
-                
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-tachometer-alt"></i></div>
+                  <div className="stat-label">Objects</div>
+                </div>
+                <div className="quick-stat">
+                  <div className="stat-value">{getInferenceTime(results).toFixed(3)}s</div>
+                  <div className="stat-label">Time</div>
+                </div>
+                <div className="quick-stat">
+                  <div className="stat-value">
+                    {getInferenceTime(results) > 0 ? (1 / getInferenceTime(results)).toFixed(1) : '0'}
+                  </div>
                   <div className="stat-label">FPS</div>
-                  <div className="stat-value">{getInferenceTime(results) > 0 ? (1 / getInferenceTime(results)).toFixed(1) : '0'}</div>
-                  <div className="stat-unit">frames/sec</div>
-                </DetailedStatItem>
-                
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-microchip"></i></div>
-                  <div className="stat-label">Framework</div>
-                  <div className="stat-value" style={{fontSize: '14px'}}>{results.result?.framework || results.framework}</div>
-                  <div className="stat-unit">engine</div>
-                </DetailedStatItem>
-                
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-brain"></i></div>
-                  <div className="stat-label">Model</div>
-                  <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '').substring(0, 8)}</div>
-                  <div className="stat-unit">ID</div>
-                </DetailedStatItem>
-                
-                <DetailedStatItem>
-                  <div className="stat-icon"><i className="fas fa-percentage"></i></div>
-                  <div className="stat-label">Avg Confidence</div>
+                </div>
+                <div className="quick-stat">
                   <div className="stat-value">
                     {getPredictions(results).length > 0 
-                      ? (getPredictions(results).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getPredictions(results).length * 100).toFixed(1)
-                      : '0'}
+                      ? (getPredictions(results).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getPredictions(results).length * 100).toFixed(0)
+                      : '0'}%
                   </div>
-                  <div className="stat-unit">percent</div>
-                </DetailedStatItem>
-              </DetailedStatsGrid>
-
-              {/* Confidence Distribution */}
-              {getPredictions(results).length > 0 && (
-                <ConfidenceDistribution>
-                  <div className="dist-title">Confidence Distribution</div>
-                  {(() => {
-                    const dist = getConfidenceDistribution(getPredictions(results));
-                    return (
-                      <>
-                        <div className="confidence-bar">
-                          <div className="bar-label">High (&gt;80%)</div>
-                          <div className="bar-container">
-                            <div 
-                              className="bar-fill" 
-                              style={{
-                                width: `${dist.total > 0 ? (dist.high / dist.total) * 100 : 0}%`,
-                                background: '#00ff00'
-                              }}
-                            />
-                          </div>
-                          <div className="bar-count">{dist.high}</div>
-                        </div>
-                        <div className="confidence-bar">
-                          <div className="bar-label">Med (50-80%)</div>
-                          <div className="bar-container">
-                            <div 
-                              className="bar-fill" 
-                              style={{
-                                width: `${dist.total > 0 ? (dist.medium / dist.total) * 100 : 0}%`,
-                                background: '#ffff00'
-                              }}
-                            />
-                          </div>
-                          <div className="bar-count">{dist.medium}</div>
-                        </div>
-                        <div className="confidence-bar">
-                          <div className="bar-label">Low (&lt;50%)</div>
-                          <div className="bar-container">
-                            <div 
-                              className="bar-fill" 
-                              style={{
-                                width: `${dist.total > 0 ? (dist.low / dist.total) * 100 : 0}%`,
-                                background: '#ff6600'
-                              }}
-                            />
-                          </div>
-                          <div className="bar-count">{dist.low}</div>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </ConfidenceDistribution>
-              )}
-
-              {/* Predictions List */}
-              {getPredictions(results).length > 0 && (
-                <div>
-                  <h4 style={{ color: 'var(--text-primary)', marginBottom: '15px' }}>Detections</h4>
-                  {getPredictions(results).slice(0, 10).map((pred: any, index: number) => (
-                    <ResultItem key={index}>
-                      <span className="label">
-                        {pred.class || pred.label || `Class ${index}`}
-                        {pred.bbox && (
-                          <span style={{fontSize: '10px', color: 'var(--text-secondary)', marginLeft: '8px'}}>
-                            [{Math.round(pred.bbox.x)}, {Math.round(pred.bbox.y)}, {Math.round(pred.bbox.width)}×{Math.round(pred.bbox.height)}]
-                          </span>
-                        )}
-                      </span>
-                      <span className="confidence">
-                        {formatConfidence(pred.confidence || pred.score || 0)}
-                      </span>
-                    </ResultItem>
-                  ))}
+                  <div className="stat-label">Avg Conf</div>
                 </div>
-              )}
+              </QuickStatsBar>
+
+              {/* Toggle Details Button */}
+              <ToggleButton 
+                className={showDetails ? 'expanded' : ''}
+                onClick={() => setShowDetails(!showDetails)}
+              >
+                <i className="fas fa-chevron-down"></i>
+                {showDetails ? 'Hide Details' : 'Show Details'}
+              </ToggleButton>
+
+              {/* Expandable Details Section */}
+              <DetailsSection isExpanded={showDetails}>
+                {/* Detailed Statistics */}
+                <DetailedStatsGrid>
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-clock"></i></div>
+                    <div className="stat-label">Inference Time</div>
+                    <div className="stat-value">{getInferenceTime(results).toFixed(3)}</div>
+                    <div className="stat-unit">seconds</div>
+                  </DetailedStatItem>
+                  
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-search"></i></div>
+                    <div className="stat-label">Detections</div>
+                    <div className="stat-value">{getPredictions(results).length}</div>
+                    <div className="stat-unit">objects</div>
+                  </DetailedStatItem>
+                  
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-tachometer-alt"></i></div>
+                    <div className="stat-label">FPS</div>
+                    <div className="stat-value">{getInferenceTime(results) > 0 ? (1 / getInferenceTime(results)).toFixed(1) : '0'}</div>
+                    <div className="stat-unit">frames/sec</div>
+                  </DetailedStatItem>
+                  
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-microchip"></i></div>
+                    <div className="stat-label">Framework</div>
+                    <div className="stat-value" style={{fontSize: '14px'}}>{results.result?.framework || results.framework}</div>
+                    <div className="stat-unit">engine</div>
+                  </DetailedStatItem>
+                  
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-brain"></i></div>
+                    <div className="stat-label">Model</div>
+                    <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '').substring(0, 8)}</div>
+                    <div className="stat-unit">ID</div>
+                  </DetailedStatItem>
+                  
+                  <DetailedStatItem>
+                    <div className="stat-icon"><i className="fas fa-percentage"></i></div>
+                    <div className="stat-label">Avg Confidence</div>
+                    <div className="stat-value">
+                      {getPredictions(results).length > 0 
+                        ? (getPredictions(results).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getPredictions(results).length * 100).toFixed(1)
+                        : '0'}
+                    </div>
+                    <div className="stat-unit">percent</div>
+                  </DetailedStatItem>
+                </DetailedStatsGrid>
+
+                {/* Confidence Distribution */}
+                {getPredictions(results).length > 0 && (
+                  <div style={{
+                    background: 'var(--background-primary)',
+                    padding: '15px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-primary)',
+                    marginBottom: '20px'
+                  }}>
+                    <div style={{
+                      color: 'var(--text-primary)',
+                      fontSize: '14px',
+                      fontWeight: 600,
+                      marginBottom: '12px'
+                    }}>Confidence Distribution</div>
+                    {(() => {
+                      const dist = getConfidenceDistribution(getPredictions(results));
+                      return (
+                        <>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            marginBottom: '8px',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ width: '80px', color: 'var(--text-secondary)' }}>High (&gt;80%)</div>
+                            <div style={{
+                              flex: 1,
+                              height: '20px',
+                              background: 'var(--background-secondary)',
+                              borderRadius: '10px',
+                              overflow: 'hidden',
+                              margin: '0 10px'
+                            }}>
+                              <div 
+                                style={{
+                                  width: `${dist.total > 0 ? (dist.high / dist.total) * 100 : 0}%`,
+                                  height: '100%',
+                                  background: '#00ff00',
+                                  borderRadius: '10px',
+                                  transition: 'width 0.3s ease'
+                                }}
+                              />
+                            </div>
+                            <div style={{ 
+                              width: '30px', 
+                              textAlign: 'right', 
+                              color: 'var(--text-primary)', 
+                              fontWeight: 600 
+                            }}>{dist.high}</div>
+                          </div>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            marginBottom: '8px',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ width: '80px', color: 'var(--text-secondary)' }}>Med (50-80%)</div>
+                            <div style={{
+                              flex: 1,
+                              height: '20px',
+                              background: 'var(--background-secondary)',
+                              borderRadius: '10px',
+                              overflow: 'hidden',
+                              margin: '0 10px'
+                            }}>
+                              <div 
+                                style={{
+                                  width: `${dist.total > 0 ? (dist.medium / dist.total) * 100 : 0}%`,
+                                  height: '100%',
+                                  background: '#ffff00',
+                                  borderRadius: '10px',
+                                  transition: 'width 0.3s ease'
+                                }}
+                              />
+                            </div>
+                            <div style={{ 
+                              width: '30px', 
+                              textAlign: 'right', 
+                              color: 'var(--text-primary)', 
+                              fontWeight: 600 
+                            }}>{dist.medium}</div>
+                          </div>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            marginBottom: '8px',
+                            fontSize: '12px'
+                          }}>
+                            <div style={{ width: '80px', color: 'var(--text-secondary)' }}>Low (&lt;50%)</div>
+                            <div style={{
+                              flex: 1,
+                              height: '20px',
+                              background: 'var(--background-secondary)',
+                              borderRadius: '10px',
+                              overflow: 'hidden',
+                              margin: '0 10px'
+                            }}>
+                              <div 
+                                style={{
+                                  width: `${dist.total > 0 ? (dist.low / dist.total) * 100 : 0}%`,
+                                  height: '100%',
+                                  background: '#ff6600',
+                                  borderRadius: '10px',
+                                  transition: 'width 0.3s ease'
+                                }}
+                              />
+                            </div>
+                            <div style={{ 
+                              width: '30px', 
+                              textAlign: 'right', 
+                              color: 'var(--text-primary)', 
+                              fontWeight: 600 
+                            }}>{dist.low}</div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Predictions List */}
+                <DetectionsList>
+                  <DetectionHeader>
+                    <span>Detections</span>
+                    <span className="count-badge">{getPredictions(results).length}</span>
+                  </DetectionHeader>
+                  <ScrollableDetectionContent>
+                    {getPredictions(results).length > 0 ? (
+                      getPredictions(results).map((pred: any, index: number) => (
+                        <DetectionItem key={index}>
+                          <div className="detection-info">
+                            <div className="detection-label">
+                              {pred.class || pred.label || `Class ${index}`}
+                            </div>
+                            {pred.bbox && (
+                              <div className="detection-coords">
+                                [{Math.round(pred.bbox.x)}, {Math.round(pred.bbox.y)}, {Math.round(pred.bbox.width)}×{Math.round(pred.bbox.height)}]
+                              </div>
+                            )}
+                          </div>
+                          <div className="detection-confidence">
+                            {formatConfidence(pred.confidence || pred.score || 0)}
+                          </div>
+                        </DetectionItem>
+                      ))
+                    ) : (
+                      <div style={{
+                        textAlign: 'center',
+                        padding: '40px 20px',
+                        color: 'var(--text-secondary)'
+                      }}>
+                        <i className="fas fa-search" style={{
+                          fontSize: '32px',
+                          marginBottom: '12px',
+                          opacity: 0.5
+                        }}></i>
+                        <div>No objects detected</div>
+                        <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                          Try adjusting the image or model settings
+                        </div>
+                      </div>
+                    )}
+                  </ScrollableDetectionContent>
+                </DetectionsList>
+              </DetailsSection>
             </>
           ) : (
             <div style={{ 

@@ -185,6 +185,33 @@ def list_models():
             'error': str(e)
         }), 500
 
+@app.route('/api/gpu/memory', methods=['GET'])
+def get_gpu_memory():
+    """Get GPU memory usage information"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/gpu/memory',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        memory_info = ai_manager.memory_manager.get_gpu_memory_info()
+        return jsonify({
+            'success': True,
+            'data': memory_info,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting GPU memory info: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/models/upload', methods=['POST'])
 def upload_model():
     """Upload a new AI model"""
@@ -269,8 +296,15 @@ def load_model(model_id):
     )
     
     try:
-        result = ai_manager.load_model(model_id)
-        logger.info(f"Model {model_id} loaded by {client_ip}")
+        # Check if model is already loaded and handle edge cases
+        force_reload = request.json.get('force_reload', False) if request.is_json else False
+        
+        if force_reload:
+            result = ai_manager.force_reload_model(model_id)
+        else:
+            result = ai_manager.load_model(model_id)
+            
+        logger.info(f"Model {model_id} loaded by {client_ip} (force_reload={force_reload})")
         
         return jsonify({
             'success': True,
@@ -279,6 +313,50 @@ def load_model(model_id):
         })
     except Exception as e:
         logger.error(f"Error loading model {model_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/<model_id>/force-reload', methods=['POST'])
+def force_reload_model(model_id):
+    """Force unload and reload a model from memory"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/api/models/{model_id}/force-reload',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        # Force unload first
+        ai_manager.force_reload_model(model_id)
+        logger.info(f"Model {model_id} force reloaded by {client_ip}")
+        
+        # Get updated model status
+        models = ai_manager.get_models()
+        target_model = None
+        for model in models:
+            if model['id'] == model_id:
+                target_model = model
+                break
+                
+        if not target_model:
+            return jsonify({
+                'success': False,
+                'error': 'Model not found after reload'
+            }), 404
+            
+        return jsonify({
+            'success': True,
+            'data': target_model,
+            'message': f'Model {model_id} force reloaded successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error force reloading model {model_id}: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

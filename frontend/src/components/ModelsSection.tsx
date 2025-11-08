@@ -545,6 +545,17 @@ const ModelCard = styled.div`
         }
       }
 
+      &.force-reload {
+        background: #6c757d;
+        color: white;
+        border: none;
+        font-size: 11px;
+
+        &:hover {
+          background: #5a6268;
+        }
+      }
+
       &.delete {
         background: ${props => props.theme.colors.status.error};
         color: white;
@@ -943,6 +954,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
+  const handleForceReloadModel = async (modelId: string) => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/models/${modelId}/force-reload`, {
+        method: 'POST'
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        await loadModels();
+        alert('Model force reloaded successfully!');
+      } else {
+        alert(data.error || 'Failed to force reload model');
+      }
+    } catch (error) {
+      console.error('Force reload error:', error);
+      alert('Failed to force reload model');
+    }
+  };
+
   const handleUnloadModel = async (modelId: string) => {
     try {
       const response = await fetch(`${getBackendUrl()}/api/models/${modelId}/unload`, {
@@ -1053,12 +1083,21 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     Load Model
                   </button>
                 ) : (
-                  <button 
-                    className="unload"
-                    onClick={() => handleUnloadModel(model.id)}
-                  >
-                    Unload Model
-                  </button>
+                  <>
+                    <button 
+                      className="unload"
+                      onClick={() => handleUnloadModel(model.id)}
+                    >
+                      Unload Model
+                    </button>
+                    <button 
+                      className="force-reload"
+                      onClick={() => handleForceReloadModel(model.id)}
+                      title="Force reload model (clears any stuck states)"
+                    >
+                      Force Reload
+                    </button>
+                  </>
                 )}
                 <button 
                   className="delete"

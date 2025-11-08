@@ -51,7 +51,60 @@ try:
 except ImportError:
     ULTRALYTICS_AVAILABLE = False
 
+# Import garbage collection for memory management
+import gc
+
 logger = logging.getLogger(__name__)
+
+class CUDAMemoryManager:
+    """Manages CUDA memory for Jetson devices with limited GPU memory"""
+    
+    @staticmethod
+    def get_gpu_memory_info():
+        """Get current GPU memory usage"""
+        if not TORCH_AVAILABLE or not torch.cuda.is_available():
+            return {"total": 0, "allocated": 0, "free": 0}
+        
+        try:
+            allocated = torch.cuda.memory_allocated()
+            total = torch.cuda.get_device_properties(0).total_memory
+            free = total - allocated
+            return {
+                "total": total,
+                "allocated": allocated, 
+                "free": free,
+                "total_gb": total / (1024**3),
+                "allocated_gb": allocated / (1024**3),
+                "free_gb": free / (1024**3)
+            }
+        except Exception as e:
+            logger.error(f"Error getting GPU memory info: {e}")
+            return {"total": 0, "allocated": 0, "free": 0}
+    
+    @staticmethod
+    def clear_cuda_cache():
+        """Clear CUDA cache to free up GPU memory"""
+        if TORCH_AVAILABLE and torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.info("CUDA cache cleared")
+            except Exception as e:
+                logger.error(f"Error clearing CUDA cache: {e}")
+        
+        # Force garbage collection
+        gc.collect()
+    
+    @staticmethod
+    def check_memory_available(required_mb=1024):
+        """Check if enough GPU memory is available for model loading"""
+        mem_info = CUDAMemoryManager.get_gpu_memory_info()
+        free_mb = mem_info.get("free", 0) / (1024**2)
+        
+        if free_mb < required_mb:
+            logger.warning(f"Low GPU memory: {free_mb:.1f}MB free, {required_mb}MB required")
+            return False
+        return True
 
 class AIModelManager:
     def __init__(self, models_dir='../models'):
@@ -60,7 +113,13 @@ class AIModelManager:
         self.models_registry = {}
         self.loaded_models = {}
         self.registry_file = self.models_dir / 'models_registry.json'
+        self.memory_manager = CUDAMemoryManager()
         self._load_registry()
+        
+        # Log initial GPU memory status
+        mem_info = self.memory_manager.get_gpu_memory_info()
+        if mem_info.get("total", 0) > 0:
+            logger.info(f"GPU Memory - Total: {mem_info.get('total_gb', 0):.1f}GB, Free: {mem_info.get('free_gb', 0):.1f}GB")
         
     def _load_registry(self):
         """Load the models registry from file"""
@@ -144,7 +203,15 @@ class AIModelManager:
             # Check if file still exists
             if Path(model_info['file_path']).exists():
                 model_copy = model_info.copy()
+                # Check actual loaded state (not just registry flag)
                 model_copy['loaded'] = model_id in self.loaded_models
+                
+                # Update registry if it's out of sync
+                if self.models_registry[model_id]['loaded'] != model_copy['loaded']:
+                    self.models_registry[model_id]['loaded'] = model_copy['loaded']
+                    self._save_registry()
+                    logger.info(f"Updated registry for model {model_id}: loaded={model_copy['loaded']}")
+                
                 models.append(model_copy)
             else:
                 logger.warning(f"Model file missing: {model_info['file_path']}")
@@ -159,6 +226,27 @@ class AIModelManager:
         if model_id in self.loaded_models:
             logger.info(f"Model {model_id} already loaded")
             return {"status": "already_loaded", "model_id": model_id}
+        
+        # Check memory before loading
+        mem_info = self.memory_manager.get_gpu_memory_info()
+        if mem_info.get("total", 0) > 0:
+            logger.info(f"Pre-load GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+            
+            # Clear cache before loading to maximize available memory
+            self.memory_manager.clear_cuda_cache()
+            
+            # Check if we have enough memory (estimate 1GB needed for most models)
+            if not self.memory_manager.check_memory_available(1024):
+                # Try to free up memory by unloading other models
+                if self.loaded_models:
+                    logger.info("Low memory detected, attempting to unload other models")
+                    for other_id in list(self.loaded_models.keys()):
+                        if other_id != model_id:
+                            try:
+                                self.unload_model(other_id)
+                                logger.info(f"Unloaded model {other_id} to free memory")
+                            except Exception as e:
+                                logger.error(f"Failed to unload {other_id}: {e}")
         
         model_info = self.models_registry[model_id]
         file_path = model_info['file_path']
@@ -191,6 +279,11 @@ class AIModelManager:
             self.models_registry[model_id]['loaded'] = True
             self._save_registry()
             
+            # Log memory usage after loading
+            mem_info = self.memory_manager.get_gpu_memory_info()
+            if mem_info.get("total", 0) > 0:
+                logger.info(f"Post-load GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+            
             logger.info(f"Model {model_id} loaded in {load_time:.2f}s")
             
             return {
@@ -201,8 +294,19 @@ class AIModelManager:
             }
             
         except Exception as e:
+            # Clean up any partial state on error
+            if model_id in self.loaded_models:
+                del self.loaded_models[model_id]
+            
+            # Ensure registry reflects the failed state
+            self.models_registry[model_id]['loaded'] = False
+            self._save_registry()
+            
+            # Clear CUDA cache after failed load to free any allocated memory
+            self.memory_manager.clear_cuda_cache()
+            
             logger.error(f"Error loading model {model_id}: {str(e)}")
-            raise
+            raise RuntimeError(f"Failed to load model {model_id}: {str(e)}")
     
     def _load_onnx_model(self, file_path):
         """Load an ONNX model"""
@@ -278,13 +382,80 @@ class AIModelManager:
     
     def unload_model(self, model_id):
         """Unload a model from memory"""
+        try:
+            # Log memory before unload
+            mem_info = self.memory_manager.get_gpu_memory_info()
+            if mem_info.get("total", 0) > 0:
+                logger.info(f"Pre-unload GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+            
+            # Remove from loaded models if it exists
+            if model_id in self.loaded_models:
+                # Get the model reference for proper cleanup
+                model_data = self.loaded_models[model_id]
+                model = model_data.get('model')
+                
+                # Framework-specific cleanup
+                if hasattr(model, 'cpu'):  # PyTorch models
+                    try:
+                        model.cpu()
+                        del model
+                    except Exception as e:
+                        logger.warning(f"Error moving model to CPU: {e}")
+                
+                del self.loaded_models[model_id]
+                logger.info(f"Model {model_id} unloaded from memory")
+            
+            # Clear CUDA cache after unloading
+            self.memory_manager.clear_cuda_cache()
+            
+            # Update registry status
+            if model_id in self.models_registry:
+                self.models_registry[model_id]['loaded'] = False
+                self._save_registry()
+                logger.info(f"Model {model_id} registry updated to unloaded state")
+                
+                # Log memory after cleanup
+                mem_info = self.memory_manager.get_gpu_memory_info()
+                if mem_info.get("total", 0) > 0:
+                    logger.info(f"Post-unload GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+                
+                return True
+            else:
+                logger.warning(f"Model {model_id} not found in registry")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error unloading model {model_id}: {str(e)}")
+            # Force cleanup even if there's an error
+            if model_id in self.loaded_models:
+                del self.loaded_models[model_id]
+            if model_id in self.models_registry:
+                self.models_registry[model_id]['loaded'] = False
+                self._save_registry()
+            
+            # Always clear cache on error
+            self.memory_manager.clear_cuda_cache()
+            return False
+    
+    def force_reload_model(self, model_id):
+        """Force reload a model by first unloading it completely"""
+        logger.info(f"Force reloading model {model_id}")
+        
+        # Force unload first
+        self.unload_model(model_id)
+        
+        # Clear any lingering state
         if model_id in self.loaded_models:
             del self.loaded_models[model_id]
-            self.models_registry[model_id]['loaded'] = False
-            self._save_registry()
-            logger.info(f"Model {model_id} unloaded")
-            return True
-        return False
+        
+        # Force clear CUDA cache before reload
+        self.memory_manager.clear_cuda_cache()
+        
+        # Wait a moment for cleanup to complete
+        time.sleep(1)
+        
+        # Now try to load
+        return self.load_model(model_id)
     
     def run_inference(self, model_id, image):
         """Run inference on an image"""
@@ -320,6 +491,9 @@ class AIModelManager:
             self.models_registry[model_id]['inference_count'] += 1
             self._save_registry()
             
+            # Clear CUDA cache after inference to prevent memory buildup
+            self.memory_manager.clear_cuda_cache()
+            
             logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s")
             
             return {
@@ -330,6 +504,8 @@ class AIModelManager:
             }
             
         except Exception as e:
+            # Clear cache on error to prevent memory leaks
+            self.memory_manager.clear_cuda_cache()
             logger.error(f"Error during inference: {str(e)}")
             raise
     
