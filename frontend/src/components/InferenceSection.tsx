@@ -1935,7 +1935,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   <DetailedStatItem>
                     <div className="stat-icon"><i className="fas fa-brain"></i></div>
                     <div className="stat-label">Model</div>
-                    <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '').substring(0, 8)}</div>
+                    <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '').substring(0, 8) + "..."}</div>
                     <div className="stat-unit">ID</div>
                   </DetailedStatItem>
                   
