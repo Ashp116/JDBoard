@@ -170,7 +170,7 @@ const AnnotatedImageContainer = styled.div`
   max-width: 100%;
   margin: 20px 0;
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible; /* Allow labels to overflow */
   background: ${props => props.theme.colors.background.primary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
 `;
@@ -189,6 +189,7 @@ const BoundingBox = styled.div<{
   confidence: number;
   classColor: string;
   isHovered: boolean;
+  anyHovered: boolean;
 }>`
   position: absolute;
   border: 2px solid ${props => props.classColor};
@@ -201,6 +202,7 @@ const BoundingBox = styled.div<{
   cursor: pointer;
   transition: all 0.2s ease;
   z-index: ${props => props.isHovered ? '10' : '5'};
+  opacity: ${props => props.anyHovered ? (props.isHovered ? '1' : '0.1') : '1'};
   
   &:hover {
     border-width: 3px;
@@ -224,10 +226,12 @@ const BoundingBoxLabel = styled.div<{
   confidence: number; 
   classColor: string;
   isHovered: boolean;
+  x: number;
+  y: number;
+  containerWidth: number;
+  containerHeight: number;
 }>`
   position: absolute;
-  top: -25px;
-  left: 0;
   background: ${props => props.classColor};
   color: #fff;
   padding: 2px 6px;
@@ -241,6 +245,25 @@ const BoundingBoxLabel = styled.div<{
   transform: ${props => props.isHovered ? 'scale(1.1)' : 'scale(1)'};
   transition: transform 0.2s ease;
   box-shadow: ${props => props.isHovered ? `0 2px 8px ${props.classColor}60` : 'none'};
+  z-index: 15;
+  
+  /* Smart positioning to prevent clipping */
+  top: ${props => {
+    const topPos = -25;
+    const bottomPos = 100;
+    // If near top of container, position below the box
+    return props.y < 15 ? `${bottomPos}%` : `${topPos}px`;
+  }};
+  
+  left: ${props => {
+    // If near right edge, align to right side of box
+    return props.x + 150 > props.containerWidth ? 'auto' : '0';
+  }};
+  
+  right: ${props => {
+    // If near right edge, align to right side of box  
+    return props.x + 150 > props.containerWidth ? '0' : 'auto';
+  }};
 `;
 
 const DetailedStatsGrid = styled.div`
@@ -368,7 +391,8 @@ const HoverTooltip = styled.div<{ x: number; y: number; visible: boolean }>`
   opacity: ${props => props.visible ? '1' : '0'};
   transform: ${props => props.visible ? 'scale(1)' : 'scale(0.9)'};
   transition: all 0.2s ease;
-  min-width: 150px;
+  min-width: 200px;
+  max-width: 300px;
 
   .tooltip-header {
     display: flex;
@@ -393,21 +417,23 @@ const HoverTooltip = styled.div<{ x: number; y: number; visible: boolean }>`
   .tooltip-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 8px 12px;
     margin-top: 8px;
   }
 
   .tooltip-stat {
     .label {
       color: ${props => props.theme.colors.text.secondary};
-      font-size: 10px;
+      font-size: 9px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      white-space: nowrap;
     }
     .value {
       color: ${props => props.theme.colors.text.primary};
       font-weight: 600;
       margin-top: 2px;
+      font-size: 11px;
     }
   }
 `;
@@ -818,6 +844,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [isDragOver, setIsDragOver] = useState(false);
   const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string>('');
   const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
+  const [imageContainerDimensions, setImageContainerDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [showDetails, setShowDetails] = useState(false);
   const [hoveredDetection, setHoveredDetection] = useState<number | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{x: number, y: number}>({x: 0, y: 0});
@@ -883,13 +910,35 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   // Handle detection hover
   const handleDetectionHover = (index: number | null, event?: React.MouseEvent) => {
-    setHoveredDetection(index);
-    if (event && index !== null) {
-      setTooltipPosition({
-        x: event.clientX + 10,
-        y: event.clientY - 10
-      });
+    if (hoveredDetection !== index) {
+      setHoveredDetection(index);
     }
+    if (event && index !== null) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const tooltipWidth = 300; // approximate tooltip width
+      const tooltipHeight = 150; // approximate tooltip height
+      
+      let x = event.clientX + 15;
+      let y = event.clientY - 10;
+      
+      // Adjust if tooltip would go off-screen
+      if (x + tooltipWidth > window.innerWidth) {
+        x = event.clientX - tooltipWidth - 15;
+      }
+      if (y + tooltipHeight > window.innerHeight) {
+        y = event.clientY - tooltipHeight - 15;
+      }
+      if (y < 0) {
+        y = event.clientY + 15;
+      }
+      
+      setTooltipPosition({ x, y });
+    }
+  };
+
+  // Handle mouse leave to clear tooltip
+  const handleDetectionLeave = () => {
+    setHoveredDetection(null);
   };
 
   // Fetch available models
@@ -1066,26 +1115,35 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     let x, y, width, height;
     
     if (bbox.x !== undefined && bbox.y !== undefined) {
-      // YOLO format: center x, center y, width, height
-      x = bbox.x - bbox.width / 2;
-      y = bbox.y - bbox.height / 2;
-      width = bbox.width;
-      height = bbox.height;
+      // YOLO format: center x, center y, width, height (normalized 0-1)
+      // Backend now sends normalized coordinates
+      const centerX = bbox.x * 100;  // Convert to percentage
+      const centerY = bbox.y * 100;
+      const boxWidth = bbox.width * 100;
+      const boxHeight = bbox.height * 100;
+      
+      // Convert center coordinates to top-left coordinates
+      x = centerX - boxWidth / 2;
+      y = centerY - boxHeight / 2;
+      width = boxWidth;
+      height = boxHeight;
+      
     } else if (bbox.x1 !== undefined && bbox.y1 !== undefined) {
-      // Corners format: x1, y1, x2, y2
-      x = bbox.x1;
-      y = bbox.y1;
-      width = bbox.x2 - bbox.x1;
-      height = bbox.y2 - bbox.y1;
+      // Corners format: x1, y1, x2, y2 (assumed normalized)
+      x = bbox.x1 * 100;
+      y = bbox.y1 * 100;
+      width = (bbox.x2 - bbox.x1) * 100;
+      height = (bbox.y2 - bbox.y1) * 100;
     } else {
       return null;
     }
 
+    // Ensure coordinates are within bounds
     return {
-      x: (x / imageWidth) * 100,
-      y: (y / imageHeight) * 100,
-      width: (width / imageWidth) * 100,
-      height: (height / imageHeight) * 100
+      x: Math.max(0, Math.min(100, x)),
+      y: Math.max(0, Math.min(100, y)),
+      width: Math.max(0, Math.min(100 - Math.max(0, x), width)),
+      height: Math.max(0, Math.min(100 - Math.max(0, y), height))
     };
   };
 
@@ -1094,6 +1152,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     setImageNaturalDimensions({
       width: img.naturalWidth,
       height: img.naturalHeight
+    });
+    
+    // Also capture the displayed/container dimensions
+    setImageContainerDimensions({
+      width: img.clientWidth,
+      height: img.clientHeight
     });
   };
 
@@ -1213,13 +1277,40 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           confidence={pred.confidence || pred.score || 0}
                           classColor={classColor}
                           isHovered={hoveredDetection === index}
+                          anyHovered={hoveredDetection !== null}
                           onMouseEnter={(e) => handleDetectionHover(index, e)}
-                          onMouseLeave={() => handleDetectionHover(null)}
+                          onMouseLeave={handleDetectionLeave}
+                          onMouseMove={(e) => {
+                            if (hoveredDetection === index) {
+                              const tooltipWidth = 300;
+                              const tooltipHeight = 150;
+                              
+                              let x = e.clientX + 15;
+                              let y = e.clientY - 10;
+                              
+                              // Adjust if tooltip would go off-screen
+                              if (x + tooltipWidth > window.innerWidth) {
+                                x = e.clientX - tooltipWidth - 15;
+                              }
+                              if (y + tooltipHeight > window.innerHeight) {
+                                y = e.clientY - tooltipHeight - 15;
+                              }
+                              if (y < 0) {
+                                y = e.clientY + 15;
+                              }
+                              
+                              setTooltipPosition({ x, y });
+                            }
+                          }}
                         >
                           <BoundingBoxLabel 
                             confidence={pred.confidence || pred.score || 0}
                             classColor={classColor}
                             isHovered={hoveredDetection === index}
+                            x={bbox.x}
+                            y={bbox.y}
+                            containerWidth={imageContainerDimensions.width}
+                            containerHeight={imageContainerDimensions.height}
                           >
                             {className} {formatConfidence(pred.confidence || pred.score || 0)}
                           </BoundingBoxLabel>
@@ -1262,7 +1353,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   <h4>
                     <span>
                       <i className="fas fa-filter filter-icon"></i>
-                      Filter Classes ({selectedClasses.size}/{availableClasses.length})
+                      {" Filter Classes"} ({selectedClasses.size}/{availableClasses.length})
                     </span>
                     <div className="filter-actions">
                       <FilterButton 
@@ -1560,7 +1651,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           visible={hoveredDetection !== null}
         >
           {(() => {
-            const pred = getPredictions(results)[hoveredDetection];
+            const filteredPredictions = getFilteredPredictions(getPredictions(results));
+            const pred = filteredPredictions[hoveredDetection];
             if (!pred) return null;
             
             const className = pred.class || pred.label || `Class ${hoveredDetection}`;
@@ -1578,21 +1670,28 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     <div className="value">{formatConfidence(pred.confidence || pred.score || 0)}</div>
                   </div>
                   <div className="tooltip-stat">
-                    <div className="label">X, Y</div>
+                    <div className="label">Class ID</div>
+                    <div className="value">{pred.class_id !== undefined ? pred.class_id : 'N/A'}</div>
+                  </div>
+                  <div className="tooltip-stat">
+                    <div className="label">Center (X,Y)</div>
                     <div className="value">
-                      {pred.bbox ? `${Math.round(pred.bbox.x)}, ${Math.round(pred.bbox.y)}` : 'N/A'}
+                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
+                        `${Math.round(pred.bbox.x * imageNaturalDimensions.width)}, ${Math.round(pred.bbox.y * imageNaturalDimensions.height)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">
-                    <div className="label">Width</div>
+                    <div className="label">Size (W,H)</div>
                     <div className="value">
-                      {pred.bbox ? `${Math.round(pred.bbox.width)}px` : 'N/A'}
+                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
+                        `${Math.round(pred.bbox.width * imageNaturalDimensions.width)}, ${Math.round(pred.bbox.height * imageNaturalDimensions.height)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">
-                    <div className="label">Height</div>
+                    <div className="label">Top-Left (X,Y)</div>
                     <div className="value">
-                      {pred.bbox ? `${Math.round(pred.bbox.height)}px` : 'N/A'}
+                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
+                        `${Math.round((pred.bbox.x - pred.bbox.width / 2) * imageNaturalDimensions.width)}, ${Math.round((pred.bbox.y - pred.bbox.height / 2) * imageNaturalDimensions.height)}` : 'N/A'}
                     </div>
                   </div>
                 </div>

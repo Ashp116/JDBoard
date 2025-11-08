@@ -57,54 +57,116 @@ import gc
 logger = logging.getLogger(__name__)
 
 class CUDAMemoryManager:
-    """Manages CUDA memory for Jetson devices with limited GPU memory"""
+    """Enhanced CUDA memory manager for Jetson devices with limited GPU memory"""
     
-    @staticmethod
-    def get_gpu_memory_info():
-        """Get current GPU memory usage"""
+    def __init__(self):
+        self.memory_threshold_critical = 0.9  # 90% memory usage triggers emergency cleanup
+        self.memory_threshold_warning = 0.8   # 80% memory usage triggers warnings
+        self.min_free_memory_mb = 256         # Minimum free memory to maintain
+        
+    def get_gpu_memory_info(self):
+        """Get current GPU memory usage with percentage calculations"""
         if not TORCH_AVAILABLE or not torch.cuda.is_available():
-            return {"total": 0, "allocated": 0, "free": 0}
+            return {"total": 0, "allocated": 0, "free": 0, "usage_percent": 0}
         
         try:
             allocated = torch.cuda.memory_allocated()
+            cached = torch.cuda.memory_cached()
             total = torch.cuda.get_device_properties(0).total_memory
             free = total - allocated
+            usage_percent = (allocated / total) * 100 if total > 0 else 0
+            
             return {
                 "total": total,
-                "allocated": allocated, 
+                "allocated": allocated,
+                "cached": cached, 
                 "free": free,
                 "total_gb": total / (1024**3),
                 "allocated_gb": allocated / (1024**3),
-                "free_gb": free / (1024**3)
+                "cached_gb": cached / (1024**3),
+                "free_gb": free / (1024**3),
+                "usage_percent": usage_percent
             }
         except Exception as e:
             logger.error(f"Error getting GPU memory info: {e}")
-            return {"total": 0, "allocated": 0, "free": 0}
+            return {"total": 0, "allocated": 0, "free": 0, "usage_percent": 0}
     
-    @staticmethod
-    def clear_cuda_cache():
+    def clear_cuda_cache(self, aggressive=False):
         """Clear CUDA cache to free up GPU memory"""
         if TORCH_AVAILABLE and torch.cuda.is_available():
             try:
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                logger.info("CUDA cache cleared")
+                if aggressive:
+                    # More aggressive cleanup
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    torch.cuda.reset_peak_memory_stats()
+                    # Clear all cached tensors
+                    for i in range(torch.cuda.device_count()):
+                        with torch.cuda.device(i):
+                            torch.cuda.empty_cache()
+                else:
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                
+                logger.info(f"CUDA cache cleared ({'aggressive' if aggressive else 'normal'})")
             except Exception as e:
                 logger.error(f"Error clearing CUDA cache: {e}")
         
-        # Force garbage collection
-        gc.collect()
+        # Force Python garbage collection
+        for _ in range(3):  # Multiple GC cycles for better cleanup
+            gc.collect()
     
-    @staticmethod
-    def check_memory_available(required_mb=1024):
-        """Check if enough GPU memory is available for model loading"""
-        mem_info = CUDAMemoryManager.get_gpu_memory_info()
+    def check_memory_available(self, required_mb=1024):
+        """Check if enough GPU memory is available"""
+        mem_info = self.get_gpu_memory_info()
         free_mb = mem_info.get("free", 0) / (1024**2)
+        usage_percent = mem_info.get("usage_percent", 0)
+        
+        if usage_percent > (self.memory_threshold_critical * 100):
+            logger.error(f"Critical GPU memory usage: {usage_percent:.1f}%")
+            return False
         
         if free_mb < required_mb:
             logger.warning(f"Low GPU memory: {free_mb:.1f}MB free, {required_mb}MB required")
             return False
+            
         return True
+    
+    def force_memory_cleanup(self):
+        """Force aggressive memory cleanup"""
+        logger.warning("Forcing aggressive GPU memory cleanup")
+        
+        # Multiple rounds of aggressive cleanup
+        for i in range(3):
+            self.clear_cuda_cache(aggressive=True)
+            
+            # Additional PyTorch cleanup
+            if TORCH_AVAILABLE and torch.cuda.is_available():
+                try:
+                    torch.cuda.ipc_collect()
+                except:
+                    pass
+        
+        # Log memory status after cleanup
+        mem_info = self.get_gpu_memory_info()
+        logger.info(f"Post-cleanup GPU memory: {mem_info.get('free_gb', 0):.1f}GB free ({mem_info.get('usage_percent', 0):.1f}% used)")
+        
+        return mem_info
+    
+    def monitor_and_cleanup_if_needed(self):
+        """Monitor memory and perform cleanup if thresholds are exceeded"""
+        mem_info = self.get_gpu_memory_info()
+        usage_percent = mem_info.get("usage_percent", 0)
+        
+        if usage_percent > (self.memory_threshold_critical * 100):
+            logger.warning(f"Critical memory usage detected: {usage_percent:.1f}%")
+            return self.force_memory_cleanup()
+        elif usage_percent > (self.memory_threshold_warning * 100):
+            logger.info(f"High memory usage detected: {usage_percent:.1f}%, performing cleanup")
+            self.clear_cuda_cache(aggressive=False)
+            return self.get_gpu_memory_info()
+        
+        return mem_info
 
 class AIModelManager:
     def __init__(self, models_dir='../models'):
@@ -528,26 +590,47 @@ class AIModelManager:
         model_info = model_data['info']
         framework = model_info['framework']
         
-        # Log memory usage before inference
-        mem_info = self.memory_manager.get_gpu_memory_info()
-        if mem_info.get("total", 0) > 0:
-            logger.info(f"Pre-inference GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+        # Monitor and cleanup memory before inference
+        mem_info = self.memory_manager.monitor_and_cleanup_if_needed()
+        logger.info(f"Pre-inference GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB ({mem_info.get('usage_percent', 0):.1f}% used)")
+        
+        # Check if we have enough memory for inference
+        if not self.memory_manager.check_memory_available(256):
+            logger.warning("Insufficient GPU memory detected, attempting cleanup")
             
-            # Check if we have enough memory for inference (minimum 512MB free)
-            if not self.memory_manager.check_memory_available(512):
-                logger.warning("Low GPU memory detected before inference, clearing cache")
-                self.memory_manager.clear_cuda_cache()
+            # Try aggressive cleanup first
+            self.memory_manager.force_memory_cleanup()
+            
+            # Check again after cleanup
+            if not self.memory_manager.check_memory_available(128):
+                # Last resort: unload other models
+                other_models = [mid for mid in self.loaded_models.keys() if mid != model_id]
+                if other_models:
+                    logger.warning(f"Unloading {len(other_models)} other models to free memory")
+                    for other_id in other_models:
+                        try:
+                            self.unload_model(other_id)
+                        except Exception as e:
+                            logger.error(f"Failed to unload {other_id}: {e}")
                 
-                # Check again after clearing cache
-                mem_info = self.memory_manager.get_gpu_memory_info()
-                if not self.memory_manager.check_memory_available(256):
-                    raise RuntimeError("Insufficient GPU memory for inference. Please restart the service.")
+                # Final check
+                if not self.memory_manager.check_memory_available(128):
+                    raise RuntimeError("Critical GPU memory shortage. Cannot perform inference.")
         
         # Preprocess image to reduce memory usage
         try:
-            # Limit image size to prevent memory overflow on Jetson devices
+            # Adaptive image resizing based on available memory
             height, width = image.shape[:2]
-            max_size = 1024  # Maximum dimension
+            mem_info = self.memory_manager.get_gpu_memory_info()
+            free_gb = mem_info.get('free_gb', 0)
+            
+            # Adjust max size based on available memory
+            if free_gb < 0.5:  # Less than 500MB
+                max_size = 640
+            elif free_gb < 1.0:  # Less than 1GB
+                max_size = 832
+            else:
+                max_size = 1024
             
             if max(height, width) > max_size:
                 if width > height:
@@ -558,7 +641,7 @@ class AIModelManager:
                     new_width = int(width * (max_size / height))
                 
                 image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-                logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height} to save memory")
+                logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height} (max_size={max_size} based on {free_gb:.1f}GB free)")
         
         except Exception as e:
             logger.error(f"Error preprocessing image: {e}")
@@ -566,7 +649,11 @@ class AIModelManager:
         
         start_time = time.time()
         
+        # Wrap inference execution with memory monitoring
         try:
+            # Monitor memory before execution
+            pre_mem = self.memory_manager.get_gpu_memory_info()
+            
             # Check if it's a YOLO model (works for all formats when loaded with ultralytics)
             if hasattr(model, 'predict'):  # YOLO model from ultralytics
                 result = self._run_yolo_inference(model, image)
@@ -588,26 +675,62 @@ class AIModelManager:
             self.models_registry[model_id]['inference_count'] += 1
             self._save_registry()
             
-            # Clear CUDA cache after inference to prevent memory buildup
-            self.memory_manager.clear_cuda_cache()
+            # Monitor memory after inference and cleanup if needed
+            post_mem = self.memory_manager.monitor_and_cleanup_if_needed()
             
-            # Log memory usage after inference
-            mem_info = self.memory_manager.get_gpu_memory_info()
-            if mem_info.get("total", 0) > 0:
-                logger.info(f"Post-inference GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
-            
-            logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s")
+            logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s - Memory: {post_mem.get('free_gb', 0):.1f}GB free")
             
             return {
                 'predictions': result,
                 'inference_time': inference_time,
                 'model_id': model_id,
-                'framework': framework
+                'framework': framework,
+                'memory_info': {
+                    'pre_inference_free_gb': pre_mem.get('free_gb', 0),
+                    'post_inference_free_gb': post_mem.get('free_gb', 0),
+                    'usage_percent': post_mem.get('usage_percent', 0)
+                }
             }
             
+        except RuntimeError as e:
+            error_msg = str(e)
+            # Handle CUDA out of memory specifically
+            if "out of memory" in error_msg.lower() or "cuda" in error_msg.lower():
+                logger.error(f"CUDA memory error during inference: {error_msg}")
+                
+                # Emergency cleanup
+                self.memory_manager.force_memory_cleanup()
+                
+                # Try CPU fallback for YOLO models
+                if hasattr(model, 'predict'):
+                    logger.warning("Attempting CPU fallback for inference")
+                    try:
+                        result = self._run_yolo_inference_cpu(model, image)
+                        inference_time = time.time() - start_time
+                        
+                        # Still update statistics
+                        self.models_registry[model_id]['last_used'] = datetime.now().isoformat()
+                        self.models_registry[model_id]['inference_count'] += 1
+                        self._save_registry()
+                        
+                        return {
+                            'predictions': result,
+                            'inference_time': inference_time,
+                            'model_id': model_id,
+                            'framework': framework + '_cpu_fallback',
+                            'warning': 'Inference performed on CPU due to GPU memory constraints'
+                        }
+                    except Exception as fallback_error:
+                        logger.error(f"CPU fallback failed: {fallback_error}")
+                        raise RuntimeError(f"GPU memory exhausted and CPU fallback failed: {fallback_error}")
+                
+                raise RuntimeError(f"GPU memory exhausted during inference: {error_msg}")
+            else:
+                raise
+        
         except Exception as e:
-            # Clear cache on error to prevent memory leaks
-            self.memory_manager.clear_cuda_cache()
+            # Clear cache on any error to prevent memory leaks
+            self.memory_manager.clear_cuda_cache(aggressive=True)
             logger.error(f"Error during inference: {str(e)}")
             raise
     
@@ -656,11 +779,21 @@ class AIModelManager:
                     # Convert to CPU immediately to free GPU memory
                     boxes_cpu = boxes.cpu()
                     
+                    # Get original image dimensions for normalization
+                    orig_shape = result.orig_shape  # (height, width)
+                    img_height, img_width = orig_shape
+                    
                     for i in range(len(boxes_cpu)):
                         # Get box coordinates, confidence, and class
-                        box = boxes_cpu.xywh[i].numpy()  # x, y, w, h
+                        box = boxes_cpu.xywh[i].numpy()  # x, y, w, h in pixels
                         conf = float(boxes_cpu.conf[i].numpy())
                         cls = int(boxes_cpu.cls[i].numpy())
+                        
+                        # Normalize coordinates to [0, 1] range
+                        x_center = float(box[0]) / img_width
+                        y_center = float(box[1]) / img_height
+                        width = float(box[2]) / img_width
+                        height = float(box[3]) / img_height
                         
                         # Get class name if available
                         class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
@@ -670,10 +803,10 @@ class AIModelManager:
                             'class': class_name,
                             'confidence': conf,
                             'bbox': {
-                                'x': float(box[0]),
-                                'y': float(box[1]),
-                                'width': float(box[2]),
-                                'height': float(box[3])
+                                'x': x_center,
+                                'y': y_center,
+                                'width': width,
+                                'height': height
                             }
                         })
             
@@ -691,6 +824,61 @@ class AIModelManager:
             # Try to recover by clearing cache and forcing CPU
             self.memory_manager.clear_cuda_cache()
             raise RuntimeError(f"YOLO inference failed: {str(e)}")
+    
+    def _run_yolo_inference_cpu(self, model, image):
+        """CPU fallback for YOLO inference when GPU memory is exhausted"""
+        try:
+            logger.info("Running YOLO inference on CPU as fallback")
+            
+            # Force CPU inference
+            results = model(image, device='cpu', verbose=False, half=False)
+            
+            # Extract predictions (same logic as GPU version)
+            predictions = []
+            
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    # Get original image dimensions for normalization
+                    orig_shape = result.orig_shape  # (height, width)
+                    img_height, img_width = orig_shape
+                    
+                    for i in range(len(boxes)):
+                        # Get box coordinates, confidence, and class
+                        box = boxes.xywh[i].numpy()  # x, y, w, h in pixels
+                        conf = float(boxes.conf[i].numpy())
+                        cls = int(boxes.cls[i].numpy())
+                        
+                        # Normalize coordinates to [0, 1] range
+                        x_center = float(box[0]) / img_width
+                        y_center = float(box[1]) / img_height
+                        width = float(box[2]) / img_width
+                        height = float(box[3]) / img_height
+                        
+                        # Get class name if available
+                        class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
+                        
+                        predictions.append({
+                            'class_id': cls,
+                            'class': class_name,
+                            'confidence': conf,
+                            'bbox': {
+                                'x': x_center,
+                                'y': y_center,
+                                'width': width,
+                                'height': height
+                            }
+                        })
+            
+            # Sort by confidence
+            predictions.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            logger.info(f"CPU fallback completed with {len(predictions)} detections")
+            return predictions
+            
+        except Exception as e:
+            logger.error(f"CPU fallback YOLO inference error: {str(e)}")
+            raise RuntimeError(f"CPU fallback YOLO inference failed: {str(e)}")
     
     def _run_tensorrt_inference(self, model, image):
         """Run TensorRT model inference (using YOLO if applicable)"""
