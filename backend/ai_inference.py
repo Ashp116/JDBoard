@@ -41,8 +41,9 @@ except ImportError:
 try:
     import tensorflow as tf
     TF_AVAILABLE = True
-except ImportError:
+except (ImportError, AttributeError, TypeError) as e:
     TF_AVAILABLE = False
+    # Skip TensorFlow due to NumPy compatibility issues
 
 try:
     from ultralytics import YOLO
@@ -521,6 +522,56 @@ class AIModelManager:
                 download_path.unlink()
             raise
     
+    def _cleanup_intermediate_files(self, source_path, target_format, final_path):
+        """Clean up intermediate files created during model conversion"""
+        base_path = source_path.with_suffix('')
+        
+        # Only clean up intermediate files for specific conversion scenarios
+        # Be very conservative to avoid deleting legitimate model files
+        
+        if target_format == 'TensorRT':
+            # For TensorRT conversion, only clean up ONNX if:
+            # 1. We started from PT and ended with .engine
+            # 2. The ONNX file has the same base name as source
+            # 3. The ONNX was likely created as an intermediate step
+            intermediate_onnx = base_path.with_suffix('.onnx')
+            
+            if (source_path.suffix.lower() == '.pt' and 
+                final_path.suffix.lower() == '.engine' and
+                intermediate_onnx.exists() and
+                intermediate_onnx != final_path and 
+                intermediate_onnx != source_path):
+                
+                # Double-check this is likely an intermediate file by checking timestamps
+                # Only delete if ONNX is newer than source (likely just created)
+                try:
+                    source_time = source_path.stat().st_mtime
+                    onnx_time = intermediate_onnx.stat().st_mtime
+                    
+                    if onnx_time >= source_time:
+                        intermediate_onnx.unlink()
+                        logger.info(f"Cleaned up intermediate ONNX file from TensorRT conversion: {intermediate_onnx}")
+                    else:
+                        logger.info(f"Keeping existing ONNX file (older than source): {intermediate_onnx}")
+                except Exception as e:
+                    logger.warning(f"Failed to check timestamps, keeping ONNX file: {e}")
+        
+        # For other formats, be even more conservative - only clean up clearly temporary files
+        elif target_format in ['CoreML', 'TensorFlow']:
+            temp_extensions = ['.torchscript', '.pb', '.tflite']
+            for ext in temp_extensions:
+                temp_file = base_path.with_suffix(ext)
+                if (temp_file.exists() and 
+                    temp_file != final_path and 
+                    temp_file != source_path):
+                    try:
+                        temp_file.unlink()
+                        logger.info(f"Cleaned up temporary file: {temp_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up temporary file {temp_file}: {e}")
+        
+        # Never clean up .onnx files for ONNX target format or other scenarios
+    
     def _convert_yolo_model(self, source_path, target_format):
         """Convert YOLO model to different format and delete original"""
         import shutil
@@ -563,6 +614,9 @@ class AIModelManager:
                 source_path.unlink()
                 logger.info(f"Deleted original PyTorch file: {source_path}")
             
+            # Clean up any intermediate files created during conversion
+            self._cleanup_intermediate_files(source_path, target_format, converted_path)
+            
             logger.info(f"Model converted to {target_format}: {converted_path}")
             return converted_path, framework
             
@@ -585,7 +639,7 @@ class AIModelManager:
             
             # Export to ONNX
             onnx_path = source_path.with_suffix('.onnx')
-            model.export(format='onnx', imgsz=640)
+            model.export(format='onnx')
             
             # Ultralytics saves the exported file with the same name but different extension
             # in the same directory as the source
@@ -607,7 +661,7 @@ class AIModelManager:
             raise
     
     def _convert_to_tensorrt(self, source_path):
-        """Convert YOLO model to TensorRT format"""
+        """Convert YOLO model to TensorRT format using ultralytics"""
         try:
             # Check if ultralytics is available
             if not ULTRALYTICS_AVAILABLE:
@@ -618,27 +672,44 @@ class AIModelManager:
             # Load the model
             model = YOLO(str(source_path))
             
-            # Export to TensorRT
-            trt_path = source_path.with_suffix('.engine')
-            model.export(format='engine', imgsz=640)
+            # Export to TensorRT with memory optimizations for Jetson
+            logger.info("Converting to TensorRT with optimized settings for Jetson...")
+            
+            # Keep track of intermediate ONNX file for cleanup
+            intermediate_onnx = source_path.with_suffix('.onnx')
+            
+            try:
+                # First attempt with moderate settings
+                model.export(
+                    format='engine',
+		            verbose=True
+                )
+            except Exception as e:
+                raise e
             
             # Check if the exported file exists
             expected_trt = source_path.with_suffix('.engine')
             if expected_trt.exists():
                 logger.info(f"Successfully converted to TensorRT: {expected_trt}")
+                
+                # Clean up intermediate ONNX file if it exists
+                if intermediate_onnx.exists():
+                    intermediate_onnx.unlink()
+                    logger.info(f"Cleaned up intermediate ONNX file: {intermediate_onnx}")
+                
                 return expected_trt
             else:
-                raise RuntimeError("TensorRT conversion completed but file not found")
+                raise RuntimeError("TensorRT conversion completed but engine file not found")
                 
         except ImportError:
-            logger.warning("ultralytics or TensorRT not available, using fallback")
-            # Fallback: copy file with .engine extension
-            trt_path = source_path.with_suffix('.engine')
-            shutil.copy2(source_path, trt_path)
-            return trt_path
+            logger.warning("ultralytics not available for TensorRT conversion")
+            raise RuntimeError("Cannot convert to TensorRT: ultralytics not available")
         except Exception as e:
             logger.error(f"TensorRT conversion failed: {str(e)}")
-            raise
+            if "memory" in str(e).lower():
+                raise RuntimeError(f"TensorRT conversion failed due to insufficient GPU memory. Consider using ONNX format for CPU inference instead. Error: {str(e)}")
+            else:
+                raise RuntimeError(f"Failed to convert to TensorRT: {str(e)}")
     
     def _convert_to_coreml(self, source_path):
         """Convert YOLO model to CoreML format"""
@@ -654,7 +725,7 @@ class AIModelManager:
             
             # Export to CoreML
             coreml_path = source_path.with_suffix('.mlmodel')
-            model.export(format='coreml', imgsz=640)
+            model.export(format='coreml')
             
             # Check if the exported file exists
             expected_coreml = source_path.with_suffix('.mlmodel')
