@@ -499,6 +499,45 @@ def list_models_detailed():
             'error': str(e)
         }), 500
 
+@app.route('/api/models/emergency-cleanup', methods=['POST'])
+def emergency_cleanup():
+    """Emergency cleanup to free all GPU memory"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/models/emergency-cleanup',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        result = ai_manager.emergency_cleanup()
+        logger.info(f"Emergency cleanup performed by {client_ip}")
+        
+        # Get memory status after cleanup
+        mem_info = ai_manager.memory_manager.get_gpu_memory_info()
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'cleaned': result,
+                'gpu_memory': {
+                    'total_gb': mem_info.get('total_gb', 0),
+                    'free_gb': mem_info.get('free_gb', 0),
+                    'allocated_gb': mem_info.get('allocated_gb', 0)
+                }
+            },
+            'message': 'Emergency cleanup completed successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error during emergency cleanup: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/api/inference', methods=['POST'])
 def run_inference():
     """Run inference on uploaded image"""
@@ -564,10 +603,30 @@ def run_inference():
         })
         
     except Exception as e:
-        logger.error(f"Error during inference: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"Error during inference: {error_msg}")
+        
+        # Handle CUDA memory errors specifically
+        if "out of memory" in error_msg.lower() or "cuda error" in error_msg.lower():
+            logger.warning("CUDA memory error detected, performing emergency cleanup")
+            try:
+                ai_manager.emergency_cleanup()
+                return jsonify({
+                    'success': False,
+                    'error': 'GPU memory exhausted. All models have been unloaded to free memory. Please try again.',
+                    'error_type': 'cuda_memory_error'
+                }), 507  # Insufficient Storage
+            except Exception as cleanup_error:
+                logger.error(f"Emergency cleanup failed: {cleanup_error}")
+                return jsonify({
+                    'success': False,
+                    'error': 'Critical GPU memory error. Please restart the service.',
+                    'error_type': 'critical_memory_error'
+                }), 500
+        
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': error_msg
         }), 500
 
 @app.route('/api/logs/requests')

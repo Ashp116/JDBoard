@@ -187,20 +187,25 @@ const BoundingBox = styled.div<{
   width: number; 
   height: number;
   confidence: number;
+  classColor: string;
+  isHovered: boolean;
 }>`
   position: absolute;
-  border: 2px solid ${props => {
-    const conf = props.confidence;
-    if (conf > 0.8) return '#00ff00'; // High confidence - green
-    if (conf > 0.5) return '#ffff00'; // Medium confidence - yellow
-    return '#ff6600'; // Low confidence - orange
-  }};
+  border: 2px solid ${props => props.classColor};
   background: transparent;
   left: ${props => props.x}%;
   top: ${props => props.y}%;
   width: ${props => props.width}%;
   height: ${props => props.height}%;
-  pointer-events: none;
+  pointer-events: all;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: ${props => props.isHovered ? '10' : '5'};
+  
+  &:hover {
+    border-width: 3px;
+    box-shadow: 0 0 10px ${props => props.classColor}80;
+  }
   
   &::before {
     content: '';
@@ -209,27 +214,22 @@ const BoundingBox = styled.div<{
     left: -1px;
     right: -1px;
     bottom: -1px;
-    background: ${props => {
-      const conf = props.confidence;
-      if (conf > 0.8) return 'rgba(0, 255, 0, 0.1)';
-      if (conf > 0.5) return 'rgba(255, 255, 0, 0.1)';
-      return 'rgba(255, 102, 0, 0.1)';
-    }};
+    background: ${props => props.isHovered ? `${props.classColor}30` : `${props.classColor}15`};
     border-radius: 2px;
+    transition: all 0.2s ease;
   }
 `;
 
-const BoundingBoxLabel = styled.div<{ confidence: number }>`
+const BoundingBoxLabel = styled.div<{ 
+  confidence: number; 
+  classColor: string;
+  isHovered: boolean;
+}>`
   position: absolute;
   top: -25px;
   left: 0;
-  background: ${props => {
-    const conf = props.confidence;
-    if (conf > 0.8) return '#00ff00';
-    if (conf > 0.5) return '#ffff00';
-    return '#ff6600';
-  }};
-  color: #000;
+  background: ${props => props.classColor};
+  color: #fff;
   padding: 2px 6px;
   font-size: 12px;
   font-weight: 600;
@@ -237,6 +237,10 @@ const BoundingBoxLabel = styled.div<{ confidence: number }>`
   white-space: nowrap;
   min-width: 50px;
   text-align: center;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  transform: ${props => props.isHovered ? 'scale(1.1)' : 'scale(1)'};
+  transition: transform 0.2s ease;
+  box-shadow: ${props => props.isHovered ? `0 2px 8px ${props.classColor}60` : 'none'};
 `;
 
 const DetailedStatsGrid = styled.div`
@@ -347,15 +351,259 @@ const QuickStatsBar = styled.div`
       letter-spacing: 0.5px;
     }
   }
+`;
 
-  @media (max-width: 768px) {
-    flex-wrap: wrap;
-    gap: 10px;
-    
-    .quick-stat {
-      flex: 1;
-      min-width: 80px;
+const HoverTooltip = styled.div<{ x: number; y: number; visible: boolean }>`
+  position: absolute;
+  left: ${props => props.x}px;
+  top: ${props => props.y}px;
+  background: ${props => props.theme.colors.background.primary};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  pointer-events: none;
+  opacity: ${props => props.visible ? '1' : '0'};
+  transform: ${props => props.visible ? 'scale(1)' : 'scale(0.9)'};
+  transition: all 0.2s ease;
+  min-width: 150px;
+
+  .tooltip-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  }
+
+  .class-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+
+  .class-name {
+    font-weight: 600;
+    color: ${props => props.theme.colors.text.primary};
+  }
+
+  .tooltip-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .tooltip-stat {
+    .label {
+      color: ${props => props.theme.colors.text.secondary};
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
+    .value {
+      color: ${props => props.theme.colors.text.primary};
+      font-weight: 600;
+      margin-top: 2px;
+    }
+  }
+`;
+
+const ClassSummarySection = styled.div`
+  margin: 20px 0;
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+
+  h4 {
+    color: ${props => props.theme.colors.text.primary};
+    margin: 0 0 12px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
+const ClassGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+`;
+
+const ClassItem = styled.div<{ classColor: string }>`
+  background: ${props => props.theme.colors.background.primary};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  border-radius: 6px;
+  padding: 12px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: ${props => props.classColor};
+    box-shadow: 0 2px 8px ${props => props.classColor}40;
+  }
+
+  .class-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .class-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    background: ${props => props.classColor};
+  }
+
+  .class-name {
+    font-weight: 600;
+    color: ${props => props.theme.colors.text.primary};
+    flex: 1;
+  }
+
+  .class-count {
+    background: ${props => props.classColor}20;
+    color: ${props => props.classColor};
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .class-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .class-stat {
+    text-align: center;
+
+    .stat-label {
+      color: ${props => props.theme.colors.text.secondary};
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-value {
+      color: ${props => props.theme.colors.text.primary};
+      font-weight: 600;
+      font-size: 14px;
+      margin-top: 2px;
+    }
+  }
+`;
+
+const ClassFilterSection = styled.div`
+  margin: 20px 0;
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+
+  h4 {
+    color: ${props => props.theme.colors.text.primary};
+    margin: 0 0 12px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    .filter-icon {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+
+    .filter-actions {
+      display: flex;
+      gap: 8px;
+    }
+  }
+`;
+
+const FilterButton = styled.button<{ variant: 'select' | 'deselect' }>`
+  background: ${props => props.variant === 'select' 
+    ? props.theme.colors.nvidia.green 
+    : props.theme.colors.status.warning};
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+`;
+
+const ClassFilterGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+`;
+
+const ClassFilterItem = styled.div<{ 
+  classColor: string; 
+  isSelected: boolean;
+}>`
+  background: ${props => props.isSelected 
+    ? props.theme.colors.background.primary 
+    : props.theme.colors.background.tertiary};
+  border: 2px solid ${props => props.isSelected 
+    ? props.classColor 
+    : props.theme.colors.border.primary};
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  opacity: ${props => props.isSelected ? '1' : '0.6'};
+
+  &:hover {
+    border-color: ${props => props.classColor};
+    opacity: 1;
+  }
+
+  .class-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .class-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    background: ${props => props.classColor};
+  }
+
+  .class-name {
+    font-weight: 600;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 12px;
+    flex: 1;
+  }
+
+  .class-count {
+    background: ${props => props.classColor}20;
+    color: ${props => props.classColor};
+    padding: 1px 4px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
   }
 `;
 
@@ -571,7 +819,78 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [annotatedImageUrl, setAnnotatedImageUrl] = useState<string>('');
   const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [showDetails, setShowDetails] = useState(false);
+  const [hoveredDetection, setHoveredDetection] = useState<number | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState<{x: number, y: number}>({x: 0, y: 0});
+  const [classColors, setClassColors] = useState<{[key: string]: string}>({});
+  const [selectedClasses, setSelectedClasses] = useState<Set<string>>(new Set());
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Generate unique colors for classes
+  const generateClassColors = (detections: any[]) => {
+    const uniqueClasses = [...new Set(detections.map(d => d.class || d.label || 'Unknown'))];
+    const colors: {[key: string]: string} = {};
+    
+    const colorPalette = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57',
+      '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3', '#FF9F43',
+      '#10AC84', '#EE5A24', '#0984E3', '#A29BFE', '#FD79A8',
+      '#E17055', '#00B894', '#00CEC9', '#6C5CE7', '#A29BFE'
+    ];
+    
+    uniqueClasses.forEach((className, index) => {
+      colors[className] = colorPalette[index % colorPalette.length];
+    });
+    
+    // Set available classes and select all by default
+    setAvailableClasses(uniqueClasses);
+    setSelectedClasses(new Set(uniqueClasses));
+    
+    return colors;
+  };
+
+  // Toggle class selection
+  const toggleClass = (className: string) => {
+    setSelectedClasses(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(className)) {
+        newSet.delete(className);
+      } else {
+        newSet.add(className);
+      }
+      return newSet;
+    });
+  };
+
+  // Select all classes
+  const selectAllClasses = () => {
+    setSelectedClasses(new Set(availableClasses));
+  };
+
+  // Deselect all classes
+  const deselectAllClasses = () => {
+    setSelectedClasses(new Set());
+  };
+
+  // Filter predictions based on selected classes
+  const getFilteredPredictions = (predictions: any[]): any[] => {
+    if (selectedClasses.size === 0) return [];
+    return predictions.filter(pred => {
+      const className = pred.class || pred.label || 'Unknown';
+      return selectedClasses.has(className);
+    });
+  };
+
+  // Handle detection hover
+  const handleDetectionHover = (index: number | null, event?: React.MouseEvent) => {
+    setHoveredDetection(index);
+    if (event && index !== null) {
+      setTooltipPosition({
+        x: event.clientX + 10,
+        y: event.clientY - 10
+      });
+    }
+  };
 
   // Fetch available models
   useEffect(() => {
@@ -666,6 +985,13 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       
       if (data.success) {
         setResults(data.data);
+        
+        // Generate colors for detected classes
+        const predictions = getPredictions(data.data);
+        if (predictions.length > 0) {
+          const colors = generateClassColors(predictions);
+          setClassColors(colors);
+        }
         
         const inferenceTime = getInferenceTime(data.data);
         const predictionsCount = getPredictions(data.data).length;
@@ -865,7 +1191,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     />
                     
                     {/* Render bounding boxes */}
-                    {getPredictions(results).map((pred: any, index: number) => {
+                    {getFilteredPredictions(getPredictions(results)).map((pred: any, index: number) => {
                       const bbox = convertBboxToPercentage(
                         pred.bbox, 
                         imageNaturalDimensions.width, 
@@ -873,6 +1199,9 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       );
                       
                       if (!bbox) return null;
+                      
+                      const className = pred.class || pred.label || `Class ${index}`;
+                      const classColor = classColors[className] || '#00ff00';
                       
                       return (
                         <BoundingBox
@@ -882,9 +1211,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           width={bbox.width}
                           height={bbox.height}
                           confidence={pred.confidence || pred.score || 0}
+                          classColor={classColor}
+                          isHovered={hoveredDetection === index}
+                          onMouseEnter={(e) => handleDetectionHover(index, e)}
+                          onMouseLeave={() => handleDetectionHover(null)}
                         >
-                          <BoundingBoxLabel confidence={pred.confidence || pred.score || 0}>
-                            {pred.class || pred.label || `Class ${index}`} {formatConfidence(pred.confidence || pred.score || 0)}
+                          <BoundingBoxLabel 
+                            confidence={pred.confidence || pred.score || 0}
+                            classColor={classColor}
+                            isHovered={hoveredDetection === index}
+                          >
+                            {className} {formatConfidence(pred.confidence || pred.score || 0)}
                           </BoundingBoxLabel>
                         </BoundingBox>
                       );
@@ -896,7 +1233,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
               {/* Quick Stats Bar */}
               <QuickStatsBar>
                 <div className="quick-stat">
-                  <div className="stat-value">{getPredictions(results).length}</div>
+                  <div className="stat-value">{getFilteredPredictions(getPredictions(results)).length}</div>
                   <div className="stat-label">Objects</div>
                 </div>
                 <div className="quick-stat">
@@ -911,13 +1248,66 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                 </div>
                 <div className="quick-stat">
                   <div className="stat-value">
-                    {getPredictions(results).length > 0 
-                      ? (getPredictions(results).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getPredictions(results).length * 100).toFixed(0)
+                    {getFilteredPredictions(getPredictions(results)).length > 0 
+                      ? (getFilteredPredictions(getPredictions(results)).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getFilteredPredictions(getPredictions(results)).length * 100).toFixed(0)
                       : '0'}%
                   </div>
                   <div className="stat-label">Avg Conf</div>
                 </div>
               </QuickStatsBar>
+
+              {/* Class Filter Section */}
+              {availableClasses.length > 0 && (
+                <ClassFilterSection>
+                  <h4>
+                    <span>
+                      <i className="fas fa-filter filter-icon"></i>
+                      Filter Classes ({selectedClasses.size}/{availableClasses.length})
+                    </span>
+                    <div className="filter-actions">
+                      <FilterButton 
+                        variant="select"
+                        onClick={selectAllClasses}
+                        title="Select All"
+                      >
+                        All
+                      </FilterButton>
+                      <FilterButton 
+                        variant="deselect"
+                        onClick={deselectAllClasses}
+                        title="Deselect All"
+                      >
+                        None
+                      </FilterButton>
+                    </div>
+                  </h4>
+                  <ClassFilterGrid>
+                    {availableClasses.map(className => {
+                      const classColor = classColors[className] || '#00ff00';
+                      const isSelected = selectedClasses.has(className);
+                      const classCount = getPredictions(results).filter(
+                        pred => (pred.class || pred.label || 'Unknown') === className
+                      ).length;
+                      
+                      return (
+                        <ClassFilterItem
+                          key={className}
+                          classColor={classColor}
+                          isSelected={isSelected}
+                          onClick={() => toggleClass(className)}
+                          title={`Toggle ${className} (${classCount} detections)`}
+                        >
+                          <div className="class-header">
+                            <div className="class-color"></div>
+                            <span className="class-name">{className}</span>
+                            <span className="class-count">{classCount}</span>
+                          </div>
+                        </ClassFilterItem>
+                      );
+                    })}
+                  </ClassFilterGrid>
+                </ClassFilterSection>
+              )}
 
               {/* Toggle Details Button */}
               <ToggleButton 
@@ -930,6 +1320,46 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
               {/* Expandable Details Section */}
               <DetailsSection isExpanded={showDetails}>
+                {/* Class Summary Section - MOVED TO TOP */}
+                <ClassSummarySection>
+                  <h4>
+                    <i className="fas fa-tags"></i>
+                    Detected Classes
+                  </h4>
+                  <ClassGrid>
+                    {Object.entries(classColors)
+                      .filter(([className]) => selectedClasses.has(className))
+                      .map(([className, color]) => {
+                        const classDetections = getFilteredPredictions(getPredictions(results)).filter(
+                          pred => (pred.class || pred.label || 'Unknown') === className
+                        );
+                        const avgConfidence = classDetections.length > 0 
+                          ? classDetections.reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / classDetections.length
+                          : 0;
+                      
+                      return (
+                        <ClassItem key={className} classColor={color}>
+                          <div className="class-header">
+                            <div className="class-color" />
+                            <div className="class-name">{className}</div>
+                            <div className="class-count">{classDetections.length}</div>
+                          </div>
+                          <div className="class-stats">
+                            <div className="class-stat">
+                              <div className="stat-label">Avg Conf</div>
+                              <div className="stat-value">{(avgConfidence * 100).toFixed(1)}%</div>
+                            </div>
+                            <div className="class-stat">
+                              <div className="stat-label">Count</div>
+                              <div className="stat-value">{classDetections.length}</div>
+                            </div>
+                          </div>
+                        </ClassItem>
+                      );
+                    })}
+                  </ClassGrid>
+                </ClassSummarySection>
+
                 {/* Detailed Statistics */}
                 <DetailedStatsGrid>
                   <DetailedStatItem>
@@ -941,8 +1371,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   
                   <DetailedStatItem>
                     <div className="stat-icon"><i className="fas fa-search"></i></div>
-                    <div className="stat-label">Detections</div>
-                    <div className="stat-value">{getPredictions(results).length}</div>
+                    <div className="stat-label">Filtered Detections</div>
+                    <div className="stat-value">{getFilteredPredictions(getPredictions(results)).length}</div>
                     <div className="stat-unit">objects</div>
                   </DetailedStatItem>
                   
@@ -969,10 +1399,10 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   
                   <DetailedStatItem>
                     <div className="stat-icon"><i className="fas fa-percentage"></i></div>
-                    <div className="stat-label">Avg Confidence</div>
+                    <div className="stat-label">Filtered Avg Conf</div>
                     <div className="stat-value">
-                      {getPredictions(results).length > 0 
-                        ? (getPredictions(results).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getPredictions(results).length * 100).toFixed(1)
+                      {getFilteredPredictions(getPredictions(results)).length > 0 
+                        ? (getFilteredPredictions(getPredictions(results)).reduce((sum, pred) => sum + (pred.confidence || pred.score || 0), 0) / getFilteredPredictions(getPredictions(results)).length * 100).toFixed(1)
                         : '0'}
                     </div>
                     <div className="stat-unit">percent</div>
@@ -980,7 +1410,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                 </DetailedStatsGrid>
 
                 {/* Confidence Distribution */}
-                {getPredictions(results).length > 0 && (
+                {getFilteredPredictions(getPredictions(results)).length > 0 && (
                   <div style={{
                     background: 'var(--background-primary)',
                     padding: '15px',
@@ -993,9 +1423,9 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       fontSize: '14px',
                       fontWeight: 600,
                       marginBottom: '12px'
-                    }}>Confidence Distribution</div>
+                    }}>Filtered Confidence Distribution</div>
                     {(() => {
-                      const dist = getConfidenceDistribution(getPredictions(results));
+                      const dist = getConfidenceDistribution(getFilteredPredictions(getPredictions(results)));
                       return (
                         <>
                           <div style={{
@@ -1099,51 +1529,6 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     })()}
                   </div>
                 )}
-
-                {/* Predictions List */}
-                <DetectionsList>
-                  <DetectionHeader>
-                    <span>Detections</span>
-                    <span className="count-badge">{getPredictions(results).length}</span>
-                  </DetectionHeader>
-                  <ScrollableDetectionContent>
-                    {getPredictions(results).length > 0 ? (
-                      getPredictions(results).map((pred: any, index: number) => (
-                        <DetectionItem key={index}>
-                          <div className="detection-info">
-                            <div className="detection-label">
-                              {pred.class || pred.label || `Class ${index}`}
-                            </div>
-                            {pred.bbox && (
-                              <div className="detection-coords">
-                                [{Math.round(pred.bbox.x)}, {Math.round(pred.bbox.y)}, {Math.round(pred.bbox.width)}×{Math.round(pred.bbox.height)}]
-                              </div>
-                            )}
-                          </div>
-                          <div className="detection-confidence">
-                            {formatConfidence(pred.confidence || pred.score || 0)}
-                          </div>
-                        </DetectionItem>
-                      ))
-                    ) : (
-                      <div style={{
-                        textAlign: 'center',
-                        padding: '40px 20px',
-                        color: 'var(--text-secondary)'
-                      }}>
-                        <i className="fas fa-search" style={{
-                          fontSize: '32px',
-                          marginBottom: '12px',
-                          opacity: 0.5
-                        }}></i>
-                        <div>No objects detected</div>
-                        <div style={{ fontSize: '12px', marginTop: '4px' }}>
-                          Try adjusting the image or model settings
-                        </div>
-                      </div>
-                    )}
-                  </ScrollableDetectionContent>
-                </DetectionsList>
               </DetailsSection>
             </>
           ) : (
@@ -1166,6 +1551,56 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           )}
         </ResultsPanel>
       </InferenceGrid>
+      
+      {/* Hover Tooltip */}
+      {hoveredDetection !== null && results && (
+        <HoverTooltip 
+          x={tooltipPosition.x} 
+          y={tooltipPosition.y} 
+          visible={hoveredDetection !== null}
+        >
+          {(() => {
+            const pred = getPredictions(results)[hoveredDetection];
+            if (!pred) return null;
+            
+            const className = pred.class || pred.label || `Class ${hoveredDetection}`;
+            const classColor = classColors[className] || '#00ff00';
+            
+            return (
+              <>
+                <div className="tooltip-header">
+                  <div className="class-indicator" style={{ backgroundColor: classColor }} />
+                  <div className="class-name">{className}</div>
+                </div>
+                <div className="tooltip-stats">
+                  <div className="tooltip-stat">
+                    <div className="label">Confidence</div>
+                    <div className="value">{formatConfidence(pred.confidence || pred.score || 0)}</div>
+                  </div>
+                  <div className="tooltip-stat">
+                    <div className="label">X, Y</div>
+                    <div className="value">
+                      {pred.bbox ? `${Math.round(pred.bbox.x)}, ${Math.round(pred.bbox.y)}` : 'N/A'}
+                    </div>
+                  </div>
+                  <div className="tooltip-stat">
+                    <div className="label">Width</div>
+                    <div className="value">
+                      {pred.bbox ? `${Math.round(pred.bbox.width)}px` : 'N/A'}
+                    </div>
+                  </div>
+                  <div className="tooltip-stat">
+                    <div className="label">Height</div>
+                    <div className="value">
+                      {pred.bbox ? `${Math.round(pred.bbox.height)}px` : 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </HoverTooltip>
+      )}
     </Container>
   );
 };
