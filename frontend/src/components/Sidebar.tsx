@@ -107,8 +107,9 @@ const NavItem = styled.div<StyledActiveProps>`
 const SidebarFooter = styled.div`
   position: absolute;
   bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  padding: 0 20px;
   text-align: center;
 `;
 
@@ -121,20 +122,64 @@ const ConnectionStatus = styled.div<StyledConnectionProps>`
   color: ${props => props.theme.colors.text.secondary};
   text-transform: uppercase;
   letter-spacing: 1px;
+  position: relative;
+  padding: 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  width: 40px;
+  height: 40px;
+  margin: 0 auto;
+  transition: all ${props => props.theme.transitions.medium};
 
+  /* Collapsed state - show just the icon with better styling */
   i {
-    font-size: 8px;
+    font-size: 12px;
     animation: pulse 2s infinite;
     color: ${props => props.$connected ? props.theme.colors.nvidia.green : props.theme.colors.status.error};
+    position: relative;
+    
+    /* Add a subtle glow effect when collapsed */
+    filter: drop-shadow(0 0 4px ${props => props.$connected ? props.theme.colors.nvidia.green : props.theme.colors.status.error});
   }
 
+  /* Text label - hidden when collapsed */
   span {
     opacity: 0;
     transition: opacity ${props => props.theme.transitions.medium};
     white-space: nowrap;
+    position: absolute;
+    left: 50px;
+    background: ${props => props.theme.colors.background.primary};
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    pointer-events: none;
   }
 
-  ${SidebarContainer}:hover & span {
+  /* Expanded state - show text and adjust layout */
+  ${SidebarContainer}:hover & {
+    width: auto;
+    gap: 8px;
+    
+    span {
+      opacity: 1;
+      position: static;
+      background: transparent;
+      padding: 0;
+      border: none;
+      box-shadow: none;
+      z-index: auto;
+    }
+    
+    i {
+      filter: none;
+    }
+  }
+
+  /* Tooltip on hover when collapsed */
+  &:hover span {
     opacity: 1;
   }
 `;
