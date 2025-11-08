@@ -636,7 +636,7 @@ const QuickStatsBar = styled.div`
 `;
 
 const HoverTooltip = styled.div<{ x: number; y: number; visible: boolean }>`
-  position: absolute;
+  position: fixed;
   left: ${props => props.x}px;
   top: ${props => props.y}px;
   background: ${props => props.theme.colors.background.primary};
@@ -1254,26 +1254,48 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       setHoveredDetection(index);
     }
     if (event && index !== null) {
-      const rect = event.currentTarget.getBoundingClientRect();
-      const tooltipWidth = 300; // approximate tooltip width
-      const tooltipHeight = 150; // approximate tooltip height
-      
-      let x = event.clientX + 15;
-      let y = event.clientY - 10;
-      
-      // Adjust if tooltip would go off-screen
-      if (x + tooltipWidth > window.innerWidth) {
-        x = event.clientX - tooltipWidth - 15;
-      }
-      if (y + tooltipHeight > window.innerHeight) {
-        y = event.clientY - tooltipHeight - 15;
-      }
-      if (y < 0) {
-        y = event.clientY + 15;
-      }
-      
-      setTooltipPosition({ x, y });
+      updateTooltipPosition(event);
     }
+  };
+
+  // Update tooltip position helper
+  const updateTooltipPosition = (event: React.MouseEvent) => {
+    const tooltipWidth = 300;
+    const tooltipHeight = 180;
+    const offsetX = -70;
+    const offsetY = 10;
+    
+    // Get mouse position
+    const mouseX = event.clientX;
+    const mouseY = event.clientY;
+    
+    // Calculate initial position (to the right and slightly below cursor)
+    let x = mouseX + offsetX;
+    let y = mouseY + offsetY;
+    
+    // Check if tooltip would overflow right edge
+    if (x + tooltipWidth > window.innerWidth) {
+      // Position to the left of cursor instead
+      x = mouseX - tooltipWidth - offsetX;
+    }
+    
+    // Check if tooltip would overflow bottom edge
+    if (y + tooltipHeight > window.innerHeight) {
+      // Position above cursor instead
+      y = mouseY - tooltipHeight - offsetY;
+    }
+    
+    // Ensure tooltip doesn't go off left edge (when positioned to the left)
+    if (x < 0) {
+      x = offsetX;
+    }
+    
+    // Ensure tooltip doesn't go off top edge (when positioned above)
+    if (y < 0) {
+      y = offsetY;
+    }
+    
+    setTooltipPosition({ x, y });
   };
 
   // Handle mouse leave to clear tooltip
@@ -1733,24 +1755,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           onMouseLeave={handleDetectionLeave}
                           onMouseMove={(e) => {
                             if (hoveredDetection === index) {
-                              const tooltipWidth = 300;
-                              const tooltipHeight = 150;
-                              
-                              let x = e.clientX + 15;
-                              let y = e.clientY - 10;
-                              
-                              // Adjust if tooltip would go off-screen
-                              if (x + tooltipWidth > window.innerWidth) {
-                                x = e.clientX - tooltipWidth - 15;
-                              }
-                              if (y + tooltipHeight > window.innerHeight) {
-                                y = e.clientY - tooltipHeight - 15;
-                              }
-                              if (y < 0) {
-                                y = e.clientY + 15;
-                              }
-                              
-                              setTooltipPosition({ x, y });
+                              updateTooltipPosition(e);
                             }
                           }}
                         >
