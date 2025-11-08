@@ -1,6 +1,18 @@
 import { createGlobalStyle } from 'styled-components';
 
 export const GlobalStyles = createGlobalStyle`
+  /* CSS Custom Properties for use in styled components */
+  :root {
+    --text-primary: ${props => props.theme.colors.text.primary};
+    --text-secondary: ${props => props.theme.colors.text.secondary};
+    --nvidia-green: ${props => props.theme.colors.nvidia.green};
+    --background-primary: ${props => props.theme.colors.background.primary};
+    --background-secondary: ${props => props.theme.colors.background.secondary};
+    --background-tertiary: ${props => props.theme.colors.background.tertiary};
+    --border-primary: ${props => props.theme.colors.border.primary};
+    --border-secondary: ${props => props.theme.colors.border.secondary};
+  }
+
   /* Reset and base styles */
   *, *::before, *::after {
     margin: 0;

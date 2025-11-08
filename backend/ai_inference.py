@@ -211,18 +211,60 @@ class AIModelManager:
         return session
     
     def _load_tensorrt_model(self, file_path):
-        """Load a TensorRT model"""
-        # This is a simplified implementation
-        # In practice, you'd need to implement proper TensorRT loading
-        logger.warning("TensorRT loading not fully implemented")
-        return None
+        """Load a TensorRT model using ultralytics YOLO"""
+        try:
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics not available for TensorRT loading")
+            
+            from ultralytics import YOLO
+            
+            # Load TensorRT engine with ultralytics
+            model = YOLO(str(file_path))
+            logger.info(f"TensorRT model loaded successfully: {file_path}")
+            return model
+            
+        except Exception as e:
+            logger.error(f"Failed to load TensorRT model: {str(e)}")
+            raise RuntimeError(f"Cannot load TensorRT model: {str(e)}")
     
     def _load_pytorch_model(self, file_path):
-        """Load a PyTorch model"""
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        model = torch.load(file_path, map_location=device)
-        model.eval()
-        return model
+        """Load a PyTorch model using ultralytics YOLO if it's a YOLO model, otherwise use standard PyTorch loading"""
+        try:
+            # First try loading as YOLO model
+            if ULTRALYTICS_AVAILABLE:
+                from ultralytics import YOLO
+                model = YOLO(str(file_path))
+                logger.info(f"YOLO PyTorch model loaded successfully: {file_path}")
+                return model
+            else:
+                # Fallback to standard PyTorch loading
+                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+                model = torch.load(file_path, map_location=device)
+                model.eval()
+                return model
+        except Exception as e:
+            logger.error(f"Failed to load PyTorch model: {str(e)}")
+            raise RuntimeError(f"Cannot load PyTorch model: {str(e)}")
+    
+    def _load_onnx_model(self, file_path):
+        """Load an ONNX model"""
+        try:
+            # First try loading as YOLO ONNX model
+            if ULTRALYTICS_AVAILABLE:
+                from ultralytics import YOLO
+                model = YOLO(str(file_path))
+                logger.info(f"YOLO ONNX model loaded successfully: {file_path}")
+                return model
+            elif ONNX_AVAILABLE:
+                # Fallback to ONNX Runtime
+                session = ort.InferenceSession(str(file_path))
+                logger.info(f"ONNX model loaded successfully: {file_path}")
+                return session
+            else:
+                raise ImportError("No ONNX loading library available")
+        except Exception as e:
+            logger.error(f"Failed to load ONNX model: {str(e)}")
+            raise RuntimeError(f"Cannot load ONNX model: {str(e)}")
     
     def _load_tensorflow_model(self, file_path):
         """Load a TensorFlow model"""
@@ -257,10 +299,15 @@ class AIModelManager:
         start_time = time.time()
         
         try:
-            if framework == 'onnx':
+            # Check if it's a YOLO model (works for all formats when loaded with ultralytics)
+            if hasattr(model, 'predict'):  # YOLO model from ultralytics
+                result = self._run_yolo_inference(model, image)
+            elif framework == 'onnx':
                 result = self._run_onnx_inference(model, image)
             elif framework == 'pytorch':
                 result = self._run_pytorch_inference(model, image)
+            elif framework == 'tensorrt':
+                result = self._run_tensorrt_inference(model, image)
             elif framework == 'tensorflow':
                 result = self._run_tensorflow_inference(model, image)
             else:
@@ -303,69 +350,134 @@ class AIModelManager:
         
         return image
     
-    def _run_onnx_inference(self, session, image):
+    def _run_yolo_inference(self, model, image):
+        """Run YOLO model inference using ultralytics"""
+        try:
+            # Run inference
+            results = model(image, verbose=False)
+            
+            # Extract predictions
+            predictions = []
+            
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for i in range(len(boxes)):
+                        # Get box coordinates, confidence, and class
+                        box = boxes.xywh[i].cpu().numpy()  # x, y, w, h
+                        conf = float(boxes.conf[i].cpu().numpy())
+                        cls = int(boxes.cls[i].cpu().numpy())
+                        
+                        # Get class name if available
+                        class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
+                        
+                        predictions.append({
+                            'class_id': cls,
+                            'class': class_name,
+                            'confidence': conf,
+                            'bbox': {
+                                'x': float(box[0]),
+                                'y': float(box[1]),
+                                'width': float(box[2]),
+                                'height': float(box[3])
+                            }
+                        })
+            
+            # Sort by confidence
+            predictions.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            return predictions
+            
+        except Exception as e:
+            logger.error(f"YOLO inference error: {str(e)}")
+            raise RuntimeError(f"YOLO inference failed: {str(e)}")
+    
+    def _run_tensorrt_inference(self, model, image):
+        """Run TensorRT model inference (using YOLO if applicable)"""
+        # Since we're loading TensorRT models with ultralytics, use YOLO inference
+        return self._run_yolo_inference(model, image)
+    
+    def _run_onnx_inference(self, model, image):
         """Run ONNX model inference"""
-        # Preprocess image
-        input_image = self._preprocess_image(image)
+        # Check if it's a YOLO model loaded with ultralytics
+        if hasattr(model, 'predict'):
+            return self._run_yolo_inference(model, image)
         
-        # Get input name
-        input_name = session.get_inputs()[0].name
-        
-        # Run inference
-        outputs = session.run(None, {input_name: input_image})
-        
-        # Process outputs (this is a generic example)
-        predictions = outputs[0]
-        
-        # Get top 5 predictions
-        top_indices = np.argsort(predictions[0])[-5:][::-1]
-        top_scores = predictions[0][top_indices]
-        
-        results = []
-        for i, (idx, score) in enumerate(zip(top_indices, top_scores)):
-            results.append({
-                'class_id': int(idx),
-                'confidence': float(score),
-                'rank': i + 1
-            })
-        
-        return results
+        # Standard ONNX Runtime inference
+        try:
+            # Preprocess image
+            input_image = self._preprocess_image(image)
+            
+            # Get input name
+            input_name = model.get_inputs()[0].name
+            
+            # Run inference
+            outputs = model.run(None, {input_name: input_image})
+            
+            # Process outputs (this is a generic example)
+            predictions = outputs[0]
+            
+            # Get top 5 predictions
+            top_indices = np.argsort(predictions[0])[-5:][::-1]
+            top_scores = predictions[0][top_indices]
+            
+            results = []
+            for i, (idx, score) in enumerate(zip(top_indices, top_scores)):
+                results.append({
+                    'class_id': int(idx),
+                    'confidence': float(score),
+                    'rank': i + 1
+                })
+            
+            return results
+        except Exception as e:
+            logger.error(f"ONNX inference error: {str(e)}")
+            raise RuntimeError(f"ONNX inference failed: {str(e)}")
     
     def _run_pytorch_inference(self, model, image):
         """Run PyTorch model inference"""
-        # Preprocess image
-        transform = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
-        ])
+        # Check if it's a YOLO model loaded with ultralytics
+        if hasattr(model, 'predict'):
+            return self._run_yolo_inference(model, image)
         
-        # Convert BGR to RGB
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        input_tensor = transform(image_rgb).unsqueeze(0)
-        
-        # Move to GPU if available
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        input_tensor = input_tensor.to(device)
-        
-        with torch.no_grad():
-            outputs = model(input_tensor)
-        
-        # Process outputs
-        probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
-        top5_prob, top5_indices = torch.topk(probabilities, 5)
-        
-        results = []
-        for i, (idx, prob) in enumerate(zip(top5_indices, top5_prob)):
-            results.append({
-                'class_id': int(idx),
-                'confidence': float(prob),
-                'rank': i + 1
-            })
-        
-        return results
+        # Standard PyTorch inference
+        try:
+            # Preprocess image
+            transform = transforms.Compose([
+                transforms.ToPILImage(),
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                   std=[0.229, 0.224, 0.225])
+            ])
+            
+            # Convert BGR to RGB
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            input_tensor = transform(image_rgb).unsqueeze(0)
+            
+            # Move to GPU if available
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            input_tensor = input_tensor.to(device)
+            
+            with torch.no_grad():
+                outputs = model(input_tensor)
+            
+            # Process outputs
+            probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+            top5_prob, top5_indices = torch.topk(probabilities, 5)
+            
+            results = []
+            for i, (idx, prob) in enumerate(zip(top5_indices, top5_prob)):
+                results.append({
+                    'class_id': int(idx),
+                    'confidence': float(prob),
+                    'rank': i + 1
+                })
+            
+            return results
+        except Exception as e:
+            logger.error(f"PyTorch inference error: {str(e)}")
+            raise RuntimeError(f"PyTorch inference failed: {str(e)}")
     
     def _run_tensorflow_inference(self, model, image):
         """Run TensorFlow model inference"""
