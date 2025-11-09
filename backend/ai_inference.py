@@ -656,6 +656,10 @@ class AIModelManager:
         model_info = model_data['info']
         framework = model_info['framework']
         
+        # Store original image dimensions before any processing
+        original_height, original_width = image.shape[:2]
+        logger.info(f"Original image dimensions: {original_width}x{original_height}")
+        
         # Monitor and cleanup memory before inference
         mem_info = self.memory_manager.monitor_and_cleanup_if_needed()
         logger.info(f"Pre-inference GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB ({mem_info.get('usage_percent', 0):.1f}% used)")
@@ -683,6 +687,11 @@ class AIModelManager:
                 if not self.memory_manager.check_memory_available(128):
                     raise RuntimeError("Critical GPU memory shortage. Cannot perform inference.")
         
+        # Store the processed image (potentially resized) and scale factor
+        processed_image = image.copy()
+        scale_factor_x = 1.0
+        scale_factor_y = 1.0
+        
         # Preprocess image to reduce memory usage
         try:
             # Adaptive image resizing based on available memory
@@ -706,8 +715,11 @@ class AIModelManager:
                     new_height = max_size
                     new_width = int(width * (max_size / height))
                 
-                image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                processed_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+                scale_factor_x = original_width / new_width
+                scale_factor_y = original_height / new_height
                 logger.info(f"Resized image from {width}x{height} to {new_width}x{new_height} (max_size={max_size} based on {free_gb:.1f}GB free)")
+                logger.info(f"Scale factors: x={scale_factor_x:.3f}, y={scale_factor_y:.3f}")
         
         except Exception as e:
             logger.error(f"Error preprocessing image: {e}")
@@ -722,15 +734,15 @@ class AIModelManager:
             
             # Check if it's a YOLO model (works for all formats when loaded with ultralytics)
             if hasattr(model, 'predict'):  # YOLO model from ultralytics
-                result = self._run_yolo_inference(model, image)
+                result = self._run_yolo_inference(model, processed_image, original_width, original_height, scale_factor_x, scale_factor_y)
             elif framework == 'onnx':
-                result = self._run_onnx_inference(model, image)
+                result = self._run_onnx_inference(model, processed_image)
             elif framework == 'pytorch':
-                result = self._run_pytorch_inference(model, image)
+                result = self._run_pytorch_inference(model, processed_image)
             elif framework == 'tensorrt':
-                result = self._run_tensorrt_inference(model, image)
+                result = self._run_tensorrt_inference(model, processed_image)
             elif framework == 'tensorflow':
-                result = self._run_tensorflow_inference(model, image)
+                result = self._run_tensorflow_inference(model, processed_image)
             else:
                 raise ValueError(f"Inference not implemented for framework: {framework}")
             
@@ -771,7 +783,7 @@ class AIModelManager:
                 if hasattr(model, 'predict'):
                     logger.warning("Attempting CPU fallback for inference")
                     try:
-                        result = self._run_yolo_inference_cpu(model, image)
+                        result = self._run_yolo_inference_cpu(model, processed_image, original_width, original_height, scale_factor_x, scale_factor_y)
                         inference_time = time.time() - start_time
                         
                         # Still update statistics
@@ -817,7 +829,7 @@ class AIModelManager:
         
         return image
     
-    def _run_yolo_inference(self, model, image):
+    def _run_yolo_inference(self, model, image, original_width, original_height, scale_factor_x=1.0, scale_factor_y=1.0):
         """Run YOLO model inference using ultralytics with memory optimization"""
         try:
             # Set device to CPU if GPU memory is critical
@@ -833,8 +845,8 @@ class AIModelManager:
                 # Force CPU inference
                 results = model(image, device='cpu', verbose=False, half=False)
             else:
-                # GPU inference with optimizations
-                results = model(image, verbose=False, half=False, imgsz=640)  # Limit image size
+                # GPU inference with optimizations - don't force imgsz to let YOLO handle it
+                results = model(image, verbose=False, half=False)
             
             # Extract predictions
             predictions = []
@@ -845,21 +857,21 @@ class AIModelManager:
                     # Convert to CPU immediately to free GPU memory
                     boxes_cpu = boxes.cpu()
                     
-                    # Get original image dimensions for normalization
-                    orig_shape = result.orig_shape  # (height, width)
-                    img_height, img_width = orig_shape
+                    # Log the image shapes for debugging
+                    logger.info(f"YOLO result - orig_shape: {result.orig_shape}, processed image shape: {image.shape[:2]}")
+                    logger.info(f"Original image dimensions: {original_width}x{original_height}, scale factors: {scale_factor_x:.3f}x{scale_factor_y:.3f}")
                     
                     for i in range(len(boxes_cpu)):
                         # Get box coordinates, confidence, and class
-                        box = boxes_cpu.xywh[i].numpy()  # x, y, w, h in pixels
+                        box = boxes_cpu.xywh[i].numpy()  # x, y, w, h in pixels relative to the processed image
                         conf = float(boxes_cpu.conf[i].numpy())
                         cls = int(boxes_cpu.cls[i].numpy())
                         
-                        # Normalize coordinates to [0, 1] range
-                        x_center = float(box[0]) / img_width
-                        y_center = float(box[1]) / img_height
-                        width = float(box[2]) / img_width
-                        height = float(box[3]) / img_height
+                        # Scale coordinates back to original image dimensions
+                        x_center = float(box[0]) * scale_factor_x  # center x in original image pixels
+                        y_center = float(box[1]) * scale_factor_y  # center y in original image pixels
+                        width = float(box[2]) * scale_factor_x     # width in original image pixels
+                        height = float(box[3]) * scale_factor_y   # height in original image pixels
                         
                         # Get class name if available
                         class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
@@ -883,6 +895,8 @@ class AIModelManager:
             if TORCH_AVAILABLE and torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
+            logger.info(f"Generated {len(predictions)} predictions with coordinates scaled to original image {original_width}x{original_height}")
+            
             return predictions
             
         except Exception as e:
@@ -891,7 +905,7 @@ class AIModelManager:
             self.memory_manager.clear_cuda_cache()
             raise RuntimeError(f"YOLO inference failed: {str(e)}")
     
-    def _run_yolo_inference_cpu(self, model, image):
+    def _run_yolo_inference_cpu(self, model, image, original_width, original_height, scale_factor_x=1.0, scale_factor_y=1.0):
         """CPU fallback for YOLO inference when GPU memory is exhausted"""
         try:
             logger.info("Running YOLO inference on CPU as fallback")
@@ -905,21 +919,21 @@ class AIModelManager:
             for result in results:
                 boxes = result.boxes
                 if boxes is not None:
-                    # Get original image dimensions for normalization
-                    orig_shape = result.orig_shape  # (height, width)
-                    img_height, img_width = orig_shape
+                    # Log the image shapes for debugging
+                    logger.info(f"CPU YOLO result - orig_shape: {result.orig_shape}, processed image shape: {image.shape[:2]}")
+                    logger.info(f"Original image dimensions: {original_width}x{original_height}, scale factors: {scale_factor_x:.3f}x{scale_factor_y:.3f}")
                     
                     for i in range(len(boxes)):
                         # Get box coordinates, confidence, and class
-                        box = boxes.xywh[i].numpy()  # x, y, w, h in pixels
+                        box = boxes.xywh[i].numpy()  # x, y, w, h in pixels relative to the processed image
                         conf = float(boxes.conf[i].numpy())
                         cls = int(boxes.cls[i].numpy())
                         
-                        # Normalize coordinates to [0, 1] range
-                        x_center = float(box[0]) / img_width
-                        y_center = float(box[1]) / img_height
-                        width = float(box[2]) / img_width
-                        height = float(box[3]) / img_height
+                        # Scale coordinates back to original image dimensions
+                        x_center = float(box[0]) * scale_factor_x  # center x in original image pixels
+                        y_center = float(box[1]) * scale_factor_y  # center y in original image pixels
+                        width = float(box[2]) * scale_factor_x     # width in original image pixels
+                        height = float(box[3]) * scale_factor_y   # height in original image pixels
                         
                         # Get class name if available
                         class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
@@ -938,6 +952,14 @@ class AIModelManager:
             
             # Sort by confidence
             predictions.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            logger.info(f"CPU inference generated {len(predictions)} predictions with coordinates scaled to original image {original_width}x{original_height}")
+            
+            return predictions
+            
+        except Exception as e:
+            logger.error(f"CPU YOLO inference error: {str(e)}")
+            raise RuntimeError(f"CPU YOLO inference failed: {str(e)}")
             
             logger.info(f"CPU fallback completed with {len(predictions)} detections")
             return predictions

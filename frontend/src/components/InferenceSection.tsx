@@ -432,12 +432,19 @@ const AnnotatedImageContainer = styled.div`
   overflow: visible; /* Allow labels to overflow */
   background: ${props => props.theme.colors.background.primary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  /* Ensure container maintains proper sizing */
+  width: fit-content;
+  height: fit-content;
 `;
 
 const AnnotatedImage = styled.img`
   max-width: 100%;
   max-height: 400px;
+  width: auto;
+  height: auto;
   display: block;
+  object-fit: contain; /* Ensure aspect ratio is maintained */
 `;
 
 const BoundingBox = styled.div<{ 
@@ -508,21 +515,26 @@ const BoundingBoxLabel = styled.div<{
   
   /* Smart positioning to prevent clipping */
   top: ${props => {
-    const topPos = -25;
-    const bottomPos = 100;
-    // If near top of container, position below the box
-    return props.y < 15 ? `${bottomPos}%` : `${topPos}px`;
+    // If near top of container (y < 15%), position below the box
+    return props.y < 15 ? '100%' : '-25px';
   }};
   
   left: ${props => {
-    // If near right edge, align to right side of box
-    return props.x + 150 > props.containerWidth ? 'auto' : '0';
+    // If bbox x position + estimated label width would overflow, align to right side
+    const estimatedLabelWidth = 100; // approximate pixels
+    const bboxRightEdge = (props.x / 100) * props.containerWidth;
+    return bboxRightEdge + estimatedLabelWidth > props.containerWidth ? 'auto' : '0';
   }};
   
   right: ${props => {
-    // If near right edge, align to right side of box  
-    return props.x + 150 > props.containerWidth ? '0' : 'auto';
+    // If bbox would overflow, align to right side of box  
+    const estimatedLabelWidth = 100; // approximate pixels
+    const bboxRightEdge = (props.x / 100) * props.containerWidth;
+    return bboxRightEdge + estimatedLabelWidth > props.containerWidth ? '0' : 'auto';
   }};
+  
+  margin-top: ${props => props.y < 15 ? '2px' : '0'};
+  margin-bottom: ${props => props.y < 15 ? '0' : '2px'};
 `;
 
 const DetailedStatsGrid = styled.div`
@@ -1157,13 +1169,45 @@ const RouteUrl = styled.code`
   word-break: break-all;
 `;
 
+const RouteUrlContainer = styled.div`
+  position: relative;
+  flex: 1;
+  width: 100%;
+  
+  &:hover .route-copy-btn {
+    opacity: 1;
+  }
+
+  .route-copy-btn {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    background: rgba(118, 185, 0, 0.2);
+    border: 1px solid ${props => props.theme.colors.nvidia.green};
+    color: ${props => props.theme.colors.nvidia.green};
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    opacity: 0;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: ${props => props.theme.colors.nvidia.green};
+      color: #000;
+    }
+  }
+`;
+
 const RouteDescription = styled.p`
   margin: 8px 0;
   color: ${props => props.theme.colors.text.secondary};
   font-size: 14px;
 `;
 
-const CodeBlock = styled.pre`
+const CodeBlock = styled.pre<{ onCopy?: () => void }>`
+  position: relative;
   background: ${props => props.theme.colors.background.tertiary};
   border: 1px solid ${props => props.theme.colors.border.primary};
   border-radius: 6px;
@@ -1175,21 +1219,61 @@ const CodeBlock = styled.pre`
   color: ${props => props.theme.colors.text.primary};
   line-height: 1.4;
 
+  &:hover .copy-icon {
+    opacity: 1;
+  }
+
+  .copy-icon {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    color: ${props => props.theme.colors.nvidia.green};
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    font-size: 14px;
+    padding: 4px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.7);
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+    }
+  }
+
   .comment {
     color: ${props => props.theme.colors.text.secondary};
     font-style: italic;
   }
 
   .string {
-    color: #e91e63;
+    color: #ce9178;
   }
 
-  .key {
-    color: #2196f3;
+  .key, .property {
+    color: #9cdcfe;
   }
 
-  .value {
-    color: ${props => props.theme.colors.nvidia.green};
+  .value, .number {
+    color: #b5cea8;
+  }
+
+  .keyword {
+    color: #569cd6;
+    font-weight: bold;
+  }
+
+  .function {
+    color: #dcdcaa;
+  }
+
+  .curl-flag {
+    color: #4fc1ff;
+  }
+
+  .curl-url {
+    color: #ce9178;
   }
 `;
 
@@ -1303,6 +1387,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   
   // Tab state
   const [activeTab, setActiveTab] = useState<'inference' | 'api'>('inference');
+  const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
+  const [activeCodeTab, setActiveCodeTab] = useState<{[key: string]: string}>({});
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1436,7 +1522,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     navigator.clipboard.writeText(text).then(() => {
       addNotification({
         type: 'success',
-        title: 'Copied',
+        title: 'Copy Code',
         message: 'Code copied to clipboard'
       });
     }).catch(() => {
@@ -1451,6 +1537,94 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   // Get selected model info
   const getSelectedModelInfo = () => {
     return models.find(model => model.id === selectedModel);
+  };
+
+  const setCodeTab = (route: string, tab: string) => {
+    setActiveCodeTab(prev => ({ ...prev, [route]: tab }));
+  };
+
+  const getCodeTab = (route: string) => {
+    return activeCodeTab[route] || 'curl';
+  };
+
+  // Syntax highlighting helper
+  const renderHighlightedCode = (code: string, language: string) => {
+    const parts = [];
+    let lastIndex = 0;
+    
+    const patterns = {
+      curl: [
+        { regex: /(curl|POST|GET|PUT|DELETE)/g, className: 'keyword' },
+        { regex: /(-X|-F|-H|--data|--json|-d)/g, className: 'curl-flag' },
+        { regex: /(https?:\/\/[^\s"\\]+)/g, className: 'curl-url' },
+        { regex: /("(?:[^"\\]|\\.)*")/g, className: 'string' }
+      ],
+      javascript: [
+        { regex: /(const|let|var|function|async|await|fetch|new|return|method)/g, className: 'keyword' },
+        { regex: /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)/g, className: 'string' },
+        { regex: /(\/\/.*$)/gm, className: 'comment' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'number' },
+        { regex: /(\w+)(?=\s*\()/g, className: 'function' }
+      ],
+      python: [
+        { regex: /(import|from|def|class|if|else|elif|for|while|try|except|with|as|return|print)/g, className: 'keyword' },
+        { regex: /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g, className: 'string' },
+        { regex: /(#.*$)/gm, className: 'comment' },
+        { regex: /\b(\d+\.?\d*)\b/g, className: 'number' }
+      ],
+      json: [
+        { regex: /("(?:[^"\\]|\\.)*")(\s*:)/g, className: 'property', group: 1 },
+        { regex: /:\s*("(?:[^"\\]|\\.)*")/g, className: 'string', group: 1 },
+        { regex: /:\s*(\d+\.?\d*)/g, className: 'number', group: 1 },
+        { regex: /:\s*(true|false|null)/g, className: 'keyword', group: 1 }
+      ]
+    };
+
+    const langPatterns = patterns[language] || [];
+    const matches = [];
+
+    langPatterns.forEach(pattern => {
+      let match;
+      while ((match = pattern.regex.exec(code)) !== null) {
+        matches.push({
+          start: match.index,
+          end: pattern.regex.lastIndex,
+          className: pattern.className,
+          text: pattern.group ? match[pattern.group] : match[0]
+        });
+      }
+    });
+
+    // Sort matches by start position
+    matches.sort((a, b) => a.start - b.start);
+
+    // Remove overlapping matches (keep the first one)
+    const cleanMatches = [];
+    matches.forEach(match => {
+      if (!cleanMatches.some(existing => 
+        (match.start >= existing.start && match.start < existing.end) ||
+        (match.end > existing.start && match.end <= existing.end)
+      )) {
+        cleanMatches.push(match);
+      }
+    });
+
+    cleanMatches.forEach((match, index) => {
+      // Add text before this match
+      if (match.start > lastIndex) {
+        parts.push(code.substring(lastIndex, match.start));
+      }
+      // Add highlighted match
+      parts.push(<span key={index} className={match.className}>{match.text}</span>);
+      lastIndex = match.end;
+    });
+
+    // Add remaining text
+    if (lastIndex < code.length) {
+      parts.push(code.substring(lastIndex));
+    }
+
+    return parts;
   };
 
   // Handle detection hover
@@ -1512,6 +1686,23 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   useEffect(() => {
     fetchModels();
   }, [isConnected]);
+
+  // Update container dimensions when window resizes
+  useEffect(() => {
+    const handleResize = () => {
+      // Trigger re-measurement of image container if image is loaded
+      const imageElement = document.querySelector('.annotated-image') as HTMLImageElement;
+      if (imageElement) {
+        setImageContainerDimensions({
+          width: imageElement.clientWidth,
+          height: imageElement.clientHeight
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const fetchModels = async () => {
     try {
@@ -1688,57 +1879,91 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   };
 
   // Helper function to convert bounding box coordinates for display
-  const convertBboxToPercentage = (bbox: any, imageWidth: number, imageHeight: number) => {
-    if (!bbox) return null;
+  const convertBboxToPercentage = (bbox: any, imageWidth: number, imageHeight: number, containerWidth: number, containerHeight: number) => {
+    if (!bbox || !imageWidth || !imageHeight || !containerWidth || !containerHeight) return null;
     
-    // Handle different bbox formats
-    let x, y, width, height;
+    // Backend now sends coordinates in pixels relative to the original image dimensions
+    // We need to convert these to percentages relative to the container
+    
+    // Handle different bbox formats - bbox comes in pixel values from backend relative to original image
+    let pixelX, pixelY, pixelWidth, pixelHeight;
     
     if (bbox.x !== undefined && bbox.y !== undefined) {
-      // YOLO format: center x, center y, width, height (normalized 0-1)
-      // Backend now sends normalized coordinates
-      const centerX = bbox.x * 100;  // Convert to percentage
-      const centerY = bbox.y * 100;
-      const boxWidth = bbox.width * 100;
-      const boxHeight = bbox.height * 100;
+      // Center format: center x, center y, width, height (in pixels relative to original image)
+      const centerX = bbox.x;
+      const centerY = bbox.y;
+      const boxWidth = bbox.width;
+      const boxHeight = bbox.height;
       
-      // Convert center coordinates to top-left coordinates
-      x = centerX - boxWidth / 2;
-      y = centerY - boxHeight / 2;
-      width = boxWidth;
-      height = boxHeight;
+      // Convert center coordinates to top-left coordinates (still in original image pixels)
+      pixelX = centerX - boxWidth / 2;
+      pixelY = centerY - boxHeight / 2;
+      pixelWidth = boxWidth;
+      pixelHeight = boxHeight;
       
     } else if (bbox.x1 !== undefined && bbox.y1 !== undefined) {
-      // Corners format: x1, y1, x2, y2 (assumed normalized)
-      x = bbox.x1 * 100;
-      y = bbox.y1 * 100;
-      width = (bbox.x2 - bbox.x1) * 100;
-      height = (bbox.y2 - bbox.y1) * 100;
+      // Corners format: x1, y1, x2, y2 (in pixels relative to original image)
+      pixelX = bbox.x1;
+      pixelY = bbox.y1;
+      pixelWidth = bbox.x2 - bbox.x1;
+      pixelHeight = bbox.y2 - bbox.y1;
     } else {
       return null;
     }
 
+    // Convert from original image pixels to percentages relative to original image
+    const xPercent = (pixelX / imageWidth) * 100;
+    const yPercent = (pixelY / imageHeight) * 100;
+    const widthPercent = (pixelWidth / imageWidth) * 100;
+    const heightPercent = (pixelHeight / imageHeight) * 100;
+
     // Ensure coordinates are within bounds
     return {
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y)),
-      width: Math.max(0, Math.min(100 - Math.max(0, x), width)),
-      height: Math.max(0, Math.min(100 - Math.max(0, y), height))
+      x: Math.max(0, Math.min(100, xPercent)),
+      y: Math.max(0, Math.min(100, yPercent)),
+      width: Math.max(0, Math.min(100 - Math.max(0, xPercent), widthPercent)),
+      height: Math.max(0, Math.min(100 - Math.max(0, yPercent), heightPercent))
     };
   };
 
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.target as HTMLImageElement;
+    
+    // Set natural dimensions
     setImageNaturalDimensions({
       width: img.naturalWidth,
       height: img.naturalHeight
     });
     
-    // Also capture the displayed/container dimensions
-    setImageContainerDimensions({
-      width: img.clientWidth,
-      height: img.clientHeight
+    // Use a small delay to ensure the image is properly rendered before measuring
+    setTimeout(() => {
+      const currentWidth = img.clientWidth;
+      const currentHeight = img.clientHeight;
+      
+      if (currentWidth > 0 && currentHeight > 0) {
+        setImageContainerDimensions({
+          width: currentWidth,
+          height: currentHeight
+        });
+      }
+    }, 10);
+    
+    // Set up a resize observer to update container dimensions when the image size changes
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          setImageContainerDimensions({ width, height });
+        }
+      }
     });
+    
+    resizeObserver.observe(img);
+    
+    // Cleanup observer when component unmounts or image changes
+    return () => {
+      resizeObserver.disconnect();
+    };
   };
 
   return (
@@ -1948,6 +2173,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                 {annotatedImageUrl && (
                   <AnnotatedImageContainer>
                     <AnnotatedImage 
+                      className="annotated-image"
                       src={annotatedImageUrl} 
                       alt="Annotated Result"
                       onLoad={handleImageLoad}
@@ -1955,10 +2181,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     
                     {/* Render bounding boxes */}
                     {getFilteredPredictions(getPredictions(results)).map((pred: any, index: number) => {
+                      // Ensure we have valid dimensions before attempting to render bounding boxes
+                      if (imageNaturalDimensions.width === 0 || imageNaturalDimensions.height === 0) {
+                        return null;
+                      }
+                      
                       const bbox = convertBboxToPercentage(
                         pred.bbox, 
                         imageNaturalDimensions.width, 
-                        imageNaturalDimensions.height
+                        imageNaturalDimensions.height,
+                        imageContainerDimensions.width,
+                        imageContainerDimensions.height
                       );
                       
                       if (!bbox) return null;
@@ -2329,132 +2562,286 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         {/* API Routes Tab Content */}
         <TabContent visible={activeTab === 'api'}>
           <ApiRoutesContainer>
-            {selectedModel ? (
-              <>
-                {/* Selected Model Info */}
-                <ModelInfoCard>
-                  <div className="model-name">{getSelectedModelInfo()?.name || 'Unknown Model'}</div>
-                  <div className="model-details">
-                    <div className="detail-item">
-                      <span className="label">Model Name:</span>
-                      <span className="value">{getSelectedModelInfo()?.name || 'Unknown Model'}</span>
-                    </div>
+            {/* Model Selection Dropdown */}
+            <ModelInfoCard>
+              <div className="model-name">API Documentation</div>
+              <div className="model-details">
+                <div className="detail-item">
+                  <span className="label">Select Model:</span>
+                  <select
+                    value={selectedModel || ''}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    style={{
+                      background: '#2a2a2a',
+                      color: '#ffffff',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      padding: '4px 8px',
+                      minWidth: '200px'
+                    }}
+                  >
+                    <option value="">Select a model...</option>
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="detail-item">
+                  <span className="label">Base URL:</span>
+                  <span className="value">{getBackendUrl()}</span>
+                </div>
+                {selectedModel && getSelectedModelInfo() && (
+                  <>
                     <div className="detail-item">
                       <span className="label">Framework:</span>
                       <span className="value">{getSelectedModelInfo()?.framework || 'Unknown'}</span>
                     </div>
                     <div className="detail-item">
                       <span className="label">Status:</span>
-                      <span className="value">{getSelectedModelInfo()?.status === 'loaded' ? 'Loaded' : 'Not Loaded'}</span>
+                      <span className="value" style={{
+                        color: getSelectedModelInfo()?.status === 'loaded' ? '#76b900' : '#ff4757'
+                      }}>{getSelectedModelInfo()?.status === 'loaded' ? 'Loaded' : 'Not Loaded'}</span>
                     </div>
-                    <div className="detail-item">
-                      <span className="label">Base URL:</span>
-                      <span className="value">{getBackendUrl()}</span>
-                    </div>
-                  </div>
-                </ModelInfoCard>
+                  </>
+                )}
+              </div>
+            </ModelInfoCard>
 
-                {/* Inference Route */}
-                <RouteSection>
-                  <RouteHeader>
-                    <MethodBadge method="POST">POST</MethodBadge>
-                    <RouteUrl>{getBackendUrl()}/api/inference</RouteUrl>
-                  </RouteHeader>
-                  <RouteDescription>
-                    Run inference on an image using the selected model. Upload an image file and get detection results.
-                  </RouteDescription>
-                  
-                  <strong>Request Example (cURL):</strong>
-                  <CodeBlock>{`curl -X POST "${getBackendUrl()}/api/inference" \\
+            {/* API Endpoints Overview */}
+            <RouteSection>
+              <RouteHeader>
+                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#76b900' }}>
+                  <i className="fas fa-list"></i> Available API Endpoints
+                </div>
+                <div style={{ fontSize: '14px', color: '#888', marginTop: '4px' }}>
+                  Click on any endpoint to see detailed examples and documentation
+                </div>
+              </RouteHeader>
+              
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'grid', gap: '10px' }}>
+                  {/* POST /api/inference */}
+                  <div style={{ 
+                    background: '#2a2a2a', 
+                    borderRadius: '6px',
+                    border: '1px solid #444'
+                  }}>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '10px', 
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpandedRoute(expandedRoute === 'inference' ? null : 'inference')}
+                    >
+                      <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
+                      <RouteUrlContainer>
+                        <RouteUrl>{getBackendUrl()}/api/inference</RouteUrl>
+                        <button 
+                          className="route-copy-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${getBackendUrl()}/api/inference`);
+                          }}
+                        >
+                          <i className="fas fa-copy"></i>
+                        </button>
+                      </RouteUrlContainer>
+                      <i className={`fas fa-chevron-${expandedRoute === 'inference' ? 'up' : 'down'}`} style={{ color: '#76b900', marginLeft: '15px' }}></i>
+                    </div>
+                    
+                    {expandedRoute === 'inference' && (
+                      <div style={{ padding: '0 15px 15px', borderTop: '1px solid #444', margin: '0 10px', paddingTop: '15px' }}>
+                        <RouteDescription>
+                          Upload an image file and get AI detection results using the selected model.
+                          {!selectedModel && (
+                            <div style={{ color: '#ff4757', fontSize: '14px', marginTop: '8px' }}>
+                              <i className="fas fa-exclamation-triangle"></i> Select a model above to see model-specific examples
+                            </div>
+                          )}
+                        </RouteDescription>
+                        
+                        {/* Request Body Section */}
+                        <div style={{ marginTop: '20px', marginBottom: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-upload"></i> Request Body
+                          </h4>
+                          <CodeBlock language="json">
+                            <div style={{ color: '#d4d4d4' }}>
+                              {`{`}<br />
+                              &nbsp;&nbsp;<span className="property">"image"</span>: <span className="comment">// File (required) - Image file to analyze</span><br />
+                              &nbsp;&nbsp;<span className="comment">// Supported formats: JPEG, PNG, WebP, BMP</span><br />
+                              &nbsp;&nbsp;<span className="comment">// Max size: 10MB</span><br />
+                              <br />
+                              &nbsp;&nbsp;<span className="property">"model_id"</span>: <span className="string">"{selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"</span><span className="comment"> // String (required)</span><br />
+                              &nbsp;&nbsp;<span className="comment">// Available models: "YOLOv11n", "YOLOv11x"</span><br />
+                              {`}`}
+                            </div>
+                          </CodeBlock>
+                        </div>
+                        
+                        {/* Code Examples with Tabs */}
+                        <div style={{ marginTop: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-code"></i> Code Examples
+                          </h4>
+                          
+                          {/* Language Tabs */}
+                          <div style={{ 
+                            display: 'flex', 
+                            marginBottom: '10px',
+                            borderBottom: '1px solid #444'
+                          }}>
+                            {['curl', 'javascript', 'python'].map(lang => (
+                              <button
+                                key={lang}
+                                onClick={() => setCodeTab('inference', lang)}
+                                style={{
+                                  background: getCodeTab('inference') === lang ? '#76b900' : 'transparent',
+                                  color: getCodeTab('inference') === lang ? '#000' : '#888',
+                                  border: 'none',
+                                  padding: '8px 16px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px 4px 0 0',
+                                  fontSize: '14px',
+                                  fontWeight: getCodeTab('inference') === lang ? 'bold' : 'normal',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {lang === 'curl' ? 'cURL' : lang}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* cURL Tab */}
+                          {getCodeTab('inference') === 'curl' && (
+                            <CodeBlock language="curl">
+                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/api/inference" \\
   -F "image=@/path/to/your/image.jpg" \\
-  -F "model_id=${getSelectedModelInfo()?.name || selectedModel}"`}</CodeBlock>
-                  <CopyButton onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${getSelectedModelInfo()?.name || selectedModel}"`)}>
-                    <i className="fas fa-copy"></i> Copy cURL
-                  </CopyButton>
+  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`, 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
 
-                  <strong>Request Example (JavaScript):</strong>
-                  <CodeBlock>{`const formData = new FormData();
-formData.append('image', imageFile); // File object
-formData.append('model_id', '${getSelectedModelInfo()?.name || selectedModel}');
+                          {/* JavaScript Tab */}
+                          {getCodeTab('inference') === 'javascript' && (
+                            <CodeBlock language="javascript">
+                              {renderHighlightedCode(`const formData = new FormData();
+formData.append('image', imageFile);
+formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
 
 const response = await fetch('${getBackendUrl()}/api/inference', {
   method: 'POST',
   body: formData
 });
 
-const data = await response.json();
-console.log(data);`}</CodeBlock>
-                  <CopyButton onClick={() => copyToClipboard(`const formData = new FormData();\nformData.append('image', imageFile); // File object\nformData.append('model_id', '${getSelectedModelInfo()?.name || selectedModel}');\n\nconst response = await fetch('${getBackendUrl()}/api/inference', {\n  method: 'POST',\n  body: formData\n});\n\nconst data = await response.json();\nconsole.log(data);`)}>
-                    <i className="fas fa-copy"></i> Copy JavaScript
-                  </CopyButton>
+const result = await response.json();
+console.log(result);`, 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const formData = new FormData();\nformData.append('image', imageFile);\nformData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');\n\nconst response = await fetch('${getBackendUrl()}/api/inference', {\n  method: 'POST',\n  body: formData\n});\n\nconst result = await response.json();\nconsole.log(result);`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
 
-                  <strong>Response Example:</strong>
-                  <CodeBlock>{`{
-  <span className="key">"success"</span>: <span className="value">true</span>,
-  <span className="key">"data"</span>: {
-    <span className="key">"result"</span>: {
-      <span className="key">"predictions"</span>: [
+                          {/* Python Tab */}
+                          {getCodeTab('inference') === 'python' && (
+                            <CodeBlock language="python">
+                              {renderHighlightedCode(`import requests
+
+url = "${getBackendUrl()}/api/inference"
+files = {'image': open('/path/to/your/image.jpg', 'rb')}
+data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
+
+response = requests.post(url, files=files, data=data)
+result = response.json()
+print(result)`, 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests\n\nurl = "${getBackendUrl()}/api/inference"\nfiles = {'image': open('/path/to/your/image.jpg', 'rb')}\ndata = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}\n\nresponse = requests.post(url, files=files, data=data)\nresult = response.json()\nprint(result)`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+                        </div>
+
+                        {/* Response Example */}
+                        <div style={{ marginTop: '25px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-arrow-left"></i> Response Example
+                          </h4>
+                          <CodeBlock language="json">
+                            {renderHighlightedCode(`{
+  "success": true,
+  "data": {
+    "result": {
+      "predictions": [
         {
-          <span className="key">"class_id"</span>: <span className="value">0</span>,
-          <span className="key">"class"</span>: <span className="string">"person"</span>,
-          <span className="key">"confidence"</span>: <span className="value">0.85</span>,
-          <span className="key">"bbox"</span>: {
-            <span className="key">"x"</span>: <span className="value">0.5</span>,    <span className="comment">// center x (normalized)</span>
-            <span className="key">"y"</span>: <span className="value">0.5</span>,    <span className="comment">// center y (normalized)</span>
-            <span className="key">"width"</span>: <span className="value">0.3</span>, <span className="comment">// width (normalized)</span>
-            <span className="key">"height"</span>: <span className="value">0.4</span> <span className="comment">// height (normalized)</span>
+          "class_id": 0,
+          "class": "person",
+          "confidence": 0.85,
+          "bbox": {
+            "x": 320.5,
+            "y": 240.0,
+            "width": 150.2,
+            "height": 200.8
           }
         }
       ],
-      <span className="key">"inference_time"</span>: <span className="value">0.123</span>,
-      <span className="key">"model_id"</span>: <span className="string">"${getSelectedModelInfo()?.name || selectedModel}"</span>,
-      <span className="key">"framework"</span>: <span className="string">"${getSelectedModelInfo()?.framework || 'pytorch'}"</span>
+      "inference_time": 0.123,
+      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+      "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"
     }
   }
-}`}</CodeBlock>
-                </RouteSection>
-
-                {/* Model Info Route */}
-                <RouteSection>
-                  <RouteHeader>
-                    <MethodBadge method="GET">GET</MethodBadge>
-                    <RouteUrl>{getBackendUrl()}/api/models/{selectedModel}</RouteUrl>
-                  </RouteHeader>
-                  <RouteDescription>
-                    Get detailed information about the selected model.
-                  </RouteDescription>
-                  
-                  <strong>Request Example (cURL):</strong>
-                  <CodeBlock>{`curl -X GET "${getBackendUrl()}/api/models/${selectedModel}"`}</CodeBlock>
-                  <CopyButton onClick={() => copyToClipboard(`curl -X GET "${getBackendUrl()}/api/models/${selectedModel}"`)}>
-                    <i className="fas fa-copy"></i> Copy cURL
-                  </CopyButton>
-                </RouteSection>
-
-                {/* Load Model Route */}
-                <RouteSection>
-                  <RouteHeader>
-                    <MethodBadge method="POST">POST</MethodBadge>
-                    <RouteUrl>{getBackendUrl()}/api/models/{selectedModel}/load</RouteUrl>
-                  </RouteHeader>
-                  <RouteDescription>
-                    Load the selected model into memory for inference.
-                  </RouteDescription>
-                  
-                  <strong>Request Example (cURL):</strong>
-                  <CodeBlock>{`curl -X POST "${getBackendUrl()}/api/models/${selectedModel}/load"`}</CodeBlock>
-                  <CopyButton onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/models/${selectedModel}/load"`)}>
-                    <i className="fas fa-copy"></i> Copy cURL
-                  </CopyButton>
-                </RouteSection>
-              </>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
-                <i className="fas fa-info-circle" style={{ fontSize: '48px', marginBottom: '16px', color: '#76b900' }}></i>
-                <h3>Select a Model First</h3>
-                <p>Please select a loaded model from the "Run Inference" tab to see the API routes for that model.</p>
+}`, 'json')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "success": true,\n  "data": {\n    "result": {\n      "predictions": [\n        {\n          "class_id": 0,\n          "class": "person",\n          "confidence": 0.85,\n          "bbox": {\n            "x": 320.5,\n            "y": 240.0,\n            "width": 150.2,\n            "height": 200.8\n          }\n        }\n      ],\n      "inference_time": 0.123,\n      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",\n      "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"\n    }\n  }\n}`)}>
+                            </i>
+                          </CodeBlock>
+                          
+                          {/* Response Format Notes */}
+                          <div style={{ marginTop: '15px', padding: '12px', background: '#333', borderRadius: '6px', border: '1px solid #555' }}>
+                            <strong style={{ color: '#76b900' }}>Bbox Format:</strong>
+                            <ul style={{ color: '#ccc', paddingLeft: '20px', lineHeight: '1.6', marginTop: '8px', marginBottom: '0' }}>
+                              <li><code>x, y</code> - Center coordinates in pixels</li>
+                              <li><code>width, height</code> - Dimensions in pixels</li>
+                              <li>All values are relative to the original image dimensions</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            </RouteSection>
+
+            {/* Error Handling Documentation */}
+            <RouteSection>
+              <RouteHeader>
+                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#76b900' }}>
+                  <i className="fas fa-exclamation-triangle"></i> Error Handling
+                </div>
+              </RouteHeader>
+
+              <div style={{ marginBottom: '25px' }}>
+                <strong>Common Error Response Format:</strong>
+                <CodeBlock>{`{
+  "success": false,
+  "error": "Error message description",
+  "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"
+}`}</CodeBlock>
+                
+                <div style={{ marginTop: '15px' }}>
+                  <strong>Error Types:</strong>
+                  <ul style={{ color: '#ccc', paddingLeft: '20px', lineHeight: '1.6' }}>
+                    <li><code>validation_error</code> - Invalid input parameters</li>
+                    <li><code>cuda_memory_error</code> - GPU memory exhausted</li>
+                    <li><code>inference_error</code> - Model inference failed</li>
+                    <li><code>model_not_found</code> - Requested model doesn't exist</li>
+                  </ul>
+                </div>
+              </div>
+            </RouteSection>
           </ApiRoutesContainer>
         </TabContent>
       </TabSection>
@@ -2492,22 +2879,22 @@ console.log(data);`}</CodeBlock>
                   <div className="tooltip-stat">
                     <div className="label">Center (X,Y)</div>
                     <div className="value">
-                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
-                        `${Math.round(pred.bbox.x * imageNaturalDimensions.width)}, ${Math.round(pred.bbox.y * imageNaturalDimensions.height)}` : 'N/A'}
+                      {pred.bbox ? 
+                        `${Math.round(pred.bbox.x)}, ${Math.round(pred.bbox.y)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">
                     <div className="label">Size (W,H)</div>
                     <div className="value">
-                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
-                        `${Math.round(pred.bbox.width * imageNaturalDimensions.width)}, ${Math.round(pred.bbox.height * imageNaturalDimensions.height)}` : 'N/A'}
+                      {pred.bbox ? 
+                        `${Math.round(pred.bbox.width)}, ${Math.round(pred.bbox.height)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">
                     <div className="label">Top-Left (X,Y)</div>
                     <div className="value">
-                      {pred.bbox && imageNaturalDimensions.width && imageNaturalDimensions.height ? 
-                        `${Math.round((pred.bbox.x - pred.bbox.width / 2) * imageNaturalDimensions.width)}, ${Math.round((pred.bbox.y - pred.bbox.height / 2) * imageNaturalDimensions.height)}` : 'N/A'}
+                      {pred.bbox ? 
+                        `${Math.round(pred.bbox.x - pred.bbox.width / 2)}, ${Math.round(pred.bbox.y - pred.bbox.height / 2)}` : 'N/A'}
                     </div>
                   </div>
                 </div>
