@@ -2,9 +2,35 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement,
+} from 'chart.js';
+import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import { InferenceSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+
+// Register Chart.js components
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  ArcElement
+);
 
 // Debounce utility function
 const debounce = (func: Function, wait: number) => {
@@ -2202,6 +2228,167 @@ const ActionButtons = styled.div`
   margin-left: auto;
 `;
 
+const ViewToggleButtons = styled.div`
+  display: flex;
+  gap: 2px;
+  background: ${props => props.theme.colors.background.tertiary};
+  border-radius: 8px;
+  padding: 4px;
+  margin-right: 10px;
+`;
+
+const ViewToggleButton = styled.button<{ active: boolean }>`
+  padding: 8px 16px;
+  background: ${props => props.active ? props.theme.colors.nvidia.green : 'transparent'};
+  color: ${props => props.active ? 'white' : props.theme.colors.text.secondary};
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  
+  &:hover {
+    background: ${props => props.active ? props.theme.colors.nvidia.darkGreen : props.theme.colors.background.hover};
+    color: ${props => props.active ? 'white' : props.theme.colors.text.primary};
+  }
+  
+  i {
+    font-size: 14px;
+  }
+`;
+
+const ChartContainer = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+`;
+
+const ChartGrid = styled.div`
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 32px;
+  margin: 32px 0;
+  
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+`;
+
+const ChartCard = styled.div`
+  background: linear-gradient(145deg, ${props => props.theme.colors.background.tertiary}, ${props => props.theme.colors.background.secondary});
+  border-radius: 16px;
+  padding: 28px;
+  border: 1px solid ${props => props.theme.colors.border.tertiary};
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, ${props => props.theme.colors.nvidia.green}, ${props => props.theme.colors.nvidia.lightGreen});
+    border-radius: 16px 16px 0 0;
+  }
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+  
+  h3 {
+    margin: 0 0 20px 0;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: -0.01em;
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+      font-size: 16px;
+      padding: 6px;
+      background: rgba(118, 185, 0, 0.1);
+      border-radius: 6px;
+    }
+  }
+`;
+
+const SmallChartsGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ChartStats = styled.div`
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 20px 0 28px 0;
+  padding: 16px 20px;
+  background: linear-gradient(145deg, ${props => props.theme.colors.background.tertiary}, ${props => props.theme.colors.background.secondary});
+  border-radius: 12px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+  
+  .stat {
+    flex: 1;
+    text-align: center;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: rgba(118, 185, 0, 0.05);
+    border: 1px solid rgba(118, 185, 0, 0.1);
+    transition: all 0.2s ease;
+    
+    &:hover {
+      background: rgba(118, 185, 0, 0.08);
+      border-color: rgba(118, 185, 0, 0.15);
+    }
+    
+    .value {
+      font-size: 18px;
+      font-weight: 700;
+      color: ${props => props.theme.colors.nvidia.green};
+      display: block;
+      margin-bottom: 2px;
+      line-height: 1;
+    }
+    
+    .label {
+      font-size: 11px;
+      color: ${props => props.theme.colors.text.secondary};
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      line-height: 1.2;
+    }
+  }
+`;
+
 const ExportButton = styled.button`
   padding: 8px 12px;
   background: ${props => props.theme.colors.nvidia.green};
@@ -2608,6 +2795,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   
   // Date range picker state
   const [startDate, setStartDate] = useState<Date | null>(null);
@@ -2683,6 +2871,250 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       end_date: '',
       page: 1
     });
+  };
+
+  // Chart data preparation functions
+  const prepareTimelineData = () => {
+    const timeData: {[key: string]: number} = {};
+    
+    inferenceLogs.forEach(log => {
+      const date = new Date(log.timestamp).toLocaleDateString();
+      timeData[date] = (timeData[date] || 0) + 1;
+    });
+
+    const sortedDates = Object.keys(timeData).sort((a, b) => 
+      new Date(a).getTime() - new Date(b).getTime()
+    );
+
+    return {
+      labels: sortedDates,
+      datasets: [
+        {
+          label: 'Inference Count',
+          data: sortedDates.map(date => timeData[date]),
+          borderColor: '#76B900',
+          backgroundColor: (context: any) => {
+            const chart = context.chart;
+            const { ctx, chartArea } = chart;
+            if (!chartArea) return 'rgba(118, 185, 0, 0.1)';
+            
+            const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+            gradient.addColorStop(0, 'rgba(118, 185, 0, 0.3)');
+            gradient.addColorStop(0.5, 'rgba(118, 185, 0, 0.15)');
+            gradient.addColorStop(1, 'rgba(118, 185, 0, 0.05)');
+            return gradient;
+          },
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointBackgroundColor: '#76B900',
+          pointBorderColor: '#FFFFFF',
+          pointBorderWidth: 2,
+          pointRadius: 6,
+          pointHoverRadius: 8,
+          pointHoverBackgroundColor: '#9DD922',
+          pointHoverBorderColor: '#FFFFFF',
+          pointHoverBorderWidth: 3,
+        },
+      ],
+    };
+  };
+
+  const prepareModelUsageData = () => {
+    const modelData: {[key: string]: number} = {};
+    
+    inferenceLogs.forEach(log => {
+      modelData[log.model_id] = (modelData[log.model_id] || 0) + 1;
+    });
+
+    const sortedModels = Object.entries(modelData)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10); // Top 10 models
+
+    return {
+      labels: sortedModels.map(([model]) => model),
+      datasets: [
+        {
+          label: 'Usage Count',
+          data: sortedModels.map(([, count]) => count),
+          backgroundColor: (context: any) => {
+            const chart = context.chart;
+            const { ctx } = chart;
+            const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+            gradient.addColorStop(0, '#76B900');
+            gradient.addColorStop(1, '#5A8B00');
+            return gradient;
+          },
+          borderColor: '#76B900',
+          borderWidth: 2,
+          borderRadius: 8,
+          borderSkipped: false,
+          hoverBackgroundColor: '#9DD922',
+          hoverBorderColor: '#9DD922',
+          hoverBorderWidth: 3,
+        },
+      ],
+    };
+  };
+
+  const prepareDeviceTypeData = () => {
+    const deviceData: {[key: string]: number} = {};
+    
+    inferenceLogs.forEach(log => {
+      const device = log.device_info || 'Unknown';
+      deviceData[device] = (deviceData[device] || 0) + 1;
+    });
+
+    const getDeviceColor = (deviceType: string) => {
+      switch(deviceType.toLowerCase()) {
+        case 'mobile': return '#FF6B6B';
+        case 'tablet': return '#4ECDC4';
+        case 'desktop': return '#45B7D1';
+        case 'jetson': return '#96CEB4';
+        case 'api/bot': return '#9B59B6';
+        default: return '#95A5A6';
+      }
+    };
+
+    const deviceEntries = Object.entries(deviceData);
+
+    return {
+      labels: deviceEntries.map(([device]) => device),
+      datasets: [
+        {
+          data: deviceEntries.map(([, count]) => count),
+          backgroundColor: deviceEntries.map(([device]) => getDeviceColor(device)),
+          borderWidth: 0,
+        },
+      ],
+    };
+  };
+
+  // Chart configuration options
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 1500,
+      easing: 'easeInOutQuart' as const,
+    },
+    plugins: {
+      legend: {
+        labels: {
+          color: '#FFFFFF',
+          font: {
+            size: 13,
+            weight: 600,
+            family: 'Inter, sans-serif'
+          },
+          padding: 20,
+          usePointStyle: true,
+          pointStyle: 'circle'
+        }
+      },
+      tooltip: {
+        backgroundColor: 'rgba(34, 34, 34, 0.95)',
+        titleColor: '#FFFFFF',
+        bodyColor: '#FFFFFF',
+        borderColor: '#76B900',
+        borderWidth: 2,
+        cornerRadius: 8,
+        padding: 12,
+        titleFont: {
+          size: 14,
+          weight: 600
+        },
+        bodyFont: {
+          size: 13,
+          weight: 500
+        }
+      }
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: '#CCCCCC',
+          font: {
+            size: 12,
+            weight: 500
+          }
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.08)',
+          lineWidth: 1
+        },
+        border: {
+          color: 'rgba(118, 185, 0, 0.3)',
+          width: 2
+        }
+      },
+      y: {
+        ticks: {
+          color: '#CCCCCC',
+          font: {
+            size: 12,
+            weight: 500
+          }
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.08)',
+          lineWidth: 1
+        },
+        border: {
+          color: 'rgba(118, 185, 0, 0.3)',
+          width: 2
+        }
+      }
+    }
+  };
+
+  const doughnutOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: {
+      duration: 1500,
+      easing: 'easeInOutQuart' as const,
+    },
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+        labels: {
+          color: '#FFFFFF',
+          font: {
+            size: 12,
+            weight: 600,
+            family: 'Inter, sans-serif'
+          },
+          padding: 20,
+          usePointStyle: true,
+          pointStyle: 'circle'
+        }
+      },
+      tooltip: {
+        backgroundColor: 'rgba(34, 34, 34, 0.95)',
+        titleColor: '#FFFFFF',
+        bodyColor: '#FFFFFF',
+        borderColor: '#76B900',
+        borderWidth: 2,
+        cornerRadius: 8,
+        padding: 12,
+        titleFont: {
+          size: 14,
+          weight: 600
+        },
+        bodyFont: {
+          size: 13,
+          weight: 500
+        }
+      }
+    },
+    cutout: '65%',
+    elements: {
+      arc: {
+        borderWidth: 3,
+        borderColor: '#1A1A1A'
+      }
+    }
   };
 
   // Helper function to get image dimensions text
@@ -4579,6 +5011,25 @@ print(result)`, 'python')}
                 </button>
               </SearchForm>
               
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+                <ViewToggleButtons>
+                  <ViewToggleButton 
+                    active={viewMode === 'table'} 
+                    onClick={() => setViewMode('table')}
+                  >
+                    <i className="fas fa-table" />
+                    Table View
+                  </ViewToggleButton>
+                  <ViewToggleButton 
+                    active={viewMode === 'chart'} 
+                    onClick={() => setViewMode('chart')}
+                  >
+                    <i className="fas fa-chart-line" />
+                    Chart View
+                  </ViewToggleButton>
+                </ViewToggleButtons>
+              </div>
+              
               <FilterRow>
                 <div style={{display: 'flex', gap: '15px', alignItems: 'end', flex: '1'}}>
                   <FilterGroup style={{minWidth: '160px'}}>
@@ -4704,24 +5155,27 @@ print(result)`, 'python')}
               </div>
             ) : (
               <>
-                {/* Logs Table */}
-                <Table>
-                  <thead>
-                    <tr>
-                      <th>Timestamp</th>
-                      <th>Model</th>
-                      <th>Client IP</th>
-                      <th>Device</th>
-                      <th>Device ID</th>
-                      <th>Framework</th>
-                      <th>Image Size</th>
-                      <th>Predictions</th>
-                      <th>Avg Confidence</th>
-                      <th>Processing Time</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                {viewMode === 'table' ? (
+                  /* Table View */
+                  <>
+                    {/* Logs Table */}
+                    <Table>
+                      <thead>
+                        <tr>
+                          <th>Timestamp</th>
+                          <th>Model</th>
+                          <th>Client IP</th>
+                          <th>Device</th>
+                          <th>Device ID</th>
+                          <th>Framework</th>
+                          <th>Image Size</th>
+                          <th>Predictions</th>
+                          <th>Avg Confidence</th>
+                          <th>Processing Time</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
                     {inferenceLogs.length === 0 ? (
                       <tr>
                         <td colSpan={11} style={{ textAlign: 'center', padding: '40px' }}>
@@ -4791,6 +5245,78 @@ print(result)`, 'python')}
                       <i className="fas fa-chevron-right" />
                     </PaginationButton>
                   </Pagination>
+                )}
+                  </>
+                ) : (
+                  /* Chart View */
+                  <div style={{ padding: '24px' }}>
+                    {inferenceLogs.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '60px' }}>
+                        <i className="fas fa-chart-line" style={{ fontSize: '48px', color: '#666', marginBottom: '16px' }} />
+                        <h3 style={{ color: '#ffffff', marginBottom: '8px' }}>No Data to Visualize</h3>
+                        <p style={{ color: '#999' }}>No inference logs found for the selected filters.</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Summary Stats */}
+                        <ChartStats>
+                          <div className="stat">
+                            <span className="value">{new Set(inferenceLogs.map(log => log.model_id)).size}</span>
+                            <span className="label">Unique Models</span>
+                          </div>
+                          <div className="stat">
+                            <span className="value">{new Set(inferenceLogs.map(log => log.client_ip)).size}</span>
+                            <span className="label">Unique IPs</span>
+                          </div>
+                          <div className="stat">
+                            <span className="value">
+                              {Math.round(inferenceLogs.reduce((sum, log) => {
+                                const time = parseFloat(log.processing_time?.replace('ms', '') || '0');
+                                return sum + time;
+                              }, 0) / inferenceLogs.length)}ms
+                            </span>
+                            <span className="label">Avg Processing Time</span>
+                          </div>
+                        </ChartStats>
+
+                        {/* Main Charts Grid */}
+                        <ChartGrid>
+                          {/* Timeline Chart */}
+                          <ChartCard>
+                            <h3>
+                              <i className="fas fa-chart-line" />
+                              Inference Timeline
+                            </h3>
+                            <div style={{ height: '380px', position: 'relative' }}>
+                              <Line data={prepareTimelineData()} options={chartOptions} />
+                            </div>
+                          </ChartCard>
+
+                          {/* Device Types Pie Chart */}
+                          <ChartCard>
+                            <h3>
+                              <i className="fas fa-mobile-alt" />
+                              Device Distribution
+                            </h3>
+                            <div style={{ height: '380px', position: 'relative' }}>
+                              <Doughnut data={prepareDeviceTypeData()} options={doughnutOptions} />
+                            </div>
+                          </ChartCard>
+                        </ChartGrid>
+
+                        {/* Model Usage Chart */}
+                        <ChartCard style={{ marginBottom: '32px' }}>
+                          <h3>
+                            <i className="fas fa-robot" />
+                            Top Model Performance
+                          </h3>
+                          <div style={{ height: '420px', position: 'relative' }}>
+                            <Bar data={prepareModelUsageData()} options={chartOptions} />
+                          </div>
+                        </ChartCard>
+                      </>
+                    )}
+                  </div>
                 )}
               </>
             )}
