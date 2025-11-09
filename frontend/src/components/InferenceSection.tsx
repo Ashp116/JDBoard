@@ -2893,7 +2893,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           label: 'Inference Count',
           data: sortedDates.map(date => timeData[date]),
           borderColor: '#76B900',
-          backgroundColor: (context: any) => {
+          backgroundColor: ((context: any) => {
             const chart = context.chart;
             const { ctx, chartArea } = chart;
             if (!chartArea) return 'rgba(118, 185, 0, 0.1)';
@@ -2903,7 +2903,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             gradient.addColorStop(0.5, 'rgba(118, 185, 0, 0.15)');
             gradient.addColorStop(1, 'rgba(118, 185, 0, 0.05)');
             return gradient;
-          },
+          }),
           borderWidth: 3,
           fill: true,
           tension: 0.4,
@@ -2937,14 +2937,14 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         {
           label: 'Usage Count',
           data: sortedModels.map(([, count]) => count),
-          backgroundColor: (context: any) => {
+          backgroundColor: ((context: any) => {
             const chart = context.chart;
             const { ctx } = chart;
             const gradient = ctx.createLinearGradient(0, 0, 0, 400);
             gradient.addColorStop(0, '#76B900');
             gradient.addColorStop(1, '#5A8B00');
             return gradient;
-          },
+          }),
           borderColor: '#76B900',
           borderWidth: 2,
           borderRadius: 8,
@@ -5079,23 +5079,7 @@ print(result)`, 'python')}
                         withPortal={window.innerWidth < 768}
                         portalId="date-picker-portal"
                         popperProps={{
-                          strategy: "fixed",
-                          modifiers: [
-                            {
-                              name: "offset",
-                              options: {
-                                offset: [0, 10]
-                              }
-                            },
-                            {
-                              name: "preventOverflow",
-                              options: {
-                                boundary: "viewport",
-                                altBoundary: true,
-                                padding: 20
-                              }
-                            }
-                          ]
+                          strategy: "fixed"
                         }}
                       />
                     </StyledDatePickerWrapper>
@@ -5271,7 +5255,8 @@ print(result)`, 'python')}
                           <div className="stat">
                             <span className="value">
                               {Math.round(inferenceLogs.reduce((sum, log) => {
-                                const time = parseFloat(log.processing_time?.replace('ms', '') || '0');
+                                const timeStr = String(log.processing_time || '0');
+                                const time = parseFloat(timeStr.replace('ms', '') || '0');
                                 return sum + time;
                               }, 0) / inferenceLogs.length)}ms
                             </span>

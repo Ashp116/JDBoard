@@ -694,11 +694,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         if (data.success) {
           addNotification({
             type: 'success',
+            title: 'Success',
             message: `Successfully cleared ${data.data.cleared_count} inference logs`
           });
         } else {
           addNotification({
             type: 'error',
+            title: 'Error',
             message: data.error || 'Failed to clear inference logs'
           });
         }
@@ -706,6 +708,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         console.error('Error clearing inference logs:', error);
         addNotification({
           type: 'error',
+          title: 'Error',
           message: 'Failed to clear inference logs'
         });
       } finally {
@@ -734,12 +737,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         
         addNotification({
           type: 'success',
+          title: 'Success',
           message: `Inference logs exported as ${format.toUpperCase()}`
         });
       } else {
         const data = await response.json();
         addNotification({
           type: 'error',
+          title: 'Error',
           message: data.error || 'Failed to export inference logs'
         });
       }
@@ -747,6 +752,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       console.error('Error exporting inference logs:', error);
       addNotification({
         type: 'error',
+        title: 'Error',
         message: 'Failed to export inference logs'
       });
     } finally {

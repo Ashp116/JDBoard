@@ -280,7 +280,7 @@ const PaginationButton = styled.button<{disabled?: boolean}>`
   transition: all ${props => props.theme.transitions.standard};
 
   &:hover:not(:disabled) {
-    background: ${props => props.theme.colors.nvidia.greenDark};
+    background: ${props => props.theme.colors.nvidia.darkGreen};
   }
 `;
 
@@ -333,6 +333,7 @@ export const InferenceMonitoring: React.FC = () => {
       } else {
         addNotification({
           type: 'error',
+          title: 'Error',
           message: data.error || 'Failed to fetch inference logs'
         });
       }
@@ -340,6 +341,7 @@ export const InferenceMonitoring: React.FC = () => {
       console.error('Error fetching inference logs:', error);
       addNotification({
         type: 'error',
+        title: 'Error',
         message: 'Failed to fetch inference logs'
       });
     } finally {
@@ -375,7 +377,7 @@ export const InferenceMonitoring: React.FC = () => {
     setFilters(prev => ({
       ...prev,
       [key]: value,
-      page: key !== 'page' ? 1 : value // Reset to page 1 when changing other filters
+      page: key !== 'page' ? 1 : Number(value) // Reset to page 1 when changing other filters
     }));
   };
 
