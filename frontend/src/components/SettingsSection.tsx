@@ -1128,7 +1128,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
             <Button 
               $variant="primary"
               onClick={() => {
-                onNavigate && onNavigate('inference');
+                onNavigate && onNavigate('inference/analytics');
               }}
             >
               <i className="fas fa-chart-line"></i>  

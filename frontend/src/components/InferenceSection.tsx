@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import styled, { createGlobalStyle } from 'styled-components';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -2754,6 +2755,9 @@ const EmptyState = styled.div`
 `;
 
 const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket, isConnected }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { tab, view } = useParams<{ tab?: string; view?: string }>();
   const { addNotification } = useNotifications();
   const [models, setModels] = useState<Model[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
@@ -2783,7 +2787,15 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   }>>([]);
   
   // Tab state
-  const [activeTab, setActiveTab] = useState<'inference' | 'api' | 'analytics'>('inference');
+  // Initialize tab from URL parameter, default to 'inference'
+  const getValidTab = (urlTab?: string): 'inference' | 'api' | 'analytics' => {
+    if (urlTab && ['inference', 'api', 'analytics'].includes(urlTab)) {
+      return urlTab as 'inference' | 'api' | 'analytics';
+    }
+    return 'inference';
+  };
+  
+  const [activeTab, setActiveTab] = useState<'inference' | 'api' | 'analytics'>(getValidTab(tab));
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
   const [activeCodeTab, setActiveCodeTab] = useState<{[key: string]: string}>({});
   
@@ -2813,13 +2825,48 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
+  // Initialize view mode from URL parameter, default to 'table'
+  const getValidView = (urlView?: string): 'table' | 'chart' => {
+    if (urlView && ['table', 'chart'].includes(urlView)) {
+      return urlView as 'table' | 'chart';
+    }
+    return 'table';
+  };
+  
+  const [viewMode, setViewMode] = useState<'table' | 'chart'>(getValidView(view));
   
   // Date range picker state
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [endDate, setEndDate] = useState<Date | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync state with URL parameters
+  useEffect(() => {
+    const newTab = getValidTab(tab);
+    const newView = getValidView(view);
+    
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+    }
+    if (newView !== viewMode) {
+      setViewMode(newView);
+    }
+  }, [tab, view]);
+
+  // Navigation helper functions
+  const navigateToTab = (newTab: 'inference' | 'api' | 'analytics') => {
+    const currentView = activeTab === 'analytics' ? viewMode : undefined;
+    const pathSegments = ['/inference', newTab];
+    if (newTab === 'analytics' && currentView) {
+      pathSegments.push(currentView);
+    }
+    navigate(pathSegments.join('/'));
+  };
+
+  const navigateToView = (newView: 'table' | 'chart') => {
+    navigate(`/inference/${activeTab}/${newView}`);
+  };
 
   // Generate unique colors for classes
   const generateClassColors = (detections: any[]) => {
@@ -4246,21 +4293,21 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         <TabHeader>
           <TabButton 
             active={activeTab === 'inference'} 
-            onClick={() => setActiveTab('inference')}
+            onClick={() => navigateToTab('inference')}
           >
             <i className="fas fa-play-circle"></i>
             Run Inference
           </TabButton>
           <TabButton 
             active={activeTab === 'api'} 
-            onClick={() => setActiveTab('api')}
+            onClick={() => navigateToTab('api')}
           >
             <i className="fas fa-code"></i>
             API Routes
           </TabButton>
           <TabButton 
             active={activeTab === 'analytics'} 
-            onClick={() => setActiveTab('analytics')}
+            onClick={() => navigateToTab('analytics')}
           >
             <i className="fas fa-chart-bar"></i>
             Analytics
@@ -5177,14 +5224,14 @@ print(result)`)}>
                 <ViewToggleButtons>
                   <ViewToggleButton 
                     active={viewMode === 'table'} 
-                    onClick={() => setViewMode('table')}
+                    onClick={() => navigateToView('table')}
                   >
                     <i className="fas fa-table" />
                     Table View
                   </ViewToggleButton>
                   <ViewToggleButton 
                     active={viewMode === 'chart'} 
-                    onClick={() => setViewMode('chart')}
+                    onClick={() => navigateToView('chart')}
                   >
                     <i className="fas fa-chart-line" />
                     Chart View
