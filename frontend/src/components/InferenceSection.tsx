@@ -1069,6 +1069,186 @@ const StatItem = styled.div`
   }
 `;
 
+// API Routes Tab Components
+const TabSection = styled.div`
+  margin-bottom: 30px;
+`;
+
+const TabHeader = styled.div`
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  margin-bottom: 20px;
+`;
+
+const TabButton = styled.button<{ active: boolean }>`
+  padding: 12px 20px;
+  background: ${props => props.active ? props.theme.colors.background.tertiary : 'transparent'};
+  border: none;
+  border-bottom: 2px solid ${props => props.active ? props.theme.colors.nvidia.green : 'transparent'};
+  color: ${props => props.active ? props.theme.colors.text.primary : props.theme.colors.text.secondary};
+  font-weight: ${props => props.active ? '600' : '400'};
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-radius: 6px 6px 0 0;
+
+  &:hover {
+    background: ${props => props.theme.colors.background.tertiary};
+    color: ${props => props.theme.colors.text.primary};
+  }
+
+  i {
+    margin-right: 8px;
+    color: ${props => props.active ? props.theme.colors.nvidia.green : 'inherit'};
+  }
+`;
+
+const TabContent = styled.div<{ visible: boolean }>`
+  display: ${props => props.visible ? 'block' : 'none'};
+`;
+
+const ApiRoutesContainer = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 12px;
+  padding: 20px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+`;
+
+const RouteSection = styled.div`
+  margin-bottom: 24px;
+  padding: 16px;
+  background: ${props => props.theme.colors.background.primary};
+  border-radius: 8px;
+  border-left: 4px solid ${props => props.theme.colors.nvidia.green};
+`;
+
+const RouteHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+`;
+
+const MethodBadge = styled.span<{ method: string }>`
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: ${props => {
+    switch (props.method) {
+      case 'POST': return '#ff6b35';
+      case 'GET': return '#28a745';
+      case 'DELETE': return '#dc3545';
+      default: return '#6c757d';
+    }
+  }};
+  color: white;
+`;
+
+const RouteUrl = styled.code`
+  background: ${props => props.theme.colors.background.tertiary};
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+  color: ${props => props.theme.colors.nvidia.green};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  word-break: break-all;
+`;
+
+const RouteDescription = styled.p`
+  margin: 8px 0;
+  color: ${props => props.theme.colors.text.secondary};
+  font-size: 14px;
+`;
+
+const CodeBlock = styled.pre`
+  background: ${props => props.theme.colors.background.tertiary};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  border-radius: 6px;
+  padding: 16px;
+  margin: 12px 0;
+  overflow-x: auto;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  color: ${props => props.theme.colors.text.primary};
+  line-height: 1.4;
+
+  .comment {
+    color: ${props => props.theme.colors.text.secondary};
+    font-style: italic;
+  }
+
+  .string {
+    color: #e91e63;
+  }
+
+  .key {
+    color: #2196f3;
+  }
+
+  .value {
+    color: ${props => props.theme.colors.nvidia.green};
+  }
+`;
+
+const CopyButton = styled.button`
+  padding: 6px 12px;
+  background: ${props => props.theme.colors.nvidia.green};
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 8px;
+
+  &:hover {
+    background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+
+  i {
+    margin-right: 4px;
+  }
+`;
+
+const ModelInfoCard = styled.div`
+  background: ${props => props.theme.colors.background.primary};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+
+  .model-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: ${props => props.theme.colors.text.primary};
+    margin-bottom: 8px;
+  }
+
+  .model-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .detail-item {
+    display: flex;
+    justify-content: space-between;
+    
+    .label {
+      color: ${props => props.theme.colors.text.secondary};
+    }
+    
+    .value {
+      color: ${props => props.theme.colors.text.primary};
+      font-weight: 500;
+    }
+  }
+`;
+
 interface InferenceResult {
   // Direct response from backend data field
   result?: {
@@ -1120,6 +1300,9 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     size: number;
     dimensions: { width: number; height: number };
   }>>([]);
+  
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'inference' | 'api'>('inference');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1246,6 +1429,28 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       const className = pred.class || pred.label || 'Unknown';
       return selectedClasses.has(className);
     });
+  };
+
+  // Copy to clipboard helper
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      addNotification({
+        type: 'success',
+        title: 'Copied',
+        message: 'Code copied to clipboard'
+      });
+    }).catch(() => {
+      addNotification({
+        type: 'error',
+        title: 'Copy Failed',
+        message: 'Failed to copy to clipboard'
+      });
+    });
+  };
+
+  // Get selected model info
+  const getSelectedModelInfo = () => {
+    return models.find(model => model.id === selectedModel);
   };
 
   // Handle detection hover
@@ -1545,7 +1750,28 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         </h2>
       </SectionHeader>
 
-      <InferenceGrid>
+      {/* Tab Navigation */}
+      <TabSection>
+        <TabHeader>
+          <TabButton 
+            active={activeTab === 'inference'} 
+            onClick={() => setActiveTab('inference')}
+          >
+            <i className="fas fa-play-circle"></i>
+            Run Inference
+          </TabButton>
+          <TabButton 
+            active={activeTab === 'api'} 
+            onClick={() => setActiveTab('api')}
+          >
+            <i className="fas fa-code"></i>
+            API Routes
+          </TabButton>
+        </TabHeader>
+
+        {/* Inference Tab Content */}
+        <TabContent visible={activeTab === 'inference'}>
+          <InferenceGrid>
         {/* Input Panel */}
         <InferencePanel>
           <PanelTitle>
@@ -1940,7 +2166,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   <DetailedStatItem>
                     <div className="stat-icon"><i className="fas fa-brain"></i></div>
                     <div className="stat-label">Model</div>
-                    <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '').substring(0, 8) + "..."}</div>
+                    <div className="stat-value" style={{fontSize: '12px'}}>{(results.result?.model_id || results.model_id || '')}</div>
                     <div className="stat-unit">ID</div>
                   </DetailedStatItem>
                   
@@ -2098,6 +2324,140 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           )}
         </ResultsPanel>
       </InferenceGrid>
+        </TabContent>
+
+        {/* API Routes Tab Content */}
+        <TabContent visible={activeTab === 'api'}>
+          <ApiRoutesContainer>
+            {selectedModel ? (
+              <>
+                {/* Selected Model Info */}
+                <ModelInfoCard>
+                  <div className="model-name">{getSelectedModelInfo()?.name || 'Unknown Model'}</div>
+                  <div className="model-details">
+                    <div className="detail-item">
+                      <span className="label">Model Name:</span>
+                      <span className="value">{getSelectedModelInfo()?.name || 'Unknown Model'}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="label">Framework:</span>
+                      <span className="value">{getSelectedModelInfo()?.framework || 'Unknown'}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="label">Status:</span>
+                      <span className="value">{getSelectedModelInfo()?.status === 'loaded' ? 'Loaded' : 'Not Loaded'}</span>
+                    </div>
+                    <div className="detail-item">
+                      <span className="label">Base URL:</span>
+                      <span className="value">{getBackendUrl()}</span>
+                    </div>
+                  </div>
+                </ModelInfoCard>
+
+                {/* Inference Route */}
+                <RouteSection>
+                  <RouteHeader>
+                    <MethodBadge method="POST">POST</MethodBadge>
+                    <RouteUrl>{getBackendUrl()}/api/inference</RouteUrl>
+                  </RouteHeader>
+                  <RouteDescription>
+                    Run inference on an image using the selected model. Upload an image file and get detection results.
+                  </RouteDescription>
+                  
+                  <strong>Request Example (cURL):</strong>
+                  <CodeBlock>{`curl -X POST "${getBackendUrl()}/api/inference" \\
+  -F "image=@/path/to/your/image.jpg" \\
+  -F "model_id=${getSelectedModelInfo()?.name || selectedModel}"`}</CodeBlock>
+                  <CopyButton onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${getSelectedModelInfo()?.name || selectedModel}"`)}>
+                    <i className="fas fa-copy"></i> Copy cURL
+                  </CopyButton>
+
+                  <strong>Request Example (JavaScript):</strong>
+                  <CodeBlock>{`const formData = new FormData();
+formData.append('image', imageFile); // File object
+formData.append('model_id', '${getSelectedModelInfo()?.name || selectedModel}');
+
+const response = await fetch('${getBackendUrl()}/api/inference', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log(data);`}</CodeBlock>
+                  <CopyButton onClick={() => copyToClipboard(`const formData = new FormData();\nformData.append('image', imageFile); // File object\nformData.append('model_id', '${getSelectedModelInfo()?.name || selectedModel}');\n\nconst response = await fetch('${getBackendUrl()}/api/inference', {\n  method: 'POST',\n  body: formData\n});\n\nconst data = await response.json();\nconsole.log(data);`)}>
+                    <i className="fas fa-copy"></i> Copy JavaScript
+                  </CopyButton>
+
+                  <strong>Response Example:</strong>
+                  <CodeBlock>{`{
+  <span className="key">"success"</span>: <span className="value">true</span>,
+  <span className="key">"data"</span>: {
+    <span className="key">"result"</span>: {
+      <span className="key">"predictions"</span>: [
+        {
+          <span className="key">"class_id"</span>: <span className="value">0</span>,
+          <span className="key">"class"</span>: <span className="string">"person"</span>,
+          <span className="key">"confidence"</span>: <span className="value">0.85</span>,
+          <span className="key">"bbox"</span>: {
+            <span className="key">"x"</span>: <span className="value">0.5</span>,    <span className="comment">// center x (normalized)</span>
+            <span className="key">"y"</span>: <span className="value">0.5</span>,    <span className="comment">// center y (normalized)</span>
+            <span className="key">"width"</span>: <span className="value">0.3</span>, <span className="comment">// width (normalized)</span>
+            <span className="key">"height"</span>: <span className="value">0.4</span> <span className="comment">// height (normalized)</span>
+          }
+        }
+      ],
+      <span className="key">"inference_time"</span>: <span className="value">0.123</span>,
+      <span className="key">"model_id"</span>: <span className="string">"${getSelectedModelInfo()?.name || selectedModel}"</span>,
+      <span className="key">"framework"</span>: <span className="string">"${getSelectedModelInfo()?.framework || 'pytorch'}"</span>
+    }
+  }
+}`}</CodeBlock>
+                </RouteSection>
+
+                {/* Model Info Route */}
+                <RouteSection>
+                  <RouteHeader>
+                    <MethodBadge method="GET">GET</MethodBadge>
+                    <RouteUrl>{getBackendUrl()}/api/models/{selectedModel}</RouteUrl>
+                  </RouteHeader>
+                  <RouteDescription>
+                    Get detailed information about the selected model.
+                  </RouteDescription>
+                  
+                  <strong>Request Example (cURL):</strong>
+                  <CodeBlock>{`curl -X GET "${getBackendUrl()}/api/models/${selectedModel}"`}</CodeBlock>
+                  <CopyButton onClick={() => copyToClipboard(`curl -X GET "${getBackendUrl()}/api/models/${selectedModel}"`)}>
+                    <i className="fas fa-copy"></i> Copy cURL
+                  </CopyButton>
+                </RouteSection>
+
+                {/* Load Model Route */}
+                <RouteSection>
+                  <RouteHeader>
+                    <MethodBadge method="POST">POST</MethodBadge>
+                    <RouteUrl>{getBackendUrl()}/api/models/{selectedModel}/load</RouteUrl>
+                  </RouteHeader>
+                  <RouteDescription>
+                    Load the selected model into memory for inference.
+                  </RouteDescription>
+                  
+                  <strong>Request Example (cURL):</strong>
+                  <CodeBlock>{`curl -X POST "${getBackendUrl()}/api/models/${selectedModel}/load"`}</CodeBlock>
+                  <CopyButton onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/models/${selectedModel}/load"`)}>
+                    <i className="fas fa-copy"></i> Copy cURL
+                  </CopyButton>
+                </RouteSection>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                <i className="fas fa-info-circle" style={{ fontSize: '48px', marginBottom: '16px', color: '#76b900' }}></i>
+                <h3>Select a Model First</h3>
+                <p>Please select a loaded model from the "Run Inference" tab to see the API routes for that model.</p>
+              </div>
+            )}
+          </ApiRoutesContainer>
+        </TabContent>
+      </TabSection>
       
       {/* Hover Tooltip */}
       {hoveredDetection !== null && results && (

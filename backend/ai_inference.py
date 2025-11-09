@@ -6,7 +6,6 @@ Handles model loading, inference, and management
 
 import os
 import json
-import uuid
 import time
 import logging
 import cv2
@@ -189,10 +188,47 @@ class AIModelManager:
             if self.registry_file.exists():
                 with open(self.registry_file, 'r') as f:
                     self.models_registry = json.load(f)
+                
+                # Migrate UUID-based models to name-based IDs
+                self._migrate_uuid_models()
+                
                 logger.info(f"Loaded {len(self.models_registry)} models from registry")
         except Exception as e:
             logger.error(f"Error loading models registry: {str(e)}")
             self.models_registry = {}
+    
+    def _migrate_uuid_models(self):
+        """Migrate models with UUID IDs to use model names as IDs"""
+        uuid_models = {}
+        name_models = {}
+        
+        for model_id, model_info in self.models_registry.items():
+            # Check if this looks like a UUID (36 characters with hyphens)
+            if len(model_id) == 36 and model_id.count('-') == 4:
+                # This is likely a UUID, migrate to name-based ID
+                new_id = model_info['name']
+                
+                # Handle name conflicts by appending a number
+                counter = 1
+                original_name = new_id
+                while new_id in name_models or new_id in self.models_registry:
+                    counter += 1
+                    new_id = f"{original_name}_{counter}"
+                
+                # Update the model info
+                model_info['id'] = new_id
+                name_models[new_id] = model_info
+                
+                logger.info(f"Migrated model '{model_info['name']}' from UUID {model_id} to name-based ID '{new_id}'")
+            else:
+                # Already using name-based ID
+                name_models[model_id] = model_info
+        
+        # Update the registry with migrated models
+        if len(name_models) != len(self.models_registry):
+            self.models_registry = name_models
+            self._save_registry()
+            logger.info("Model registry migration completed")
     
     def _save_registry(self):
         """Save the models registry to file"""
@@ -210,9 +246,39 @@ class AIModelManager:
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
     
+    def _validate_model_name(self, model_name):
+        """Validate that a model name is safe to use as an ID"""
+        import re
+        
+        # Remove leading/trailing whitespace
+        model_name = model_name.strip()
+        
+        # Check for empty name
+        if not model_name:
+            raise ValueError("Model name cannot be empty")
+        
+        # Check length
+        if len(model_name) > 100:
+            raise ValueError("Model name must be 100 characters or less")
+        
+        # Check for invalid characters (allow alphanumeric, spaces, hyphens, underscores)
+        if not re.match(r'^[a-zA-Z0-9\s\-_]+$', model_name):
+            raise ValueError("Model name can only contain letters, numbers, spaces, hyphens, and underscores")
+        
+        return model_name
+    
     def register_model(self, model_name, file_path, model_type='vision', original_filename=''):
         """Register a new model in the system"""
-        model_id = str(uuid.uuid4())
+        # Validate and clean the model name
+        model_name = self._validate_model_name(model_name)
+        
+        # Use model name as ID (ensure it's safe for use as an identifier)
+        model_id = model_name.strip()
+        
+        # Check if model name already exists
+        if model_id in self.models_registry:
+            raise ValueError(f"Model with name '{model_name}' already exists. Please use a different name.")
+        
         file_path = Path(file_path)
         
         # Get model info
@@ -241,7 +307,7 @@ class AIModelManager:
         self.models_registry[model_id] = model_info
         self._save_registry()
         
-        logger.info(f"Registered model: {model_name} ({model_id})")
+        logger.info(f"Registered model: {model_name}")
         return model_info
     
     def _detect_framework(self, file_extension):

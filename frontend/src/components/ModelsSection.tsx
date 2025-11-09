@@ -1063,10 +1063,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <span className="value">{model.type}</span>
                 </div>
                 <div className="info-row">
-                  <span className="label">Model ID:</span>
-                  <span className="value" title={model.id}>{model.id.substring(0, 8)}...</span>
-                </div>
-                <div className="info-row">
                   <span className="label">Size:</span>
                   <span className="value">{formatFileSize(model.file_size)}</span>
                 </div>
