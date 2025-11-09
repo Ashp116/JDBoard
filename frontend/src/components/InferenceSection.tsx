@@ -1173,10 +1173,6 @@ const RouteUrlContainer = styled.div`
   position: relative;
   flex: 1;
   width: 100%;
-  
-  &:hover .route-copy-btn {
-    opacity: 1;
-  }
 
   .route-copy-btn {
     position: absolute;
@@ -1190,7 +1186,7 @@ const RouteUrlContainer = styled.div`
     padding: 6px 8px;
     border-radius: 4px;
     font-size: 11px;
-    opacity: 0;
+    opacity: 1;
     transition: all 0.2s ease;
 
     &:hover {
@@ -1219,26 +1215,23 @@ const CodeBlock = styled.pre<{ onCopy?: () => void }>`
   color: ${props => props.theme.colors.text.primary};
   line-height: 1.4;
 
-  &:hover .copy-icon {
-    opacity: 1;
-  }
-
   .copy-icon {
     position: absolute;
     top: 8px;
     right: 8px;
     color: ${props => props.theme.colors.nvidia.green};
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.2s ease;
+    opacity: 1; /* Always visible */
+    transition: all 0.2s ease;
     font-size: 14px;
-    padding: 4px;
+    padding: 6px;
     border-radius: 4px;
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.8);
 
     &:hover {
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
+      background: ${props => props.theme.colors.nvidia.green};
+      color: #000;
+      transform: scale(1.05);
     }
   }
 
@@ -2681,6 +2674,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                               &nbsp;&nbsp;<span className="comment">// Available models: "YOLOv11n", "YOLOv11x"</span><br />
                               {`}`}
                             </div>
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "image": "// File (required) - Image file to analyze\\n  // Supported formats: JPEG, PNG, WebP, BMP\\n  // Max size: 10MB\\n\\n  "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}" // String (required)\\n  // Available models: \\"YOLOv11n\\", \\"YOLOv11x\\"\\n}"`)}>
+                            </i>
                           </CodeBlock>
                         </div>
                         
@@ -2797,16 +2792,6 @@ print(result)`, 'python')}
                             <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "success": true,\n  "data": {\n    "result": {\n      "predictions": [\n        {\n          "class_id": 0,\n          "class": "person",\n          "confidence": 0.85,\n          "bbox": {\n            "x": 320.5,\n            "y": 240.0,\n            "width": 150.2,\n            "height": 200.8\n          }\n        }\n      ],\n      "inference_time": 0.123,\n      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",\n      "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"\n    }\n  }\n}`)}>
                             </i>
                           </CodeBlock>
-                          
-                          {/* Response Format Notes */}
-                          <div style={{ marginTop: '15px', padding: '12px', background: '#333', borderRadius: '6px', border: '1px solid #555' }}>
-                            <strong style={{ color: '#76b900' }}>Bbox Format:</strong>
-                            <ul style={{ color: '#ccc', paddingLeft: '20px', lineHeight: '1.6', marginTop: '8px', marginBottom: '0' }}>
-                              <li><code>x, y</code> - Center coordinates in pixels</li>
-                              <li><code>width, height</code> - Dimensions in pixels</li>
-                              <li>All values are relative to the original image dimensions</li>
-                            </ul>
-                          </div>
                         </div>
                       </div>
                     )}
@@ -2829,7 +2814,9 @@ print(result)`, 'python')}
   "success": false,
   "error": "Error message description",
   "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"
-}`}</CodeBlock>
+}`}
+                  <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "success": false,\n  "error": "Error message description",\n  "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"\n}`)}></i>
+                </CodeBlock>
                 
                 <div style={{ marginTop: '15px' }}>
                   <strong>Error Types:</strong>
