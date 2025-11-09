@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
+import html2canvas from 'html2canvas';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -3692,30 +3693,130 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const handleExportLogs = async (format: string) => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/export?format=${format}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `inference_logs.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+      // Export the same filtered raw logs for both chart and table view
+      let exportData: string;
+      let filename: string;
+      let mimeType: string;
 
-        addNotification({
-          type: 'success',
-          title: 'Export Complete',
-          message: `Logs exported as ${format.toUpperCase()}`
-        });
+      if (format === 'json') {
+        exportData = JSON.stringify(inferenceLogs, null, 2);
+        filename = `inference_logs_${new Date().toISOString().split('T')[0]}.json`;
+        mimeType = 'application/json';
+        
+      } else if (format === 'csv') {
+        let csvContent = '';
+        
+        if (inferenceLogs.length > 0) {
+          const headers = Object.keys(inferenceLogs[0]).join(',');
+          csvContent += headers + '\n';
+          inferenceLogs.forEach(log => {
+            const values = Object.values(log).map(value => 
+              typeof value === 'string' && value.includes(',') ? `"${value}"` : value
+            ).join(',');
+            csvContent += values + '\n';
+          });
+        }
+        
+        exportData = csvContent;
+        filename = `inference_logs_${new Date().toISOString().split('T')[0]}.csv`;
+        mimeType = 'text/csv';
+        
+      } else if (format === 'txt') {
+        let txtContent = '';
+        
+        if (inferenceLogs.length > 0) {
+          inferenceLogs.forEach((log, index) => {
+            if (index > 0) txtContent += '\n';
+            Object.entries(log).forEach(([key, value]) => {
+              txtContent += `${key}: ${value}\n`;
+            });
+          });
+        }
+        
+        exportData = txtContent;
+        filename = `inference_logs_${new Date().toISOString().split('T')[0]}.txt`;
+        mimeType = 'text/plain';
+        
+      } else {
+        throw new Error(`Unsupported format: ${format}`);
       }
+      
+      // Create and download file
+      const blob = new Blob([exportData], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      addNotification({
+        type: 'success',
+        title: 'Export Complete',
+        message: `Logs exported as ${format.toUpperCase()}`
+      });
     } catch (error) {
       console.error('Error exporting logs:', error);
       addNotification({
         type: 'error',
         title: 'Export Failed',
-        message: 'Failed to export logs'
+        message: 'Failed to export data'
+      });
+    }
+  };
+
+  const handleExportChartsAsImage = async () => {
+    try {
+      setIsExportDropdownOpen(false);
+      
+      // Find the chart container
+      const chartContainer = document.querySelector('.charts-section');
+      if (!chartContainer) {
+        throw new Error('Chart container not found');
+      }
+
+      // Create canvas from chart container
+      const canvas = await html2canvas(chartContainer as HTMLElement, {
+        backgroundColor: '#1a1a1a',
+        scale: 2, // Higher resolution
+        useCORS: true,
+        allowTaint: true,
+        ignoreElements: (element) => {
+          // Ignore tooltips and other floating elements
+          return element.classList.contains('tooltip') || 
+                 element.classList.contains('dropdown-menu') ||
+                 element.getAttribute('role') === 'tooltip';
+        }
+      });
+
+      // Convert canvas to blob and download
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `inference_analytics_charts_${new Date().toISOString().split('T')[0]}.png`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+
+          addNotification({
+            type: 'success',
+            title: 'Export Complete',
+            message: 'Charts exported as PNG image'
+          });
+        }
+      }, 'image/png', 0.95);
+
+    } catch (error) {
+      console.error('Error exporting charts as image:', error);
+      addNotification({
+        type: 'error',
+        title: 'Export Failed',
+        message: 'Failed to export charts as image'
       });
     }
   };
@@ -4899,7 +5000,17 @@ const response = await fetch('${getBackendUrl()}/api/inference', {
 
 const result = await response.json();
 console.log(result);`, 'javascript')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const formData = new FormData();\nformData.append('image', imageFile);\nformData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');\n\nconst response = await fetch('${getBackendUrl()}/api/inference', {\n  method: 'POST',\n  body: formData\n});\n\nconst result = await response.json();\nconsole.log(result);`)}>
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const formData = new FormData();
+formData.append('image', imageFile);
+formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
+
+const response = await fetch('${getBackendUrl()}/api/inference', {
+  method: 'POST',
+  body: formData
+});
+
+const result = await response.json();
+console.log(result);`)}>
                               </i>
                             </CodeBlock>
                           )}
@@ -4916,7 +5027,15 @@ data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selected
 response = requests.post(url, files=files, data=data)
 result = response.json()
 print(result)`, 'python')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests\n\nurl = "${getBackendUrl()}/api/inference"\nfiles = {'image': open('/path/to/your/image.jpg', 'rb')}\ndata = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}\n\nresponse = requests.post(url, files=files, data=data)\nresult = response.json()\nprint(result)`)}>
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
+
+url = "${getBackendUrl()}/api/inference"
+files = {'image': open('/path/to/your/image.jpg', 'rb')}
+data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
+
+response = requests.post(url, files=files, data=data)
+result = response.json()
+print(result)`)}>
                               </i>
                             </CodeBlock>
                           )}
@@ -4951,7 +5070,29 @@ print(result)`, 'python')}
     }
   }
 }`, 'json')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "success": true,\n  "data": {\n    "result": {\n      "predictions": [\n        {\n          "class_id": 0,\n          "class": "person",\n          "confidence": 0.85,\n          "bbox": {\n            "x": 320.5,\n            "y": 240.0,\n            "width": 150.2,\n            "height": 200.8\n          }\n        }\n      ],\n      "inference_time": 0.123,\n      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",\n      "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"\n    }\n  }\n}`)}>
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": true,
+  "data": {
+    "result": {
+      "predictions": [
+        {
+          "class_id": 0,
+          "class": "person",
+          "confidence": 0.85,
+          "bbox": {
+            "x": 320.5,
+            "y": 240.0,
+            "width": 150.2,
+            "height": 200.8
+          }
+        }
+      ],
+      "inference_time": 0.123,
+      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+      "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"
+    }
+  }
+}`)}>
                             </i>
                           </CodeBlock>
                         </div>
@@ -4977,7 +5118,11 @@ print(result)`, 'python')}
   "error": "Error message description",
   "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"
 }`}
-                  <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "success": false,\n  "error": "Error message description",\n  "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"\n}`)}></i>
+                  <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": false,
+  "error": "Error message description",
+  "error_type": "validation_error | cuda_memory_error | inference_error | model_not_found"
+}`)}></i>
                 </CodeBlock>
                 
                 <div style={{ marginTop: '15px' }}>
@@ -5116,16 +5261,22 @@ print(result)`, 'python')}
                     <DropdownExportMenu $isOpen={isExportDropdownOpen}>
                       <DropdownExportItem onClick={() => handleDropdownExport('csv')}>
                         <i className="fas fa-file-csv" />
-                        Export as CSV
+                        CSV
                       </DropdownExportItem>
                       <DropdownExportItem onClick={() => handleDropdownExport('json')}>
                         <i className="fas fa-file-code" />
-                        Export as JSON
+                        JSON
                       </DropdownExportItem>
                       <DropdownExportItem onClick={() => handleDropdownExport('txt')}>
                         <i className="fas fa-file-alt" />
-                        Export as TXT
+                        TXT
                       </DropdownExportItem>
+                      {viewMode === 'chart' && (
+                        <DropdownExportItem onClick={handleExportChartsAsImage}>
+                          <i className="fas fa-image" />
+                          Charts as PNG
+                        </DropdownExportItem>
+                      )}
                     </DropdownExportMenu>
                   </DropdownExportContainer>
                 </div>
@@ -5233,7 +5384,7 @@ print(result)`, 'python')}
                   </>
                 ) : (
                   /* Chart View */
-                  <div style={{ padding: '24px' }}>
+                  <div className="charts-section" style={{ padding: '24px' }}>
                     {inferenceLogs.length === 0 ? (
                       <div style={{ textAlign: 'center', padding: '60px' }}>
                         <i className="fas fa-chart-line" style={{ fontSize: '48px', color: '#666', marginBottom: '16px' }} />
