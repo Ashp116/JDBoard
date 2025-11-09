@@ -717,6 +717,8 @@ def get_inference_logs():
     per_page = request.args.get('per_page', 50, type=int)
     filter_client_ip = request.args.get('client_ip', None)
     filter_model_id = request.args.get('model_id', None)
+    filter_device_info = request.args.get('device_info', None)
+    search = request.args.get('search', None)
     start_date = request.args.get('start_date', None)
     end_date = request.args.get('end_date', None)
     
@@ -728,7 +730,9 @@ def get_inference_logs():
             client_ip=filter_client_ip,
             start_date=start_date,
             end_date=end_date,
-            model_id=filter_model_id
+            model_id=filter_model_id,
+            search=search,
+            device_info=filter_device_info
         )
         
         return jsonify({

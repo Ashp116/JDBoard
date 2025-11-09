@@ -274,7 +274,8 @@ class RequestLogger:
         return f"DEV-{device_id}"
     
     def get_logs(self, log_type='requests', page=1, per_page=50, 
-                client_ip=None, start_date=None, end_date=None, model_id=None):
+                client_ip=None, start_date=None, end_date=None, model_id=None, 
+                search=None, device_info=None):
         """Get logs with pagination and filtering"""
         try:
             offset = (page - 1) * per_page
@@ -312,6 +313,36 @@ class RequestLogger:
             if model_id and log_type == 'inference':
                 where_conditions.append('model_id = ?')
                 params.append(model_id)
+            
+            # Add device_info filter for inference logs
+            if device_info and log_type == 'inference':
+                where_conditions.append('device_info = ?')
+                params.append(device_info)
+            
+            # Add search functionality - search across multiple fields
+            if search and log_type == 'inference':
+                search_term = f"%{search}%"
+                search_conditions = [
+                    'model_id LIKE ?',
+                    'client_ip LIKE ?', 
+                    'device_info LIKE ?',
+                    'framework LIKE ?',
+                    'image_size LIKE ?',
+                    'device_id LIKE ?'
+                ]
+                where_conditions.append(f"({' OR '.join(search_conditions)})")
+                # Add search term for each search condition
+                params.extend([search_term] * len(search_conditions))
+            elif search and log_type == 'requests':
+                search_term = f"%{search}%"
+                search_conditions = [
+                    'endpoint LIKE ?',
+                    'method LIKE ?',
+                    'client_ip LIKE ?',
+                    'user_agent LIKE ?'
+                ]
+                where_conditions.append(f"({' OR '.join(search_conditions)})")
+                params.extend([search_term] * len(search_conditions))
             
             if where_conditions:
                 base_query += ' WHERE ' + ' AND '.join(where_conditions)

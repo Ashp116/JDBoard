@@ -1,8 +1,200 @@
-import React, { useState, useEffect, useRef } from 'react';
-import styled from 'styled-components';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import styled, { createGlobalStyle } from 'styled-components';
+import DatePicker from 'react-datepicker';
+import 'react-datepicker/dist/react-datepicker.css';
 import { InferenceSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+
+// Debounce utility function
+const debounce = (func: Function, wait: number) => {
+  let timeout: NodeJS.Timeout;
+  return function executedFunction(...args: any[]) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
+
+// Global styles for react-datepicker theming
+const DatePickerGlobalStyle = createGlobalStyle`
+  .react-datepicker-popper {
+    z-index: 10000 !important;
+  }
+  
+  .react-datepicker {
+    background-color: #222222 !important;
+    border: 1px solid #333333 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: #FFFFFF !important;
+  }
+  
+  .react-datepicker__header {
+    background-color: #333333 !important;
+    border-bottom: 1px solid #333333 !important;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 8px 0 !important;
+  }
+  
+  .react-datepicker__current-month,
+  .react-datepicker-time__header {
+    color: #FFFFFF !important;
+    font-weight: 600 !important;
+  }
+  
+  .react-datepicker__navigation {
+    border: none !important;
+    background: none !important;
+    width: 30px !important;
+    height: 30px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 4px !important;
+    transition: background-color 0.2s !important;
+    
+    &:hover {
+      background-color: #333333 !important;
+    }
+    
+    &::before {
+      content: '' !important;
+      border: none !important;
+      width: 0 !important;
+      height: 0 !important;
+    }
+  }
+  
+  .react-datepicker__navigation--previous {
+    border: none !important;
+    
+    &::after {
+      content: '‹' !important;
+      font-size: 18px !important;
+      font-weight: bold !important;
+      color: #CCCCCC !important;
+      display: block !important;
+      line-height: 1 !important;
+    }
+    
+    &:hover::after {
+      color: #FFFFFF !important;
+    }
+  }
+  
+  .react-datepicker__navigation--next {
+    border: none !important;
+    
+    &::after {
+      content: '›' !important;
+      font-size: 18px !important;
+      font-weight: bold !important;
+      color: #CCCCCC !important;
+      display: block !important;
+      line-height: 1 !important;
+    }
+    
+    &:hover::after {
+      color: #FFFFFF !important;
+    }
+  }
+  
+  .react-datepicker__day-names {
+    border-bottom: 1px solid #333333 !important;
+    margin-bottom: 8px !important;
+  }
+  
+  .react-datepicker__day,
+  .react-datepicker__day-name {
+    color: #FFFFFF !important;
+  }
+  
+  .react-datepicker__day:hover {
+    background-color: #333333 !important;
+    border-radius: 4px !important;
+  }
+  
+  .react-datepicker__day-name {
+    color: #CCCCCC !important;
+    font-weight: 600 !important;
+  }
+  
+  .react-datepicker__day--disabled {
+    color: #999999 !important;
+  }
+  
+  .react-datepicker__day--disabled:hover {
+    background-color: transparent !important;
+    cursor: default !important;
+  }
+  
+  .react-datepicker__day--outside-month {
+    color: #999999 !important;
+  }
+  
+  .react-datepicker__day--today {
+    background-color: #333333 !important;
+    border: 1px solid #76B900 !important;
+    border-radius: 4px !important;
+    font-weight: 600 !important;
+  }
+  
+  .react-datepicker__day--selected,
+  .react-datepicker__day--in-selecting-range,
+  .react-datepicker__day--in-range {
+    background-color: #76B900 !important;
+    color: white !important;
+    border-radius: 4px !important;
+    font-weight: 600 !important;
+  }
+  
+  .react-datepicker__day--selected:hover,
+  .react-datepicker__day--in-selecting-range:hover,
+  .react-datepicker__day--in-range:hover {
+    background-color: #5A8B00 !important;
+  }
+  
+  .react-datepicker__day--range-start,
+  .react-datepicker__day--range-end {
+    background-color: #5A8B00 !important;
+    color: white !important;
+    font-weight: 700 !important;
+  }
+  
+  .react-datepicker__day--keyboard-selected {
+    background-color: #5A8B00 !important;
+    color: white !important;
+    border-radius: 4px !important;
+  }
+  
+  .react-datepicker__month-container {
+    background-color: #222222 !important;
+  }
+  
+  .react-datepicker__month {
+    background-color: #222222 !important;
+    color: #FFFFFF !important;
+  }
+  
+  .react-datepicker__week {
+    color: #FFFFFF !important;
+  }
+  
+  .react-datepicker__triangle {
+    border-bottom-color: #333333 !important;
+    border-top-color: #333333 !important;
+  }
+  
+  .react-datepicker__triangle::before {
+    border-bottom-color: #222222 !important;
+    border-top-color: #222222 !important;
+  }
+`;
 
 const Container = styled.div`
   padding: 30px;
@@ -1469,20 +1661,20 @@ const FilterGrid = styled.div`
 const FilterGroup = styled.div`
   .label {
     color: ${props => props.theme.colors.text.primary};
-    font-size: 14px;
-    margin-bottom: 5px;
+    font-size: 13px;
+    margin-bottom: 4px;
     display: block;
     font-weight: 500;
   }
 
   select {
     width: 100%;
-    padding: 8px 12px;
+    padding: 6px 8px;
     background: ${props => props.theme.colors.background.secondary};
     border: 1px solid ${props => props.theme.colors.border.secondary};
-    border-radius: 6px;
+    border-radius: 4px;
     color: ${props => props.theme.colors.text.primary};
-    font-size: 14px;
+    font-size: 13px;
 
     &:focus {
       outline: none;
@@ -1681,10 +1873,327 @@ const SearchForm = styled.form`
 
 const FilterRow = styled.div`
   display: flex;
-  gap: 20px;
-  align-items: end;
-  flex-wrap: wrap;
   justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+  margin-bottom: 20px;
+  
+  @media (max-width: 1024px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 15px;
+    
+    > div:first-child {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    
+    > div:last-child {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+  }
+  
+  @media (max-width: 768px) {
+    > div:first-child {
+      grid-template-columns: 1fr;
+    }
+    
+    > div:last-child {
+      justify-content: stretch;
+      
+      button {
+        flex: 1;
+      }
+    }
+  }
+`;
+
+const StyledDatePickerWrapper = styled.div`
+  position: relative;
+  
+  /* Global overrides for react-datepicker popper */
+  :global(.react-datepicker-popper) {
+    z-index: 10000 !important;
+    
+    .react-datepicker {
+      background-color: ${props => props.theme.colors.background.secondary} !important;
+      border: 1px solid ${props => props.theme.colors.border.secondary} !important;
+      color: ${props => props.theme.colors.text.primary} !important;
+      border-radius: 8px !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+    }
+  }
+  
+  .react-datepicker-wrapper,
+  .react-datepicker__input-container {
+    display: block;
+    width: 100%;
+  }
+
+  .react-datepicker__input-container input {
+    width: 100%;
+    padding: 12px 40px 12px 12px;
+    background: ${props => props.theme.colors.background.secondary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 8px;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: relative;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23CCCCCC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3crect x='3' y='4' width='18' height='18' rx='2' ry='2'%3e%3c/rect%3e%3cline x1='16' y1='2' x2='16' y2='6'%3e%3c/line%3e%3cline x1='8' y1='2' x2='8' y2='6'%3e%3c/line%3e%3cline x1='3' y1='10' x2='21' y2='10'%3e%3c/line%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 20px 20px;
+    
+    &:hover {
+      border-color: ${props => props.theme.colors.nvidia.green};
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+      background-color: ${props => props.theme.colors.background.hover};
+    }
+    
+    &:focus {
+      outline: none;
+      border-color: ${props => props.theme.colors.nvidia.green};
+      box-shadow: 0 0 0 3px rgba(118, 185, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.15);
+      background-color: ${props => props.theme.colors.background.hover};
+    }
+    
+    &::placeholder {
+      color: ${props => props.theme.colors.text.secondary};
+      font-weight: 400;
+    }
+    
+    &:not(:placeholder-shown) {
+      font-weight: 600;
+      color: ${props => props.theme.colors.text.primary};
+    }
+  }
+
+  .react-datepicker-popper {
+    z-index: 10000 !important;
+    position: fixed !important;
+    
+    .react-datepicker {
+      background-color: ${props => props.theme.colors.background.secondary} !important;
+      border: 1px solid ${props => props.theme.colors.border.secondary} !important;
+      border-radius: 8px !important;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+      color: ${props => props.theme.colors.text.primary} !important;
+    }
+    
+    .react-datepicker__triangle {
+      border-bottom-color: ${props => props.theme.colors.border.secondary} !important;
+      border-top-color: ${props => props.theme.colors.border.secondary} !important;
+      
+      &::before {
+        border-bottom-color: ${props => props.theme.colors.background.secondary} !important;
+        border-top-color: ${props => props.theme.colors.background.secondary} !important;
+      }
+    }
+  }
+
+  /* Global portal styles */
+  :global(#date-picker-portal) {
+    z-index: 10001 !important;
+    position: relative !important;
+    
+    .react-datepicker-popper {
+      z-index: 10002 !important;
+    }
+    
+    .react-datepicker {
+      z-index: 10002 !important;
+      background-color: ${props => props.theme.colors.background.secondary} !important;
+      border: 1px solid ${props => props.theme.colors.border.secondary} !important;
+    }
+  }
+
+  .react-datepicker__month-container {
+    background-color: ${props => props.theme.colors.background.secondary} !important;
+  }
+
+  .react-datepicker__month {
+    background-color: ${props => props.theme.colors.background.secondary} !important;
+    color: ${props => props.theme.colors.text.primary} !important;
+  }
+
+  .react-datepicker__week {
+    color: ${props => props.theme.colors.text.primary} !important;
+  }
+
+  .react-datepicker {
+    background-color: ${props => props.theme.colors.background.secondary} !important;
+    border: 1px solid ${props => props.theme.colors.border.secondary} !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
+    font-family: ${props => props.theme.fonts.body} !important;
+    z-index: 10000 !important;
+    position: relative;
+    color: ${props => props.theme.colors.text.primary} !important;
+    
+    @media (max-width: 768px) {
+      width: 280px !important;
+      font-size: 14px;
+    }
+    
+    @media (max-width: 480px) {
+      width: 260px !important;
+      font-size: 12px;
+    }
+  }
+
+  .react-datepicker__header {
+    background-color: ${props => props.theme.colors.background.tertiary} !important;
+    border-bottom: 1px solid ${props => props.theme.colors.border.secondary} !important;
+    border-radius: 8px 8px 0 0 !important;
+    padding: 8px 0 !important;
+  }
+
+  .react-datepicker__current-month,
+  .react-datepicker-time__header {
+    color: ${props => props.theme.colors.text.primary} !important;
+    font-weight: 600 !important;
+  }
+
+  .react-datepicker__navigation {
+    border: 0.45rem solid transparent !important;
+    
+    &--previous {
+      border-right-color: ${props => props.theme.colors.text.secondary} !important;
+      
+      &:hover {
+        border-right-color: ${props => props.theme.colors.text.primary} !important;
+      }
+    }
+    
+    &--next {
+      border-left-color: ${props => props.theme.colors.text.secondary} !important;
+      
+      &:hover {
+        border-left-color: ${props => props.theme.colors.text.primary} !important;
+      }
+    }
+  }
+
+  .react-datepicker__day-names {
+    border-bottom: 1px solid ${props => props.theme.colors.border.secondary} !important;
+    margin-bottom: 8px !important;
+  }
+
+  .react-datepicker__day,
+  .react-datepicker__day-name {
+    color: ${props => props.theme.colors.text.primary} !important;
+    
+    &:hover {
+      background-color: ${props => props.theme.colors.background.tertiary} !important;
+      border-radius: 4px !important;
+    }
+  }
+
+  .react-datepicker__day-name {
+    color: ${props => props.theme.colors.text.secondary} !important;
+    font-weight: 600 !important;
+  }
+
+  .react-datepicker__day--disabled {
+    color: ${props => props.theme.colors.text.muted} !important;
+    
+    &:hover {
+      background-color: transparent !important;
+      cursor: default !important;
+    }
+  }
+
+  .react-datepicker__day--outside-month {
+    color: ${props => props.theme.colors.text.muted} !important;
+  }
+
+  .react-datepicker__day--today {
+    background-color: ${props => props.theme.colors.background.tertiary} !important;
+    border: 1px solid ${props => props.theme.colors.nvidia.green} !important;
+    border-radius: 4px !important;
+    font-weight: 600 !important;
+  }
+
+  .react-datepicker__day--selected,
+  .react-datepicker__day--in-selecting-range,
+  .react-datepicker__day--in-range {
+    background-color: ${props => props.theme.colors.nvidia.green} !important;
+    color: white !important;
+    border-radius: 4px !important;
+    font-weight: 600 !important;
+    
+    &:hover {
+      background-color: ${props => props.theme.colors.nvidia.darkGreen} !important;
+    }
+  }
+
+  .react-datepicker__day--range-start,
+  .react-datepicker__day--range-end {
+    background-color: ${props => props.theme.colors.nvidia.darkGreen} !important;
+    color: white !important;
+    font-weight: 700 !important;
+  }
+
+  .react-datepicker__day--keyboard-selected {
+    background-color: ${props => props.theme.colors.nvidia.darkGreen} !important;
+    color: white !important;
+    border-radius: 4px !important;
+  }
+
+  .react-datepicker__close-icon {
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    outline: none;
+    padding: 0;
+    right: 7px;
+    top: 7px;
+    
+    &::after {
+      background-color: ${props => props.theme.colors.text.secondary};
+      border-radius: 50%;
+      bottom: 0;
+      box-sizing: border-box;
+      color: ${props => props.theme.colors.text.primary};
+      content: '×';
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: bold;
+      height: 16px;
+      line-height: 1;
+      margin: auto;
+      padding: 2px;
+      position: absolute;
+      right: 0;
+      text-align: center;
+      top: 0;
+      width: 16px;
+      
+      &:hover {
+        background-color: ${props => props.theme.colors.text.primary};
+        color: ${props => props.theme.colors.background.primary};
+      }
+    }
+  }
+
+  .react-datepicker__triangle {
+    border-bottom-color: ${props => props.theme.colors.border.secondary} !important;
+    border-top-color: ${props => props.theme.colors.border.secondary} !important;
+  }
+
+  /* Portal-specific overrides */
+  &:global(#date-picker-portal) .react-datepicker {
+    background-color: ${props => props.theme.colors.background.secondary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  }
 `;
 
 const ActionButtons = styled.div`
@@ -2081,6 +2590,9 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [filters, setFilters] = useState({
     model_id: '',
     client_ip: '',
+    device_info: '',
+    start_date: '',
+    end_date: '',
     page: 1,
     per_page: 20
   });
@@ -2095,6 +2607,11 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [selectedLogForModal, setSelectedLogForModal] = useState<InferenceLog | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  
+  // Date range picker state
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -2128,6 +2645,44 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  // Date picker helper functions
+  const handleDateRangeChange = (dates: [Date | null, Date | null]) => {
+    const [start, end] = dates;
+    setStartDate(start);
+    setEndDate(end);
+    
+    // Update filters with ISO strings
+    const newFilters = {
+      ...filters,
+      start_date: start ? start.toISOString() : '',
+      end_date: end ? end.toISOString() : '',
+      page: 1
+    };
+    setFilters(newFilters);
+    
+    // Only fetch if both dates are selected or both are cleared
+    if ((start && end) || (!start && !end)) {
+      fetchInferenceLogs(newFilters);
+    }
+  };
+
+  const clearDateRange = () => {
+    setStartDate(null);
+    setEndDate(null);
+    setFilters(prev => ({
+      ...prev,
+      start_date: '',
+      end_date: '',
+      page: 1
+    }));
+    fetchInferenceLogs({
+      ...filters,
+      start_date: '',
+      end_date: '',
+      page: 1
+    });
   };
 
   // Helper function to get image dimensions text
@@ -2350,6 +2905,16 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       }
     }
   };
+
+  // Debounced search function for smart search
+  const debouncedSearch = useCallback(
+    debounce((searchValue: string, currentFilters: any) => {
+      const newFilters = { ...currentFilters, page: 1 };
+      setFilters(newFilters);
+      fetchInferenceLogs({ ...newFilters, search: searchValue });
+    }, 500),
+    []
+  );
 
   // Get device icon based on device type
   const getDeviceIcon = (deviceType: string) => {
@@ -2600,7 +3165,10 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         per_page: searchParams.per_page?.toString() || filters.per_page.toString(),
         search: searchParams.search || searchQuery,
         model_id: searchParams.model_id || filters.model_id,
-        client_ip: searchParams.client_ip || filters.client_ip
+        client_ip: searchParams.client_ip || filters.client_ip,
+        device_info: searchParams.device_info || filters.device_info,
+        start_date: searchParams.start_date || filters.start_date,
+        end_date: searchParams.end_date || filters.end_date
       });
 
       const response = await fetch(`${getBackendUrl()}/api/logs/inference?${params}`);
@@ -2642,9 +3210,25 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    // Immediate search on form submit
     const newFilters = { ...filters, page: 1 };
     setFilters(newFilters);
     fetchInferenceLogs({ ...newFilters, search: searchQuery });
+  };
+
+  const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    
+    // Trigger debounced search if there's a value, or clear search if empty
+    if (value.trim()) {
+      debouncedSearch(value.trim(), filters);
+    } else {
+      // If search is cleared, immediately fetch without search
+      const newFilters = { ...filters, page: 1 };
+      setFilters(newFilters);
+      fetchInferenceLogs(newFilters);
+    }
   };
 
   const handleFilterChange = (key: string, value: string) => {
@@ -2657,6 +3241,21 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     const newFilters = { ...filters, page: newPage };
     setFilters(newFilters);
     fetchInferenceLogs(newFilters);
+  };
+
+  const clearFilters = () => {
+    const clearedFilters = {
+      model_id: '',
+      client_ip: '',
+      device_info: '',
+      start_date: '',
+      end_date: '',
+      page: 1,
+      per_page: 20
+    };
+    setFilters(clearedFilters);
+    setSearchQuery('');
+    fetchInferenceLogs({ ...clearedFilters, search: '' });
   };
 
   const handleExportLogs = async (format: string) => {
@@ -2768,6 +3367,25 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   useEffect(() => {
     fetchModels();
   }, [isConnected]);
+
+  // Create portal container for date picker
+  useEffect(() => {
+    let portalContainer = document.getElementById('date-picker-portal');
+    if (!portalContainer) {
+      portalContainer = document.createElement('div');
+      portalContainer.id = 'date-picker-portal';
+      portalContainer.style.zIndex = '10001';
+      portalContainer.style.position = 'relative';
+      document.body.appendChild(portalContainer);
+    }
+
+    return () => {
+      const container = document.getElementById('date-picker-portal');
+      if (container && container.parentNode) {
+        container.parentNode.removeChild(container);
+      }
+    };
+  }, []);
 
   // Update container dimensions when window resizes
   useEffect(() => {
@@ -3065,6 +3683,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   return (
     <Container>
+      <DatePickerGlobalStyle />
       <SectionHeader>
         <h2>
           <i className="fas fa-rocket"></i>
@@ -3951,9 +4570,9 @@ print(result)`, 'python')}
               <SearchForm onSubmit={handleSearch}>
                 <SearchBar
                   type="text"
-                  placeholder="Search inference logs..."
+                  placeholder="Search logs by model, IP, device, etc..."
                   value={searchQuery}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                  onChange={handleSearchInput}
                 />
                 <button type="submit">
                   <i className="fas fa-search" />
@@ -3961,12 +4580,13 @@ print(result)`, 'python')}
               </SearchForm>
               
               <FilterRow>
-                <div style={{display: 'flex', gap: '20px', alignItems: 'end', flexWrap: 'wrap', flex: '1'}}>
-                  <FilterGroup>
+                <div style={{display: 'flex', gap: '15px', alignItems: 'end', flex: '1'}}>
+                  <FilterGroup style={{minWidth: '160px'}}>
                     <label className="label">Model:</label>
                     <select
                       value={filters.model_id}
                       onChange={(e) => handleFilterChange('model_id', e.target.value)}
+                      style={{fontSize: '13px', padding: '6px 8px'}}
                     >
                       <option value="">All Models</option>
                       {models.map(model => (
@@ -3975,28 +4595,85 @@ print(result)`, 'python')}
                     </select>
                   </FilterGroup>
                   
-                  <FilterGroup>
-                    <label className="label">Client IP:</label>
-                    <input
-                      type="text"
-                      placeholder="Filter by IP..."
-                      value={filters.client_ip}
-                      onChange={(e) => handleFilterChange('client_ip', e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        background: '#2a2a2a',
-                        border: '1px solid #444',
-                        borderRadius: '6px',
-                        color: '#ffffff'
-                      }}
-                    />
+                  <FilterGroup style={{minWidth: '140px'}}>
+                    <label className="label">Device:</label>
+                    <select
+                      value={filters.device_info}
+                      onChange={(e) => handleFilterChange('device_info', e.target.value)}
+                      style={{fontSize: '13px', padding: '6px 8px'}}
+                    >
+                      <option value="">All</option>
+                      <option value="Mobile">Mobile</option>
+                      <option value="Tablet">Tablet</option>
+                      <option value="Desktop">Desktop</option>
+                      <option value="Jetson">Jetson</option>
+                      <option value="API/Bot">API/Bot</option>
+                    </select>
+                  </FilterGroup>
+                  
+                  <FilterGroup style={{minWidth: '280px'}}>
+                    <label className="label">Date Range:</label>
+                    <StyledDatePickerWrapper>
+                      <DatePicker
+                        selected={startDate}
+                        onChange={handleDateRangeChange}
+                        startDate={startDate}
+                        endDate={endDate}
+                        selectsRange
+                        placeholderText="Select date range..."
+                        dateFormat="MMM d, yyyy"
+                        isClearable={startDate || endDate ? true : false}
+                        maxDate={new Date()}
+                        showPopperArrow={false}
+                        withPortal={window.innerWidth < 768}
+                        portalId="date-picker-portal"
+                        popperProps={{
+                          strategy: "fixed",
+                          modifiers: [
+                            {
+                              name: "offset",
+                              options: {
+                                offset: [0, 10]
+                              }
+                            },
+                            {
+                              name: "preventOverflow",
+                              options: {
+                                boundary: "viewport",
+                                altBoundary: true,
+                                padding: 20
+                              }
+                            }
+                          ]
+                        }}
+                      />
+                    </StyledDatePickerWrapper>
                   </FilterGroup>
                 </div>
                 
-                <ActionButtons>
+                <div style={{display: 'flex', gap: '10px', alignItems: 'end', marginLeft: 'auto'}}>
+                  <button 
+                    onClick={clearFilters}
+                    style={{
+                      padding: '8px 12px',
+                      background: '#444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '13px',
+                      height: '32px'
+                    }}
+                  >
+                    <i className="fas fa-times" />
+                    Clear Filters
+                  </button>
+                  
                   <DropdownExportContainer className="dropdown-export-container">
-                    <DropdownExportButton onClick={toggleExportDropdown}>
+                    <DropdownExportButton onClick={toggleExportDropdown} style={{height: '32px', fontSize: '13px'}}>
                       <i className="fas fa-download" />
                       Export Data
                       <i className={`fas fa-chevron-${isExportDropdownOpen ? 'up' : 'down'}`} />
@@ -4016,7 +4693,7 @@ print(result)`, 'python')}
                       </DropdownExportItem>
                     </DropdownExportMenu>
                   </DropdownExportContainer>
-                </ActionButtons>
+                </div>
               </FilterRow>
             </FilterSection>
 
@@ -4096,23 +4773,23 @@ print(result)`, 'python')}
                 {/* Pagination */}
                 {pagination.pages > 1 && (
                   <Pagination>
-                    <button
+                    <PaginationButton
                       onClick={() => handlePageChange(pagination.page - 1)}
                       disabled={pagination.page === 1}
                     >
                       <i className="fas fa-chevron-left" />
                       Previous
-                    </button>
-                    <span>
+                    </PaginationButton>
+                    <span className="pagination-info">
                       Page {pagination.page} of {pagination.pages} ({pagination.total} total)
                     </span>
-                    <button
+                    <PaginationButton
                       onClick={() => handlePageChange(pagination.page + 1)}
                       disabled={pagination.page === pagination.pages}
                     >
                       Next
                       <i className="fas fa-chevron-right" />
-                    </button>
+                    </PaginationButton>
                   </Pagination>
                 )}
               </>
