@@ -51,9 +51,41 @@ class RequestLogger:
                         inference_time REAL NOT NULL,
                         result TEXT,
                         image_hash TEXT,
-                        session_id TEXT
+                        session_id TEXT,
+                        user_agent TEXT,
+                        device_info TEXT,
+                        framework TEXT,
+                        image_size TEXT,
+                        predictions_count INTEGER,
+                        confidence_avg REAL
                     )
                 ''')
+
+                # Add new columns to existing table if they don't exist
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN user_agent TEXT')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN device_info TEXT')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN framework TEXT')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN image_size TEXT')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN predictions_count INTEGER')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN confidence_avg REAL')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
                 
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS system_events (
@@ -104,21 +136,55 @@ class RequestLogger:
             logger.error(f"Error logging request: {str(e)}")
     
     def log_inference(self, model_id, client_ip, inference_time, result=None, 
-                     image_data=None, session_id=None):
-        """Log an inference operation"""
+                     image_data=None, session_id=None, user_agent=None, 
+                     framework=None, image_size=None):
+        """Log an inference operation with enhanced metadata"""
         try:
             # Generate hash of image data for tracking
             image_hash = None
             if image_data is not None:
                 image_hash = hashlib.md5(str(image_data).encode()).hexdigest()
             
+            # Extract predictions info from result
+            predictions_count = 0
+            confidence_avg = None
+            if result and isinstance(result, dict):
+                predictions = result.get('predictions', [])
+                if predictions and isinstance(predictions, list):
+                    predictions_count = len(predictions)
+                    # Calculate average confidence
+                    confidences = []
+                    for pred in predictions:
+                        if isinstance(pred, dict):
+                            conf = pred.get('confidence') or pred.get('score') or pred.get('prob')
+                            if conf is not None:
+                                confidences.append(float(conf))
+                    if confidences:
+                        confidence_avg = sum(confidences) / len(confidences)
+            
+            # Parse device info from user agent
+            device_info = None
+            if user_agent:
+                # Simple device detection
+                if 'Mobile' in user_agent:
+                    device_info = 'Mobile'
+                elif 'Tablet' in user_agent:
+                    device_info = 'Tablet'
+                elif 'Desktop' in user_agent:
+                    device_info = 'Desktop'
+                elif 'Jetson' in user_agent:
+                    device_info = 'Jetson'
+                else:
+                    device_info = 'Unknown'
+            
             with self.lock:
                 with sqlite3.connect(self.db_path) as conn:
                     conn.execute('''
                         INSERT INTO inference_logs 
                         (timestamp, model_id, client_ip, inference_time, 
-                         result, image_hash, session_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                         result, image_hash, session_id, user_agent, 
+                         device_info, framework, image_size, predictions_count, confidence_avg)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         datetime.now().isoformat(),
                         model_id,
@@ -126,7 +192,13 @@ class RequestLogger:
                         inference_time,
                         json.dumps(result) if result else None,
                         image_hash,
-                        session_id or self._generate_session_id(client_ip)
+                        session_id or self._generate_session_id(client_ip, user_agent),
+                        user_agent,
+                        device_info,
+                        framework,
+                        image_size,
+                        predictions_count,
+                        confidence_avg
                     ))
                     conn.commit()
         except Exception as e:
@@ -157,7 +229,7 @@ class RequestLogger:
         return hashlib.md5(data.encode()).hexdigest()[:12]
     
     def get_logs(self, log_type='requests', page=1, per_page=50, 
-                client_ip=None, start_date=None, end_date=None):
+                client_ip=None, start_date=None, end_date=None, model_id=None):
         """Get logs with pagination and filtering"""
         try:
             offset = (page - 1) * per_page
@@ -191,29 +263,32 @@ class RequestLogger:
                 where_conditions.append('timestamp <= ?')
                 params.append(end_date)
             
+            # Add model_id filter for inference logs
+            if model_id and log_type == 'inference':
+                where_conditions.append('model_id = ?')
+                params.append(model_id)
+            
             if where_conditions:
                 base_query += ' WHERE ' + ' AND '.join(where_conditions)
             
             # Add ordering and pagination
             query = f"{base_query} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-            params.extend([per_page, offset])
+            query_params = params.copy()
+            query_params.extend([per_page, offset])
             
             # Get count for pagination
             count_query = f"SELECT COUNT(*) FROM {table}"
             if where_conditions:
-                count_query += ' WHERE ' + ' AND '.join(where_conditions[:-2] if len(params) > 2 else where_conditions)
+                count_query += ' WHERE ' + ' AND '.join(where_conditions)
             
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 
                 # Get total count
-                if where_conditions:
-                    total_count = conn.execute(count_query, params[:-2]).fetchone()[0]
-                else:
-                    total_count = conn.execute(count_query).fetchone()[0]
+                total_count = conn.execute(count_query, params).fetchone()[0] if params else conn.execute(count_query).fetchone()[0]
                 
                 # Get logs
-                cursor = conn.execute(query, params)
+                cursor = conn.execute(query, query_params)
                 logs = [dict(row) for row in cursor.fetchall()]
                 
                 # Parse JSON data
@@ -460,3 +535,140 @@ class RequestLogger:
         except Exception as e:
             logger.error(f"Error getting total inference count: {str(e)}")
             return 0
+
+    def clear_inference_logs(self):
+        """Clear all inference logs"""
+        try:
+            with self.lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.execute('SELECT COUNT(*) FROM inference_logs')
+                    count_before = cursor.fetchone()[0] if cursor.fetchone() else 0
+                    
+                    cursor = conn.execute('DELETE FROM inference_logs')
+                    cleared_count = cursor.rowcount
+                    
+                    conn.commit()
+                    
+                    logger.info(f"Cleared {cleared_count} inference logs")
+                    
+                    return {
+                        'cleared_count': cleared_count,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+        except Exception as e:
+            logger.error(f"Error clearing inference logs: {str(e)}")
+            return {'cleared_count': 0, 'error': str(e)}
+
+    def get_inference_stats(self):
+        """Get detailed inference statistics"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                stats = {}
+                
+                # Total inference count
+                cursor = conn.execute('SELECT COUNT(*) FROM inference_logs')
+                stats['total_inferences'] = cursor.fetchone()[0] or 0
+                
+                # Inferences in last 24 hours
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM inference_logs 
+                    WHERE timestamp >= datetime('now', '-24 hours')
+                ''')
+                stats['inferences_24h'] = cursor.fetchone()[0] or 0
+                
+                # Inferences in last 7 days
+                cursor = conn.execute('''
+                    SELECT COUNT(*) FROM inference_logs 
+                    WHERE timestamp >= datetime('now', '-7 days')
+                ''')
+                stats['inferences_7d'] = cursor.fetchone()[0] or 0
+                
+                # Average inference time (last 100 inferences)
+                cursor = conn.execute('''
+                    SELECT AVG(inference_time) FROM (
+                        SELECT inference_time FROM inference_logs 
+                        ORDER BY timestamp DESC LIMIT 100
+                    )
+                ''')
+                result = cursor.fetchone()
+                stats['avg_inference_time'] = result[0] if result and result[0] else 0
+                
+                # Most used models (last 7 days)
+                cursor = conn.execute('''
+                    SELECT model_id, COUNT(*) as count 
+                    FROM inference_logs 
+                    WHERE timestamp >= datetime('now', '-7 days')
+                    GROUP BY model_id 
+                    ORDER BY count DESC 
+                    LIMIT 10
+                ''')
+                stats['top_models'] = [{'model_id': row[0], 'count': row[1]} 
+                                     for row in cursor.fetchall()]
+                
+                # Top clients (last 7 days)
+                cursor = conn.execute('''
+                    SELECT client_ip, COUNT(*) as count 
+                    FROM inference_logs 
+                    WHERE timestamp >= datetime('now', '-7 days')
+                    GROUP BY client_ip 
+                    ORDER BY count DESC 
+                    LIMIT 10
+                ''')
+                stats['top_clients'] = [{'client_ip': row[0], 'count': row[1]} 
+                                      for row in cursor.fetchall()]
+                
+                # Inference frequency by hour (last 24 hours)
+                cursor = conn.execute('''
+                    SELECT 
+                        strftime('%H', timestamp) as hour,
+                        COUNT(*) as count
+                    FROM inference_logs
+                    WHERE timestamp >= datetime('now', '-24 hours')
+                    GROUP BY hour
+                    ORDER BY hour
+                ''')
+                stats['hourly_distribution'] = [{'hour': row[0], 'count': row[1]} 
+                                              for row in cursor.fetchall()]
+                
+                # Performance distribution
+                cursor = conn.execute('''
+                    SELECT 
+                        CASE 
+                            WHEN inference_time < 0.1 THEN 'fast'
+                            WHEN inference_time < 0.5 THEN 'medium'
+                            ELSE 'slow'
+                        END as performance,
+                        COUNT(*) as count
+                    FROM inference_logs
+                    WHERE timestamp >= datetime('now', '-7 days')
+                    GROUP BY performance
+                ''')
+                perf_dist = {row[0]: row[1] for row in cursor.fetchall()}
+                stats['performance_distribution'] = {
+                    'fast': perf_dist.get('fast', 0),
+                    'medium': perf_dist.get('medium', 0),
+                    'slow': perf_dist.get('slow', 0)
+                }
+                
+                # Recent activity
+                cursor = conn.execute('''
+                    SELECT timestamp, model_id, client_ip, inference_time
+                    FROM inference_logs
+                    ORDER BY timestamp DESC
+                    LIMIT 10
+                ''')
+                stats['recent_inferences'] = [
+                    {
+                        'timestamp': row[0],
+                        'model_id': row[1],
+                        'client_ip': row[2],
+                        'inference_time': row[3]
+                    } for row in cursor.fetchall()
+                ]
+                
+                return stats
+                
+        except Exception as e:
+            logger.error(f"Error getting inference stats: {str(e)}")
+            return {'total_inferences': 0, 'error': str(e)}

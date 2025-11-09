@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import { useNotifications } from '../contexts/NotificationContext';
 
 // Styled component interfaces
 interface StyledActiveProps {
@@ -277,7 +278,7 @@ const InfoItem = styled.div`
   }
 `;
 
-const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected }) => {
+const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected, onNavigate }) => {
   const [settings, setSettings] = useState({
     jetsonClocks: false,
     fanMode: 'quiet',
@@ -304,7 +305,9 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     powerMode: false,
     fanMode: false,
     reboot: false,
-    shutdown: false
+    shutdown: false,
+    clearInferenceLogs: false,
+    exportInferenceLogs: false
   });
 
   const [sudoModal, setSudoModal] = useState<SudoModalState>({
@@ -318,6 +321,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     isValid: false,
     lastUsed: null
   });
+
+  const { addNotification } = useNotifications();
 
   // Fetch current settings from backend
   const fetchSettings = async () => {
@@ -676,6 +681,79 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     }
   };
 
+  const handleClearInferenceLogs = async () => {
+    if (window.confirm('Are you sure you want to clear all inference logs? This action cannot be undone.')) {
+      setLoading(prev => ({ ...prev, clearInferenceLogs: true }));
+      
+      try {
+        const response = await fetch(`${getBackendUrl()}/api/logs/inference/clear`, {
+          method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+          addNotification({
+            type: 'success',
+            message: `Successfully cleared ${data.data.cleared_count} inference logs`
+          });
+        } else {
+          addNotification({
+            type: 'error',
+            message: data.error || 'Failed to clear inference logs'
+          });
+        }
+      } catch (error) {
+        console.error('Error clearing inference logs:', error);
+        addNotification({
+          type: 'error',
+          message: 'Failed to clear inference logs'
+        });
+      } finally {
+        setLoading(prev => ({ ...prev, clearInferenceLogs: false }));
+      }
+    }
+  };
+
+  const handleExportInferenceLogs = async (format: 'json' | 'csv' | 'txt') => {
+    setLoading(prev => ({ ...prev, exportInferenceLogs: true }));
+    
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/logs/inference/export/${format}`);
+      
+      if (response.ok) {
+        // Handle file download
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `inference_logs.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        addNotification({
+          type: 'success',
+          message: `Inference logs exported as ${format.toUpperCase()}`
+        });
+      } else {
+        const data = await response.json();
+        addNotification({
+          type: 'error',
+          message: data.error || 'Failed to export inference logs'
+        });
+      }
+    } catch (error) {
+      console.error('Error exporting inference logs:', error);
+      addNotification({
+        type: 'error',
+        message: 'Failed to export inference logs'
+      });
+    } finally {
+      setLoading(prev => ({ ...prev, exportInferenceLogs: false }));
+    }
+  };
+
   return (
     <Container>
       <SectionHeader>
@@ -878,6 +956,87 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
             >
               <i className={loading.shutdown ? "fas fa-spinner fa-spin" : "fas fa-power-off"}></i> 
               {loading.shutdown ? ' Shutting down...' : ' Shutdown'}
+            </Button>
+          </SettingItem>
+        </SettingsCard>
+
+        {/* Inference Management */}
+        <SettingsCard>
+          <h3>
+            <i className="fas fa-analytics"></i>
+            Inference Management
+          </h3>
+
+          <SettingItem>
+            <div>
+              <div className="label">Clear Inference Logs</div>
+              <div className="description">Remove all stored inference history</div>
+            </div>
+            <Button 
+              $variant="danger"
+              onClick={handleClearInferenceLogs}
+              disabled={loading.clearInferenceLogs}
+              style={{ opacity: loading.clearInferenceLogs ? 0.6 : 1 }}
+            >
+              <i className={loading.clearInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-trash"}></i>  
+              {loading.clearInferenceLogs ? ' Clearing...' : ' Clear Logs'}
+            </Button>
+          </SettingItem>
+
+          <SettingItem>
+            <div>
+              <div className="label">Export Inference Data</div>
+              <div className="description">Download inference logs in various formats</div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <Button 
+                $variant="primary"
+                onClick={() => handleExportInferenceLogs('json')}
+                disabled={loading.exportInferenceLogs}
+                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
+              >
+                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
+                JSON
+              </Button>
+              <Button 
+                $variant="primary"
+                onClick={() => handleExportInferenceLogs('csv')}
+                disabled={loading.exportInferenceLogs}
+                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
+              >
+                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
+                CSV
+              </Button>
+              <Button 
+                $variant="primary"
+                onClick={() => handleExportInferenceLogs('txt')}
+                disabled={loading.exportInferenceLogs}
+                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
+              >
+                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
+                TXT
+              </Button>
+            </div>
+          </SettingItem>
+
+          <SettingItem>
+            <div>
+              <div className="label">Inference Statistics</div>
+              <div className="description">View detailed analytics and performance data</div>
+            </div>
+            <Button 
+              $variant="primary"
+              onClick={() => {
+                onNavigate && onNavigate('monitoring');
+                // Add a small delay and then switch to inference tab
+                setTimeout(() => {
+                  // Trigger a custom event to switch to inference tab
+                  window.dispatchEvent(new CustomEvent('switch-to-inference-tab'));
+                }, 100);
+              }}
+            >
+              <i className="fas fa-chart-line"></i>  
+              View Analytics
             </Button>
           </SettingItem>
         </SettingsCard>

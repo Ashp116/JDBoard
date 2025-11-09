@@ -14,6 +14,8 @@ import {
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
 import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
+import { getBackendUrl } from '../utils/api';
+import { useNotifications } from '../contexts/NotificationContext';
 
 // Styled component interfaces
 interface StyledConnectionProps {
@@ -127,6 +129,7 @@ const MetricRow = styled.div`
   }
 `;
 
+// Monitoring styled components
 const ChartSection = styled.div`
   background: ${props => props.theme.colors.background.secondary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
@@ -230,6 +233,8 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   const [bufferedDataStats, setBufferedDataStats] = useState<BufferStats | null>(null);
   const maxDataPoints = 50; // Increased since we have buffered data
   const updateInterval = 2000; // Update charts every 2 seconds
+  
+  const { addNotification } = useNotifications();
 
   useEffect(() => {
     const interval = setInterval(() => {

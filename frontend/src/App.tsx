@@ -86,6 +86,18 @@ const AppContent: React.FC = () => {
       );
     }
     
+    // Pass navigation to SettingsSection
+    if (activeSection === 'settings') {
+      return (
+        <SectionComponent 
+          systemData={systemData} 
+          socket={socket}
+          isConnected={isConnected}
+          onNavigate={handleSectionChange}
+        />
+      );
+    }
+    
     return (
       <SectionComponent 
         systemData={systemData} 

@@ -1351,6 +1351,624 @@ interface Model {
   status: 'loaded' | 'unloaded';
 }
 
+// Analytics tab interfaces
+interface InferenceLog {
+  id: number;
+  timestamp: string;
+  model_id: string;
+  client_ip: string;
+  inference_time: number;
+  processing_time?: number;
+  status?: string;
+  result?: any;
+  image_hash?: string;
+  session_id?: string;
+  user_agent?: string;
+  device_info?: string;
+  framework?: string;
+  image_size?: string;
+  predictions_count?: number;
+  confidence_avg?: number;
+}
+
+interface InferenceStats {
+  total_inferences: number;
+  inferences_24h: number;
+  inferences_7d: number;
+  avg_inference_time: number;
+  top_models: Array<{model_id: string, count: number}>;
+  top_clients: Array<{client_ip: string, count: number}>;
+  hourly_distribution: Array<{hour: string, count: number}>;
+  performance_distribution: {fast: number, medium: number, slow: number};
+  recent_inferences: Array<{
+    timestamp: string;
+    model_id: string;
+    client_ip: string;
+    inference_time: number;
+  }>;
+}
+
+// Analytics styled components
+const AnalyticsContainer = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 12px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  overflow: hidden;
+`;
+
+const SearchBarContainer = styled.div`
+  padding: 20px;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  background: ${props => props.theme.colors.background.primary};
+`;
+
+const SearchBar = styled.input`
+  width: 100%;
+  padding: 12px 16px;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.colors.nvidia.green};
+    box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.2);
+  }
+  
+  &::placeholder {
+    color: ${props => props.theme.colors.text.secondary};
+  }
+`;
+
+const FilterSection = styled.div`
+  padding: 20px;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  background: ${props => props.theme.colors.background.primary};
+`;
+
+const FilterGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  align-items: end;
+`;
+
+const FilterGroup = styled.div`
+  .label {
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    margin-bottom: 5px;
+    display: block;
+    font-weight: 500;
+  }
+
+  select {
+    width: 100%;
+    padding: 8px 12px;
+    background: ${props => props.theme.colors.background.secondary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+
+    &:focus {
+      outline: none;
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
+const LogsTable = styled.div`
+  overflow-x: auto;
+`;
+
+const Table = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  }
+
+  th {
+    background: ${props => props.theme.colors.background.primary};
+    color: ${props => props.theme.colors.text.primary};
+    font-weight: 600;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  td {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 13px;
+  }
+
+  tr:hover {
+    background: ${props => props.theme.colors.background.tertiary};
+  }
+`;
+
+const DeviceTag = styled.span`
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #96CEB4;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+`;
+
+const PerformanceIndicator = styled.span<{performance: 'high' | 'medium' | 'low'}>`
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: ${props => {
+    switch(props.performance) {
+      case 'high': return '#28a745';
+      case 'medium': return '#ffc107';
+      case 'low': return '#dc3545';
+      default: return '#6c757d';
+    }
+  }};
+  color: white;
+  display: inline-block;
+`;
+
+const StatusIndicator = styled.span<{status: 'success' | 'error' | 'warning' | string}>`
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: ${props => {
+    switch(props.status) {
+      case 'success': return '#28a745';
+      case 'warning': return '#ffc107';
+      case 'error': return '#dc3545';
+      case 'failed': return '#dc3545';
+      default: return '#28a745'; // Default to success green
+    }
+  }};
+  color: white;
+  display: inline-block;
+  cursor: help;
+  position: relative;
+`;
+
+const StatusTooltip = styled.div`
+  position: absolute;
+  bottom: 120%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: ${props => props.theme.colors.background.primary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  white-space: nowrap;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s, visibility 0.2s;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: ${props => props.theme.colors.text.primary};
+  
+  ${StatusIndicator}:hover & {
+    opacity: 1;
+    visibility: visible;
+  }
+  
+  &::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: ${props => props.theme.colors.border.secondary};
+  }
+`;
+
+const Pagination = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background: ${props => props.theme.colors.background.primary};
+  border-top: 1px solid ${props => props.theme.colors.border.secondary};
+
+  .pagination-info {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 14px;
+  }
+
+  .pagination-controls {
+    display: flex;
+    gap: 10px;
+  }
+`;
+
+const PaginationButton = styled.button<{disabled?: boolean}>`
+  padding: 8px 16px;
+  background: ${props => props.disabled ? 
+    props.theme.colors.background.secondary : 
+    props.theme.colors.nvidia.green};
+  color: ${props => props.disabled ? 
+    props.theme.colors.text.secondary : 
+    'white'};
+  border: none;
+  border-radius: 6px;
+  cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
+  transition: all ${props => props.theme.transitions.standard};
+  font-size: 14px;
+
+  &:hover:not(:disabled) {
+    background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+`;
+
+const SearchForm = styled.form`
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  
+  button {
+    padding: 12px 16px;
+    background: ${props => props.theme.colors.nvidia.green};
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    
+    &:hover {
+      background: ${props => props.theme.colors.nvidia.darkGreen};
+    }
+  }
+`;
+
+const FilterRow = styled.div`
+  display: flex;
+  gap: 20px;
+  align-items: end;
+  flex-wrap: wrap;
+  justify-content: space-between;
+`;
+
+const ActionButtons = styled.div`
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+`;
+
+const ExportButton = styled.button`
+  padding: 8px 12px;
+  background: ${props => props.theme.colors.nvidia.green};
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  transition: all ${props => props.theme.transitions.standard};
+
+  &:hover {
+    background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+`;
+
+// New styled components for dropdown export and modal
+const DropdownExportContainer = styled.div`
+  position: relative;
+  display: inline-block;
+`;
+
+const DropdownExportButton = styled.button`
+  padding: 8px 12px;
+  background: ${props => props.theme.colors.nvidia.green};
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  transition: all ${props => props.theme.transitions.standard};
+
+  &:hover {
+    background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+`;
+
+const DropdownExportMenu = styled.div<{$isOpen: boolean}>`
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 160px;
+  display: ${props => props.$isOpen ? 'block' : 'none'};
+`;
+
+const DropdownExportItem = styled.button`
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  color: ${props => props.theme.colors.text.primary};
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  
+  &:hover {
+    background: ${props => props.theme.colors.background.tertiary};
+  }
+  
+  &:first-child {
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+  }
+  
+  &:last-child {
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+  }
+`;
+
+const ClickableTableRow = styled.tr`
+  cursor: pointer;
+  transition: background-color ${props => props.theme.transitions.fast};
+  
+  &:hover {
+    background: ${props => props.theme.colors.background.tertiary} !important;
+  }
+`;
+
+const Modal = styled.div<{$isOpen: boolean}>`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  z-index: 10000;
+  display: ${props => props.$isOpen ? 'flex' : 'none'};
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+`;
+
+const ModalContent = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 16px;
+  max-width: 900px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+`;
+
+const ModalHeader = styled.div`
+  padding: 24px;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
+  
+  h3 {
+    margin: 0;
+    color: ${props => props.theme.colors.text.primary};
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 20px;
+    font-weight: 600;
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+      font-size: 18px;
+    }
+  }
+`;
+
+const ModalCloseButton = styled.button`
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: transparent;
+  border: none;
+  color: ${props => props.theme.colors.text.secondary};
+  cursor: pointer;
+  font-size: 18px;
+  padding: 5px;
+  
+  &:hover {
+    color: ${props => props.theme.colors.text.primary};
+  }
+`;
+
+const ModalBody = styled.div`
+  padding: 24px;
+  background: ${props => props.theme.colors.background.primary};
+`;
+
+const DetailGrid = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+`;
+
+const DetailCard = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(118, 185, 0, 0.1);
+  }
+  
+  h4 {
+    margin: 0 0 16px 0;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid ${props => props.theme.colors.nvidia.green};
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+      font-size: 16px;
+    }
+  }
+`;
+
+const DetailRow = styled.div`
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  transition: background-color 0.2s ease;
+  
+  &:hover {
+    background: rgba(118, 185, 0, 0.05);
+    margin: 0 -12px;
+    padding: 12px;
+    border-radius: 6px;
+    border-bottom-color: transparent;
+  }
+  
+  &:last-child {
+    border-bottom: none;
+  }
+  
+  .label {
+    color: ${props => props.theme.colors.text.secondary};
+    font-weight: 500;
+    font-size: 14px;
+    min-width: 120px;
+  }
+  
+  .value {
+    color: ${props => props.theme.colors.text.primary};
+    font-weight: 600;
+    text-align: right;
+    font-size: 14px;
+  }
+`;
+
+const ClearButton = styled.button`
+  padding: 8px 12px;
+  background: #dc3545;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  
+  &:hover {
+    background: #c82333;
+  }
+`;
+
+const CodeHeaderCopyIcon = styled.button`
+  background: transparent;
+  border: none;
+  color: ${props => props.theme.colors.text.secondary};
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-left: auto;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  &:hover {
+    color: ${props => props.theme.colors.nvidia.green};
+    background: rgba(118, 185, 0, 0.1);
+  }
+  
+  &:active {
+    transform: scale(0.95);
+  }
+`;
+
+const LoadingState = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px;
+  color: ${props => props.theme.colors.text.secondary};
+  
+  i {
+    margin-right: 8px;
+  }
+`;
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 40px;
+  color: ${props => props.theme.colors.text.secondary};
+  
+  .empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+  }
+  
+  .empty-text {
+    font-size: 16px;
+    margin-bottom: 8px;
+  }
+  
+  .empty-hint {
+    font-size: 14px;
+    opacity: 0.7;
+  }
+`;
+
 const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket, isConnected }) => {
   const { addNotification } = useNotifications();
   const [models, setModels] = useState<Model[]>([]);
@@ -1381,9 +1999,32 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   }>>([]);
   
   // Tab state
-  const [activeTab, setActiveTab] = useState<'inference' | 'api'>('inference');
+  const [activeTab, setActiveTab] = useState<'inference' | 'api' | 'analytics'>('inference');
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
   const [activeCodeTab, setActiveCodeTab] = useState<{[key: string]: string}>({});
+  
+  // Analytics state
+  const [inferenceLogs, setInferenceLogs] = useState<InferenceLog[]>([]);
+  const [inferenceStats, setInferenceStats] = useState<InferenceStats | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filters, setFilters] = useState({
+    model_id: '',
+    client_ip: '',
+    page: 1,
+    per_page: 20
+  });
+  const [pagination, setPagination] = useState({
+    page: 1,
+    per_page: 20,
+    total: 0,
+    pages: 0
+  });
+  
+  // Modal and dropdown state
+  const [selectedLogForModal, setSelectedLogForModal] = useState<InferenceLog | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1525,6 +2166,35 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         type: 'error',
         title: 'Copy Failed',
         message: 'Failed to copy to clipboard'
+      });
+    });
+  };
+
+  // Get status description for tooltip
+  const getStatusDescription = (status: string) => {
+    switch(status?.toLowerCase()) {
+      case 'success': return 'Inference completed successfully';
+      case 'error': case 'failed': return 'Inference failed with error';
+      case 'pending': return 'Inference is pending';
+      case 'processing': return 'Inference is currently processing';
+      default: return 'Inference completed successfully';
+    }
+  };
+
+  // Copy raw log data to clipboard
+  const copyRawDataToClipboard = (log: InferenceLog) => {
+    const rawData = JSON.stringify(log, null, 2);
+    navigator.clipboard.writeText(rawData).then(() => {
+      addNotification({
+        type: 'success',
+        title: 'Raw Data Copied',
+        message: 'Raw log data copied to clipboard'
+      });
+    }).catch(() => {
+      addNotification({
+        type: 'error',
+        title: 'Copy Failed',
+        message: 'Failed to copy raw data to clipboard'
       });
     });
   };
@@ -1677,6 +2347,179 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     setHoveredDetection(null);
   };
 
+  // Analytics functions
+  const fetchInferenceLogs = async (searchParams: any = {}) => {
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: searchParams.page?.toString() || filters.page.toString(),
+        per_page: searchParams.per_page?.toString() || filters.per_page.toString(),
+        search: searchParams.search || searchQuery,
+        model_id: searchParams.model_id || filters.model_id,
+        client_ip: searchParams.client_ip || filters.client_ip
+      });
+
+      const response = await fetch(`${getBackendUrl()}/api/logs/inference?${params}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setInferenceLogs(data.data.logs || []);
+        setPagination({
+          page: data.data.page,
+          per_page: data.data.per_page,
+          total: data.data.total,
+          pages: data.data.pages
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching inference logs:', error);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to load inference logs'
+      });
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  const fetchInferenceStats = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/logs/inference/stats`);
+      const data = await response.json();
+
+      if (data.success) {
+        setInferenceStats(data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching inference stats:', error);
+    }
+  };
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newFilters = { ...filters, page: 1 };
+    setFilters(newFilters);
+    fetchInferenceLogs({ ...newFilters, search: searchQuery });
+  };
+
+  const handleFilterChange = (key: string, value: string) => {
+    const newFilters = { ...filters, [key]: value, page: 1 };
+    setFilters(newFilters);
+    fetchInferenceLogs(newFilters);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    const newFilters = { ...filters, page: newPage };
+    setFilters(newFilters);
+    fetchInferenceLogs(newFilters);
+  };
+
+  const handleExportLogs = async (format: string) => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/logs/inference/export?format=${format}`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `inference_logs.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        addNotification({
+          type: 'success',
+          title: 'Export Complete',
+          message: `Logs exported as ${format.toUpperCase()}`
+        });
+      }
+    } catch (error) {
+      console.error('Error exporting logs:', error);
+      addNotification({
+        type: 'error',
+        title: 'Export Failed',
+        message: 'Failed to export logs'
+      });
+    }
+  };
+
+  const handleClearLogs = async () => {
+    if (!window.confirm('Are you sure you want to clear all inference logs? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/logs/inference/clear`, {
+        method: 'DELETE'
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        setInferenceLogs([]);
+        setPagination({
+          page: 1,
+          per_page: 20,
+          total: 0,
+          pages: 0
+        });
+        fetchInferenceStats(); // Refresh stats
+
+        addNotification({
+          type: 'success',
+          title: 'Logs Cleared',
+          message: 'All inference logs have been cleared'
+        });
+      }
+    } catch (error) {
+      console.error('Error clearing logs:', error);
+      addNotification({
+        type: 'error',
+        title: 'Clear Failed',
+        message: 'Failed to clear logs'
+      });
+    }
+  };
+
+  // New handler functions for modal and dropdown
+  const handleRowClick = (log: InferenceLog) => {
+    setSelectedLogForModal(log);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedLogForModal(null);
+  };
+
+  const toggleExportDropdown = () => {
+    setIsExportDropdownOpen(!isExportDropdownOpen);
+  };
+
+  const handleDropdownExport = async (format: string) => {
+    setIsExportDropdownOpen(false);
+    await handleExportLogs(format);
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-export-container')) {
+        setIsExportDropdownOpen(false);
+      }
+    };
+
+    if (isExportDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isExportDropdownOpen]);
+
   // Fetch available models
   useEffect(() => {
     fetchModels();
@@ -1698,6 +2541,21 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Load analytics data when analytics tab is active
+  useEffect(() => {
+    if (activeTab === 'analytics') {
+      fetchInferenceLogs();
+      fetchInferenceStats();
+    }
+  }, [activeTab]);
+
+  // Reload analytics when filters change
+  useEffect(() => {
+    if (activeTab === 'analytics') {
+      fetchInferenceLogs();
+    }
+  }, [filters, searchQuery]);
 
   const fetchModels = async () => {
     try {
@@ -1986,6 +2844,13 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           >
             <i className="fas fa-code"></i>
             API Routes
+          </TabButton>
+          <TabButton 
+            active={activeTab === 'analytics'} 
+            onClick={() => setActiveTab('analytics')}
+          >
+            <i className="fas fa-chart-bar"></i>
+            Analytics
           </TabButton>
         </TabHeader>
 
@@ -2833,6 +3698,179 @@ print(result)`, 'python')}
             </RouteSection>
           </ApiRoutesContainer>
         </TabContent>
+
+        {/* Analytics Tab Content */}
+        <TabContent visible={activeTab === 'analytics'}>
+          <AnalyticsContainer>
+            {/* Search and Filters */}
+            <FilterSection>
+              <SearchForm onSubmit={handleSearch}>
+                <SearchBar
+                  type="text"
+                  placeholder="Search inference logs..."
+                  value={searchQuery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                />
+                <button type="submit">
+                  <i className="fas fa-search" />
+                </button>
+              </SearchForm>
+              
+              <FilterRow>
+                <div style={{display: 'flex', gap: '20px', alignItems: 'end', flexWrap: 'wrap', flex: '1'}}>
+                  <FilterGroup>
+                    <label className="label">Model:</label>
+                    <select
+                      value={filters.model_id}
+                      onChange={(e) => handleFilterChange('model_id', e.target.value)}
+                    >
+                      <option value="">All Models</option>
+                      {models.map(model => (
+                        <option key={model.id} value={model.id}>{model.name}</option>
+                      ))}
+                    </select>
+                  </FilterGroup>
+                  
+                  <FilterGroup>
+                    <label className="label">Client IP:</label>
+                    <input
+                      type="text"
+                      placeholder="Filter by IP..."
+                      value={filters.client_ip}
+                      onChange={(e) => handleFilterChange('client_ip', e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        background: '#2a2a2a',
+                        border: '1px solid #444',
+                        borderRadius: '6px',
+                        color: '#ffffff'
+                      }}
+                    />
+                  </FilterGroup>
+                </div>
+                
+                <ActionButtons>
+                  <DropdownExportContainer className="dropdown-export-container">
+                    <DropdownExportButton onClick={toggleExportDropdown}>
+                      <i className="fas fa-download" />
+                      Export Data
+                      <i className={`fas fa-chevron-${isExportDropdownOpen ? 'up' : 'down'}`} />
+                    </DropdownExportButton>
+                    <DropdownExportMenu $isOpen={isExportDropdownOpen}>
+                      <DropdownExportItem onClick={() => handleDropdownExport('csv')}>
+                        <i className="fas fa-file-csv" />
+                        Export as CSV
+                      </DropdownExportItem>
+                      <DropdownExportItem onClick={() => handleDropdownExport('json')}>
+                        <i className="fas fa-file-code" />
+                        Export as JSON
+                      </DropdownExportItem>
+                      <DropdownExportItem onClick={() => handleDropdownExport('txt')}>
+                        <i className="fas fa-file-alt" />
+                        Export as TXT
+                      </DropdownExportItem>
+                    </DropdownExportMenu>
+                  </DropdownExportContainer>
+                </ActionButtons>
+              </FilterRow>
+            </FilterSection>
+
+            {analyticsLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <i className="fas fa-spinner fa-spin" style={{ fontSize: '24px', color: '#00ff88' }} />
+                <p style={{ marginTop: '16px', color: '#ffffff' }}>Loading analytics...</p>
+              </div>
+            ) : (
+              <>
+                {/* Logs Table */}
+                <Table>
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Model</th>
+                      <th>Client IP</th>
+                      <th>Device</th>
+                      <th>Framework</th>
+                      <th>Image Size</th>
+                      <th>Predictions</th>
+                      <th>Avg Confidence</th>
+                      <th>Processing Time</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inferenceLogs.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
+                          No inference logs found
+                        </td>
+                      </tr>
+                    ) : (
+                      inferenceLogs.map((log) => (
+                        <ClickableTableRow key={log.id} onClick={() => handleRowClick(log)}>
+                          <td>{new Date(log.timestamp).toLocaleString()}</td>
+                          <td>{log.model_id}</td>
+                          <td>{log.client_ip}</td>
+                          <td>
+                            <DeviceTag>
+                              <i className="fas fa-mobile-alt" />
+                              {log.device_info || 'Unknown'}
+                            </DeviceTag>
+                          </td>
+                          <td>{log.framework || 'N/A'}</td>
+                          <td>{log.image_size || 'N/A'}</td>
+                          <td>{log.predictions_count || 0}</td>
+                          <td>
+                            {log.confidence_avg ? (
+                              <PerformanceIndicator 
+                                performance={log.confidence_avg > 0.8 ? 'high' : log.confidence_avg > 0.5 ? 'medium' : 'low'}
+                              >
+                                {(log.confidence_avg * 100).toFixed(1)}%
+                              </PerformanceIndicator>
+                            ) : 'N/A'}
+                          </td>
+                          <td>{log.processing_time ? `${log.processing_time.toFixed(3)}s` : 'N/A'}</td>
+                          <td>
+                            <StatusIndicator status={log.status || 'success'}>
+                              {log.status || 'success'}
+                              <StatusTooltip>
+                                {getStatusDescription(log.status || 'success')}
+                              </StatusTooltip>
+                            </StatusIndicator>
+                          </td>
+                        </ClickableTableRow>
+                      ))
+                    )}
+                  </tbody>
+                </Table>
+
+                {/* Pagination */}
+                {pagination.pages > 1 && (
+                  <Pagination>
+                    <button
+                      onClick={() => handlePageChange(pagination.page - 1)}
+                      disabled={pagination.page === 1}
+                    >
+                      <i className="fas fa-chevron-left" />
+                      Previous
+                    </button>
+                    <span>
+                      Page {pagination.page} of {pagination.pages} ({pagination.total} total)
+                    </span>
+                    <button
+                      onClick={() => handlePageChange(pagination.page + 1)}
+                      disabled={pagination.page === pagination.pages}
+                    >
+                      Next
+                      <i className="fas fa-chevron-right" />
+                    </button>
+                  </Pagination>
+                )}
+              </>
+            )}
+          </AnalyticsContainer>
+        </TabContent>
       </TabSection>
       
       {/* Hover Tooltip */}
@@ -2892,6 +3930,193 @@ print(result)`, 'python')}
           })()}
         </HoverTooltip>
       )}
+      
+      {/* Log Details Modal */}
+      <Modal $isOpen={isModalOpen} onClick={closeModal}>
+        <ModalContent onClick={(e) => e.stopPropagation()}>
+          <ModalCloseButton onClick={closeModal}>
+            <i className="fas fa-times" />
+          </ModalCloseButton>
+          
+          {selectedLogForModal && (
+            <>
+              <ModalHeader>
+                <h3>
+                  <i className="fas fa-analytics" />
+                  Inference Log Details
+                  <span style={{fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '12px'}}>
+                    #{selectedLogForModal.id}
+                  </span>
+                </h3>
+              </ModalHeader>
+              
+              <ModalBody>
+                <DetailGrid>
+                  <DetailCard>
+                    <h4>
+                      <i className="fas fa-info-circle" />
+                      Basic Information
+                    </h4>
+                    <DetailRow>
+                      <span className="label">Log ID</span>
+                      <span className="value">#{selectedLogForModal.id}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Timestamp</span>
+                      <span className="value">{new Date(selectedLogForModal.timestamp).toLocaleString()}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Model Used</span>
+                      <span className="value">{selectedLogForModal.model_id}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Status</span>
+                      <span className="value">
+                        <StatusIndicator status={selectedLogForModal.status || 'success'}>
+                          {selectedLogForModal.status || 'success'}
+                          <StatusTooltip>
+                            {getStatusDescription(selectedLogForModal.status || 'success')}
+                          </StatusTooltip>
+                        </StatusIndicator>
+                      </span>
+                    </DetailRow>
+                  </DetailCard>
+                  
+                  <DetailCard>
+                    <h4>
+                      <i className="fas fa-network-wired" />
+                      Client Information
+                    </h4>
+                    <DetailRow>
+                      <span className="label">IP Address</span>
+                      <span className="value">{selectedLogForModal.client_ip}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Session ID</span>
+                      <span className="value">{selectedLogForModal.session_id || 'N/A'}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">User Agent</span>
+                      <span className="value">{selectedLogForModal.user_agent || 'N/A'}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Device Info</span>
+                      <span className="value">
+                        <DeviceTag>
+                          <i className="fas fa-mobile-alt" />
+                          {selectedLogForModal.device_info || 'Unknown'}
+                        </DeviceTag>
+                      </span>
+                    </DetailRow>
+                  </DetailCard>
+                  
+                  <DetailCard>
+                    <h4>
+                      <i className="fas fa-cogs" />
+                      Technical Details
+                    </h4>
+                    <DetailRow>
+                      <span className="label">Framework</span>
+                      <span className="value">{selectedLogForModal.framework || 'N/A'}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Processing Time</span>
+                      <span className="value">
+                        {selectedLogForModal.processing_time ? 
+                          `${selectedLogForModal.processing_time.toFixed(3)}s` : 
+                          selectedLogForModal.inference_time ? 
+                          `${(selectedLogForModal.inference_time * 1000).toFixed(1)}ms` : 'N/A'}
+                      </span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Image Size</span>
+                      <span className="value">{selectedLogForModal.image_size || 'N/A'}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Image Hash</span>
+                      <span className="value" style={{fontFamily: 'monospace', fontSize: '12px'}}>
+                        {selectedLogForModal.image_hash ? selectedLogForModal.image_hash.slice(0, 16) + '...' : 'N/A'}
+                      </span>
+                    </DetailRow>
+                  </DetailCard>
+                  
+                  <DetailCard>
+                    <h4>
+                      <i className="fas fa-chart-bar" />
+                      Results Summary
+                    </h4>
+                    <DetailRow>
+                      <span className="label">Predictions Count</span>
+                      <span className="value">{selectedLogForModal.predictions_count || 0}</span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Average Confidence</span>
+                      <span className="value">
+                        {selectedLogForModal.confidence_avg ? (
+                          <PerformanceIndicator 
+                            performance={selectedLogForModal.confidence_avg > 0.8 ? 'high' : selectedLogForModal.confidence_avg > 0.5 ? 'medium' : 'low'}
+                          >
+                            {(selectedLogForModal.confidence_avg * 100).toFixed(1)}%
+                          </PerformanceIndicator>
+                        ) : 'N/A'}
+                      </span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Result Status</span>
+                      <span className="value">
+                        {selectedLogForModal.result ? 'Results Available' : 'No Results'}
+                      </span>
+                    </DetailRow>
+                  </DetailCard>
+                </DetailGrid>
+                
+                {selectedLogForModal.result && (
+                  <DetailCard style={{marginTop: '24px', gridColumn: '1 / -1'}}>
+                    <h4 style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                      <span style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+                        <i className="fas fa-code" />
+                        Raw Result Data
+                        <span style={{
+                          fontSize: '12px', 
+                          fontWeight: 'normal', 
+                          color: '#666',
+                          background: 'rgba(118, 185, 0, 0.1)',
+                          padding: '2px 8px',
+                          borderRadius: '12px'
+                        }}>
+                          JSON
+                        </span>
+                      </span>
+                      <CodeHeaderCopyIcon 
+                        onClick={() => copyRawDataToClipboard(selectedLogForModal)}
+                        title="Copy raw JSON data to clipboard"
+                      >
+                        <i className="fas fa-copy" />
+                      </CodeHeaderCopyIcon>
+                    </h4>
+                    <pre style={{
+                      background: '#1a1a1a',
+                      padding: '20px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      overflow: 'auto',
+                      maxHeight: '300px',
+                      color: '#00ff88',
+                      fontFamily: 'JetBrains Mono, Consolas, Monaco, monospace',
+                      lineHeight: '1.5',
+                      border: '1px solid #333',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: '#666 #1a1a1a'
+                    }}>
+                      {JSON.stringify(selectedLogForModal.result, null, 2)}
+                    </pre>
+                  </DetailCard>
+                )}
+              </ModalBody>
+            </>
+          )}
+        </ModalContent>
+      </Modal>
     </Container>
   );
 };
