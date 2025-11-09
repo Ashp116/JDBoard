@@ -92,6 +92,29 @@ def get_system_status():
     
     try:
         status = system_monitor.get_system_status()
+        
+        # Add AI models information
+        try:
+            loaded_models = ai_manager.list_models()
+            status['models'] = [model for model in loaded_models if model.get('loaded', False)]
+        except Exception as e:
+            logger.debug(f"Error getting models list: {e}")
+            status['models'] = []
+        
+        # Add inference statistics
+        try:
+            request_stats = request_logger.get_stats()
+            # Get total lifetime inferences (not just 24h)
+            total_inferences = request_logger.get_total_inference_count()
+            status['stats'] = {
+                'totalInferences': total_inferences
+            }
+        except Exception as e:
+            logger.debug(f"Error getting inference stats: {e}")
+            status['stats'] = {
+                'totalInferences': 0
+            }
+        
         return jsonify({
             'success': True,
             'data': status,
@@ -704,6 +727,28 @@ def handle_system_data_request():
     """Handle request for system data"""
     try:
         system_data = system_monitor.get_system_status()
+        
+        # Add AI models information
+        try:
+            loaded_models = ai_manager.list_models()
+            system_data['models'] = [model for model in loaded_models if model.get('loaded', False)]
+        except Exception as e:
+            logger.debug(f"Error getting models list: {e}")
+            system_data['models'] = []
+        
+        # Add inference statistics
+        try:
+            request_stats = request_logger.get_stats()
+            # Get total lifetime inferences (not just 24h)
+            total_inferences = request_logger.get_total_inference_count()
+            system_data['stats'] = {
+                'totalInferences': total_inferences
+            }
+        except Exception as e:
+            logger.debug(f"Error getting inference stats: {e}")
+            system_data['stats'] = {
+                'totalInferences': 0
+            }
         
         # Validate JSON serialization
         try:
@@ -1863,6 +1908,28 @@ def background_system_updates():
     while True:
         try:
             system_data = system_monitor.get_system_status()
+            
+            # Add AI models information
+            try:
+                loaded_models = ai_manager.list_models()
+                system_data['models'] = [model for model in loaded_models if model.get('loaded', False)]
+            except Exception as e:
+                logger.debug(f"Error getting models list: {e}")
+                system_data['models'] = []
+            
+            # Add inference statistics
+            try:
+                request_stats = request_logger.get_stats()
+                # Get total lifetime inferences (not just 24h)
+                total_inferences = request_logger.get_total_inference_count()
+                system_data['stats'] = {
+                    'totalInferences': total_inferences
+                }
+            except Exception as e:
+                logger.debug(f"Error getting inference stats: {e}")
+                system_data['stats'] = {
+                    'totalInferences': 0
+                }
             
             # Validate that the data can be serialized to JSON
             try:

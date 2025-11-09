@@ -449,3 +449,14 @@ class RequestLogger:
         except Exception as e:
             logger.error(f"Error cleaning up logs: {str(e)}")
             return {'requests_deleted': 0, 'inference_deleted': 0, 'events_deleted': 0}
+    
+    def get_total_inference_count(self):
+        """Get total lifetime inference count"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute('SELECT COUNT(*) FROM inference_logs')
+                result = cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.error(f"Error getting total inference count: {str(e)}")
+            return 0
