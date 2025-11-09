@@ -86,6 +86,10 @@ class RequestLogger:
                     conn.execute('ALTER TABLE inference_logs ADD COLUMN confidence_avg REAL')
                 except sqlite3.OperationalError:
                     pass  # Column already exists
+                try:
+                    conn.execute('ALTER TABLE inference_logs ADD COLUMN device_id TEXT')
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
                 
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS system_events (
@@ -163,19 +167,46 @@ class RequestLogger:
                         confidence_avg = sum(confidences) / len(confidences)
             
             # Parse device info from user agent
-            device_info = None
+            device_info = 'Unknown'
             if user_agent:
-                # Simple device detection
-                if 'Mobile' in user_agent:
+                user_agent_lower = user_agent.lower()
+                
+                # Mobile device detection (more comprehensive)
+                if any(keyword in user_agent_lower for keyword in [
+                    'mobile', 'android', 'iphone', 'ipod', 'blackberry', 
+                    'windows phone', 'opera mini', 'iemobile', 'mobile safari'
+                ]):
                     device_info = 'Mobile'
-                elif 'Tablet' in user_agent:
+                
+                # Tablet detection
+                elif any(keyword in user_agent_lower for keyword in [
+                    'ipad', 'tablet', 'kindle', 'silk', 'playbook', 'nexus 7',
+                    'nexus 9', 'nexus 10', 'galaxy tab', 'sm-t', 'tab-'
+                ]):
                     device_info = 'Tablet'
-                elif 'Desktop' in user_agent:
-                    device_info = 'Desktop'
-                elif 'Jetson' in user_agent:
+                
+                # Jetson/embedded device detection
+                elif any(keyword in user_agent_lower for keyword in [
+                    'jetson', 'tegra', 'nvidia', 'l4t', 'aarch64', 'arm64'
+                ]):
                     device_info = 'Jetson'
-                else:
-                    device_info = 'Unknown'
+                
+                # Bot/API detection
+                elif any(keyword in user_agent_lower for keyword in [
+                    'bot', 'crawler', 'spider', 'scraper', 'curl', 'wget',
+                    'python-requests', 'postman', 'insomnia', 'httpie'
+                ]):
+                    device_info = 'API/Bot'
+                
+                # Desktop browsers (catch-all for common desktop browsers)
+                elif any(keyword in user_agent_lower for keyword in [
+                    'chrome', 'firefox', 'safari', 'edge', 'opera', 'webkit'
+                ]) and 'mobile' not in user_agent_lower:
+                    device_info = 'Desktop'
+                
+                # If it has Mozilla but no mobile indicators, likely desktop
+                elif 'mozilla' in user_agent_lower and 'mobile' not in user_agent_lower:
+                    device_info = 'Desktop'
             
             with self.lock:
                 with sqlite3.connect(self.db_path) as conn:
@@ -183,8 +214,8 @@ class RequestLogger:
                         INSERT INTO inference_logs 
                         (timestamp, model_id, client_ip, inference_time, 
                          result, image_hash, session_id, user_agent, 
-                         device_info, framework, image_size, predictions_count, confidence_avg)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         device_info, framework, image_size, predictions_count, confidence_avg, device_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         datetime.now().isoformat(),
                         model_id,
@@ -198,7 +229,8 @@ class RequestLogger:
                         framework,
                         image_size,
                         predictions_count,
-                        confidence_avg
+                        confidence_avg,
+                        self._generate_device_id(client_ip, user_agent)
                     ))
                     conn.commit()
         except Exception as e:
@@ -227,6 +259,19 @@ class RequestLogger:
         """Generate a session ID based on client info"""
         data = f"{client_ip}_{user_agent or 'unknown'}_{datetime.now().strftime('%Y%m%d')}"
         return hashlib.md5(data.encode()).hexdigest()[:12]
+    
+    def _generate_device_id(self, client_ip, user_agent=None):
+        """Generate a persistent device ID based on client characteristics"""
+        # Create a more stable device fingerprint that persists across sessions
+        # Use user agent and IP to create a consistent device identifier
+        device_data = f"{user_agent or 'unknown'}_{client_ip}"
+        device_hash = hashlib.sha256(device_data.encode()).hexdigest()
+        
+        # Take first 8 characters for a shorter, readable device ID
+        device_id = device_hash[:8].upper()
+        
+        # Add a prefix to make it more readable
+        return f"DEV-{device_id}"
     
     def get_logs(self, log_type='requests', page=1, per_page=50, 
                 client_ip=None, start_date=None, end_date=None, model_id=None):

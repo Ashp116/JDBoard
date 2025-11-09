@@ -1292,6 +1292,36 @@ const CopyButton = styled.button`
   }
 `;
 
+const SmallCopyButton = styled.button`
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.8);
+  color: ${props => props.theme.colors.nvidia.green};
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    background: ${props => props.theme.colors.nvidia.green};
+    color: #000;
+    transform: scale(1.05);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
+
+  i {
+    font-size: 10px;
+  }
+`;
+
 const ModelInfoCard = styled.div`
   background: ${props => props.theme.colors.background.primary};
   border: 1px solid ${props => props.theme.colors.border.primary};
@@ -1365,6 +1395,7 @@ interface InferenceLog {
   session_id?: string;
   user_agent?: string;
   device_info?: string;
+  device_id?: string;
   framework?: string;
   image_size?: string;
   predictions_count?: number;
@@ -1494,13 +1525,22 @@ const Table = styled.table`
   }
 `;
 
-const DeviceTag = styled.span`
+const DeviceTag = styled.span<{deviceType?: string}>`
   padding: 3px 8px;
   border-radius: 12px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  background: #96CEB4;
+  background: ${props => {
+    switch(props.deviceType?.toLowerCase()) {
+      case 'mobile': return '#FF6B6B';
+      case 'tablet': return '#4ECDC4';
+      case 'desktop': return '#45B7D1';
+      case 'jetson': return '#96CEB4';
+      case 'api/bot': return '#9B59B6';
+      default: return '#95A5A6';
+    }
+  }};
   color: white;
   display: inline-flex;
   align-items: center;
@@ -1766,10 +1806,11 @@ const ModalContent = styled.div`
   max-width: 900px;
   width: 100%;
   max-height: 90vh;
-  overflow-y: auto;
   position: relative;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
 `;
 
 const ModalHeader = styled.div`
@@ -1779,6 +1820,8 @@ const ModalHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
+  flex-shrink: 0;
+  border-radius: 16px 16px 0 0;
   
   h3 {
     margin: 0;
@@ -1815,6 +1858,33 @@ const ModalCloseButton = styled.button`
 const ModalBody = styled.div`
   padding: 24px;
   background: ${props => props.theme.colors.background.primary};
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  border-radius: 0 0 16px 16px;
+
+  /* Custom scrollbar styling for webkit browsers */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 0 0 16px 0;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: ${props => props.theme.colors.border.secondary};
+    border-radius: 4px;
+    
+    &:hover {
+      background: ${props => props.theme.colors.text.secondary};
+    }
+  }
+
+  /* For Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: ${props => props.theme.colors.border.secondary} transparent;
 `;
 
 const DetailGrid = styled.div`
@@ -2155,19 +2225,142 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   // Copy to clipboard helper
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      addNotification({
-        type: 'success',
-        title: 'Copy Code',
-        message: 'Code copied to clipboard'
+    // Fallback for when navigator.clipboard is not available (non-HTTPS contexts)
+    const fallbackCopy = (text: string) => {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        return true;
+      } catch (err) {
+        console.error('Fallback: Unable to copy', err);
+        return false;
+      } finally {
+        document.body.removeChild(textArea);
+      }
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      // Use modern clipboard API
+      navigator.clipboard.writeText(text).then(() => {
+        addNotification({
+          type: 'success',
+          title: 'Copied',
+          message: 'Content copied to clipboard'
+        });
+      }).catch((err) => {
+        console.error('Clipboard API failed:', err);
+        if (fallbackCopy(text)) {
+          addNotification({
+            type: 'success',
+            title: 'Copied',
+            message: 'Content copied to clipboard'
+          });
+        } else {
+          addNotification({
+            type: 'error',
+            title: 'Copy Failed',
+            message: 'Failed to copy to clipboard'
+          });
+        }
       });
-    }).catch(() => {
-      addNotification({
-        type: 'error',
-        title: 'Copy Failed',
-        message: 'Failed to copy to clipboard'
+    } else {
+      // Use fallback method
+      if (fallbackCopy(text)) {
+        addNotification({
+          type: 'success',
+          title: 'Copied',
+          message: 'Content copied to clipboard'
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Copy Failed',
+          message: 'Failed to copy to clipboard'
+        });
+      }
+    }
+  };
+
+  // Copy hash to clipboard helper
+  const copyHashToClipboard = (hash: string) => {
+    // Fallback for when navigator.clipboard is not available (non-HTTPS contexts)
+    const fallbackCopy = (text: string) => {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        return true;
+      } catch (err) {
+        console.error('Fallback: Unable to copy', err);
+        return false;
+      } finally {
+        document.body.removeChild(textArea);
+      }
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      // Use modern clipboard API
+      navigator.clipboard.writeText(hash).then(() => {
+        addNotification({
+          type: 'success',
+          title: 'Hash Copied',
+          message: 'Image hash copied to clipboard'
+        });
+      }).catch((err) => {
+        console.error('Clipboard API failed:', err);
+        if (fallbackCopy(hash)) {
+          addNotification({
+            type: 'success',
+            title: 'Hash Copied',
+            message: 'Image hash copied to clipboard'
+          });
+        } else {
+          addNotification({
+            type: 'error',
+            title: 'Copy Failed',
+            message: 'Failed to copy hash to clipboard'
+          });
+        }
       });
-    });
+    } else {
+      // Use fallback method
+      if (fallbackCopy(hash)) {
+        addNotification({
+          type: 'success',
+          title: 'Hash Copied',
+          message: 'Image hash copied to clipboard'
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Copy Failed',
+          message: 'Failed to copy hash to clipboard'
+        });
+      }
+    }
+  };
+
+  // Get device icon based on device type
+  const getDeviceIcon = (deviceType: string) => {
+    switch(deviceType?.toLowerCase()) {
+      case 'mobile': return 'fas fa-mobile-alt';
+      case 'tablet': return 'fas fa-tablet-alt';
+      case 'desktop': return 'fas fa-desktop';
+      case 'jetson': return 'fas fa-microchip';
+      case 'api/bot': return 'fas fa-robot';
+      default: return 'fas fa-question-circle';
+    }
   };
 
   // Get status description for tooltip
@@ -2183,20 +2376,71 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   // Copy raw log data to clipboard
   const copyRawDataToClipboard = (log: InferenceLog) => {
-    const rawData = JSON.stringify(log, null, 2);
-    navigator.clipboard.writeText(rawData).then(() => {
-      addNotification({
-        type: 'success',
-        title: 'Raw Data Copied',
-        message: 'Raw log data copied to clipboard'
+    // Extract just the raw results data, not the entire log
+    const rawData = log.result ? JSON.stringify(log.result, null, 2) : JSON.stringify({
+      error: "No results data available"
+    }, null, 2);
+    
+    // Fallback for when navigator.clipboard is not available (non-HTTPS contexts)
+    const fallbackCopy = (text: string) => {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        return true;
+      } catch (err) {
+        console.error('Fallback: Unable to copy', err);
+        return false;
+      } finally {
+        document.body.removeChild(textArea);
+      }
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+      // Use modern clipboard API
+      navigator.clipboard.writeText(rawData).then(() => {
+        addNotification({
+          type: 'success',
+          title: 'Results Copied',
+          message: 'Raw inference results copied to clipboard'
+        });
+      }).catch((err) => {
+        console.error('Clipboard API failed:', err);
+        if (fallbackCopy(rawData)) {
+          addNotification({
+            type: 'success',
+            title: 'Results Copied',
+            message: 'Raw inference results copied to clipboard'
+          });
+        } else {
+          addNotification({
+            type: 'error',
+            title: 'Copy Failed',
+            message: 'Failed to copy results to clipboard'
+          });
+        }
       });
-    }).catch(() => {
-      addNotification({
-        type: 'error',
-        title: 'Copy Failed',
-        message: 'Failed to copy raw data to clipboard'
-      });
-    });
+    } else {
+      // Use fallback method
+      if (fallbackCopy(rawData)) {
+        addNotification({
+          type: 'success',
+          title: 'Results Copied',
+          message: 'Raw inference results copied to clipboard'
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Copy Failed',
+          message: 'Failed to copy results to clipboard'
+        });
+      }
+    }
   };
 
   // Get selected model info
@@ -3791,6 +4035,7 @@ print(result)`, 'python')}
                       <th>Model</th>
                       <th>Client IP</th>
                       <th>Device</th>
+                      <th>Device ID</th>
                       <th>Framework</th>
                       <th>Image Size</th>
                       <th>Predictions</th>
@@ -3802,7 +4047,7 @@ print(result)`, 'python')}
                   <tbody>
                     {inferenceLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={10} style={{ textAlign: 'center', padding: '40px' }}>
+                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px' }}>
                           No inference logs found
                         </td>
                       </tr>
@@ -3813,10 +4058,13 @@ print(result)`, 'python')}
                           <td>{log.model_id}</td>
                           <td>{log.client_ip}</td>
                           <td>
-                            <DeviceTag>
-                              <i className="fas fa-mobile-alt" />
+                            <DeviceTag deviceType={log.device_info || 'Unknown'}>
+                              <i className={getDeviceIcon(log.device_info || 'Unknown')} />
                               {log.device_info || 'Unknown'}
                             </DeviceTag>
+                          </td>
+                          <td style={{fontFamily: 'monospace', fontSize: '11px'}}>
+                            {log.device_id || 'N/A'}
                           </td>
                           <td>{log.framework || 'N/A'}</td>
                           <td>{log.image_size || 'N/A'}</td>
@@ -4002,10 +4250,26 @@ print(result)`, 'python')}
                     <DetailRow>
                       <span className="label">Device Info</span>
                       <span className="value">
-                        <DeviceTag>
-                          <i className="fas fa-mobile-alt" />
+                        <DeviceTag deviceType={selectedLogForModal.device_info || 'Unknown'}>
+                          <i className={getDeviceIcon(selectedLogForModal.device_info || 'Unknown')} />
                           {selectedLogForModal.device_info || 'Unknown'}
                         </DeviceTag>
+                      </span>
+                    </DetailRow>
+                    <DetailRow>
+                      <span className="label">Device ID</span>
+                      <span className="value" style={{fontFamily: 'monospace', fontSize: '12px', display: 'flex', alignItems: 'center'}}>
+                        {selectedLogForModal.device_id ? (
+                          <>
+                            {selectedLogForModal.device_id}
+                            <SmallCopyButton 
+                              onClick={() => copyToClipboard(selectedLogForModal.device_id!)}
+                              title="Copy device ID"
+                            >
+                              <i className="fas fa-copy" />
+                            </SmallCopyButton>
+                          </>
+                        ) : 'N/A'}
                       </span>
                     </DetailRow>
                   </DetailCard>
@@ -4034,8 +4298,18 @@ print(result)`, 'python')}
                     </DetailRow>
                     <DetailRow>
                       <span className="label">Image Hash</span>
-                      <span className="value" style={{fontFamily: 'monospace', fontSize: '12px'}}>
-                        {selectedLogForModal.image_hash ? selectedLogForModal.image_hash.slice(0, 16) + '...' : 'N/A'}
+                      <span className="value" style={{fontFamily: 'monospace', fontSize: '12px', display: 'flex', alignItems: 'center'}}>
+                        {selectedLogForModal.image_hash ? (
+                          <>
+                            {selectedLogForModal.image_hash.slice(0, 16) + '...'}
+                            <SmallCopyButton 
+                              onClick={() => copyHashToClipboard(selectedLogForModal.image_hash!)}
+                              title="Copy full hash"
+                            >
+                              <i className="fas fa-copy" />
+                            </SmallCopyButton>
+                          </>
+                        ) : 'N/A'}
                       </span>
                     </DetailRow>
                   </DetailCard>
