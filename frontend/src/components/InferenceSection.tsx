@@ -1202,7 +1202,9 @@ const RouteDescription = styled.p`
   font-size: 14px;
 `;
 
-const CodeBlock = styled.pre<{ onCopy?: () => void }>`
+const CodeBlock = styled.pre.withConfig({
+  shouldForwardProp: (prop) => prop !== 'language'
+})<{ onCopy?: () => void; language?: string }>`
   position: relative;
   background: ${props => props.theme.colors.background.tertiary};
   border: 1px solid ${props => props.theme.colors.border.primary};
