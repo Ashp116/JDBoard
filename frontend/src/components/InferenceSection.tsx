@@ -2429,6 +2429,12 @@ const DropdownExportButton = styled.button`
 
   &:hover {
     background: ${props => props.theme.colors.nvidia.darkGreen};
+    transform: translateY(-1px);
+  }
+
+  i.chevron {
+    transition: transform 0.2s ease;
+    transform: ${props => props.className?.includes('open') ? 'rotate(180deg)' : 'rotate(0deg)'};
   }
 `;
 
@@ -2438,38 +2444,49 @@ const DropdownExportMenu = styled.div<{$isOpen: boolean}>`
   right: 0;
   background: ${props => props.theme.colors.background.secondary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   min-width: 160px;
-  display: ${props => props.$isOpen ? 'block' : 'none'};
+  z-index: 1000;
+  opacity: ${props => props.$isOpen ? 1 : 0};
+  visibility: ${props => props.$isOpen ? 'visible' : 'hidden'};
+  transform: ${props => props.$isOpen ? 'translateY(0)' : 'translateY(-10px)'};
+  transition: all 0.2s ease;
 `;
 
 const DropdownExportItem = styled.button`
   width: 100%;
-  padding: 12px 16px;
-  background: transparent;
+  padding: 10px 16px;
+  background: none;
   border: none;
   color: ${props => props.theme.colors.text.primary};
-  cursor: pointer;
+  font-size: 14px;
   text-align: left;
+  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
-  
+  transition: background-color 0.2s ease;
+
   &:hover {
     background: ${props => props.theme.colors.background.tertiary};
   }
-  
+
   &:first-child {
-    border-top-left-radius: 6px;
-    border-top-right-radius: 6px;
+    border-radius: 8px 8px 0 0;
   }
-  
+
   &:last-child {
-    border-bottom-left-radius: 6px;
-    border-bottom-right-radius: 6px;
+    border-radius: 0 0 8px 8px;
+  }
+
+  &:only-child {
+    border-radius: 8px;
+  }
+
+  i {
+    width: 16px;
+    color: ${props => props.theme.colors.nvidia.green};
   }
 `;
 
@@ -5253,10 +5270,14 @@ print(result)`)}>
                   </button>
                   
                   <DropdownExportContainer className="dropdown-export-container">
-                    <DropdownExportButton onClick={toggleExportDropdown} style={{height: '32px', fontSize: '13px'}}>
+                    <DropdownExportButton 
+                      onClick={toggleExportDropdown} 
+                      className={isExportDropdownOpen ? 'open' : ''}
+                      style={{height: '32px', fontSize: '13px'}}
+                    >
                       <i className="fas fa-download" />
                       Export Data
-                      <i className={`fas fa-chevron-${isExportDropdownOpen ? 'up' : 'down'}`} />
+                      <i className={`fas fa-chevron-down chevron`} />
                     </DropdownExportButton>
                     <DropdownExportMenu $isOpen={isExportDropdownOpen}>
                       <DropdownExportItem onClick={() => handleDropdownExport('csv')}>

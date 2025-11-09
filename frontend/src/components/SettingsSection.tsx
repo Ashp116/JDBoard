@@ -278,6 +278,74 @@ const InfoItem = styled.div`
   }
 `;
 
+const DropdownContainer = styled.div`
+  position: relative;
+  display: inline-block;
+`;
+
+const DropdownButton = styled(Button)`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  i.chevron {
+    transition: transform 0.2s ease;
+    transform: ${props => props.className?.includes('open') ? 'rotate(180deg)' : 'rotate(0deg)'};
+  }
+`;
+
+const DropdownMenu = styled.div<{ $isOpen: boolean }>`
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  min-width: 120px;
+  z-index: 1000;
+  opacity: ${props => props.$isOpen ? 1 : 0};
+  visibility: ${props => props.$isOpen ? 'visible' : 'hidden'};
+  transform: ${props => props.$isOpen ? 'translateY(0)' : 'translateY(-10px)'};
+  transition: all 0.2s ease;
+`;
+
+const DropdownItem = styled.button`
+  width: 100%;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: ${props => props.theme.colors.background.tertiary};
+  }
+
+  &:first-child {
+    border-radius: 8px 8px 0 0;
+  }
+
+  &:last-child {
+    border-radius: 0 0 8px 8px;
+  }
+
+  &:only-child {
+    border-radius: 8px;
+  }
+
+  i {
+    width: 16px;
+    color: ${props => props.theme.colors.nvidia.green};
+  }
+`;
+
 const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected, onNavigate }) => {
   const [settings, setSettings] = useState({
     jetsonClocks: false,
@@ -321,6 +389,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     isValid: false,
     lastUsed: null
   });
+
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
 
   const { addNotification } = useNotifications();
 
@@ -417,6 +487,24 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
     fetchPowerModes();
   }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.dropdown-container')) {
+        setExportDropdownOpen(false);
+      }
+    };
+
+    if (exportDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [exportDropdownOpen]);
 
   // Sudo authentication functions
   const requestSudoPassword = (action: any): Promise<string> => {
@@ -969,14 +1057,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         {/* Inference Management */}
         <SettingsCard>
           <h3>
-            <i className="fas fa-analytics"></i>
+            <i className="fas fa-rocket"></i>
             Inference Management
           </h3>
 
           <SettingItem>
             <div>
               <div className="label">Clear Inference Logs</div>
-              <div className="description">Remove all stored inference history</div>
+              <div className="description">Remove stored inference history</div>
             </div>
             <Button 
               $variant="danger"
@@ -992,57 +1080,59 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Export Inference Data</div>
-              <div className="description">Download inference logs in various formats</div>
+              <div className="description">Download logs</div>
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <Button 
+            <DropdownContainer className="dropdown-container">
+              <DropdownButton 
                 $variant="primary"
-                onClick={() => handleExportInferenceLogs('json')}
+                className={exportDropdownOpen ? 'open' : ''}
+                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
                 disabled={loading.exportInferenceLogs}
-                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
+                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1 }}
               >
                 <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
-                JSON
-              </Button>
-              <Button 
-                $variant="primary"
-                onClick={() => handleExportInferenceLogs('csv')}
-                disabled={loading.exportInferenceLogs}
-                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
-              >
-                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
-                CSV
-              </Button>
-              <Button 
-                $variant="primary"
-                onClick={() => handleExportInferenceLogs('txt')}
-                disabled={loading.exportInferenceLogs}
-                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1, fontSize: '12px', padding: '6px 12px' }}
-              >
-                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
-                TXT
-              </Button>
-            </div>
+                {" Export"}
+                <i className="fas fa-chevron-down chevron"></i>
+              </DropdownButton>
+              <DropdownMenu $isOpen={exportDropdownOpen}>
+                <DropdownItem onClick={() => {
+                  handleExportInferenceLogs('json');
+                  setExportDropdownOpen(false);
+                }}>
+                  <i className="fas fa-file-code"></i>
+                  JSON
+                </DropdownItem>
+                <DropdownItem onClick={() => {
+                  handleExportInferenceLogs('csv');
+                  setExportDropdownOpen(false);
+                }}>
+                  <i className="fas fa-file-csv"></i>
+                  CSV
+                </DropdownItem>
+                <DropdownItem onClick={() => {
+                  handleExportInferenceLogs('txt');
+                  setExportDropdownOpen(false);
+                }}>
+                  <i className="fas fa-file-alt"></i>
+                  TXT
+                </DropdownItem>
+              </DropdownMenu>
+            </DropdownContainer>
           </SettingItem>
 
           <SettingItem>
             <div>
-              <div className="label">Inference Statistics</div>
-              <div className="description">View detailed analytics and performance data</div>
+              <div className="label">Inference Analytics</div>
+              <div className="description">View charts and performance metrics</div>
             </div>
             <Button 
               $variant="primary"
               onClick={() => {
-                onNavigate && onNavigate('monitoring');
-                // Add a small delay and then switch to inference tab
-                setTimeout(() => {
-                  // Trigger a custom event to switch to inference tab
-                  window.dispatchEvent(new CustomEvent('switch-to-inference-tab'));
-                }, 100);
+                onNavigate && onNavigate('inference');
               }}
             >
               <i className="fas fa-chart-line"></i>  
-              View Analytics
+              {" View"}
             </Button>
           </SettingItem>
         </SettingsCard>
