@@ -123,7 +123,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     {
       type: 'output',
-      content: 'Welcome to JetsonBoard Terminal v1.0.0',
+      content: 'Welcome to JBoard Terminal v1.0.0',
       timestamp: new Date()
     },
     {
@@ -395,7 +395,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
 
       <TerminalContainer>
         <TerminalHeader>
-          <div className="terminal-title">JetsonBoard Terminal</div>
+          <div className="terminal-title">JBoard Terminal</div>
         </TerminalHeader>
 
         <TerminalOutput ref={outputRef}>

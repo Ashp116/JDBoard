@@ -199,7 +199,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     <SidebarContainer>
       <SidebarBrand>
         <SidebarLogo>
-          <span className="brand-text">JetsonBoard</span>
+          <span className="brand-text">JBoard</span>
         </SidebarLogo>
       </SidebarBrand>
 

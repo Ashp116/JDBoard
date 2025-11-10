@@ -1,6 +1,6 @@
-# JetsonBoard - React Frontend
+# JBoard - React Frontend
 
-A modern, responsive React-based frontend for JetsonBoard with real-time system monitoring and AI model management.
+A modern, responsive React-based frontend for JBoard with real-time system monitoring and AI model management.
 
 ## 🚀 Features
 
@@ -198,7 +198,7 @@ The build script automatically copies built files to the backend static director
 
 ## 📄 License
 
-This project is part of the JetsonBoard system.
+This project is part of the JBoard system.
 
 ## 🤝 Contributing
 

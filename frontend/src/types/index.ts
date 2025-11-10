@@ -1,4 +1,4 @@
-// TypeScript type definitions for JetsonBoard
+// TypeScript type definitions for JBoard
 
 export interface CPUData {
   usage: number;
