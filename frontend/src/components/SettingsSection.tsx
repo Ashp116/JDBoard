@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
-import { useNotifications } from '../contexts/NotificationContext';
 
 // Styled component interfaces
 interface StyledActiveProps {
@@ -278,75 +277,7 @@ const InfoItem = styled.div`
   }
 `;
 
-const DropdownContainer = styled.div`
-  position: relative;
-  display: inline-block;
-`;
-
-const DropdownButton = styled(Button)`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  i.chevron {
-    transition: transform 0.2s ease;
-    transform: ${props => props.className?.includes('open') ? 'rotate(180deg)' : 'rotate(0deg)'};
-  }
-`;
-
-const DropdownMenu = styled.div<{ $isOpen: boolean }>`
-  position: absolute;
-  top: 100%;
-  right: 0;
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  min-width: 120px;
-  z-index: 1000;
-  opacity: ${props => props.$isOpen ? 1 : 0};
-  visibility: ${props => props.$isOpen ? 'visible' : 'hidden'};
-  transform: ${props => props.$isOpen ? 'translateY(0)' : 'translateY(-10px)'};
-  transition: all 0.2s ease;
-`;
-
-const DropdownItem = styled.button`
-  width: 100%;
-  padding: 10px 16px;
-  background: none;
-  border: none;
-  color: ${props => props.theme.colors.text.primary};
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: background-color 0.2s ease;
-
-  &:hover {
-    background: ${props => props.theme.colors.background.tertiary};
-  }
-
-  &:first-child {
-    border-radius: 8px 8px 0 0;
-  }
-
-  &:last-child {
-    border-radius: 0 0 8px 8px;
-  }
-
-  &:only-child {
-    border-radius: 8px;
-  }
-
-  i {
-    width: 16px;
-    color: ${props => props.theme.colors.nvidia.green};
-  }
-`;
-
-const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected, onNavigate }) => {
+const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, isConnected }) => {
   const [settings, setSettings] = useState({
     jetsonClocks: false,
     fanMode: 'quiet',
@@ -373,9 +304,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     powerMode: false,
     fanMode: false,
     reboot: false,
-    shutdown: false,
-    clearInferenceLogs: false,
-    exportInferenceLogs: false
+    shutdown: false
   });
 
   const [sudoModal, setSudoModal] = useState<SudoModalState>({
@@ -389,10 +318,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     isValid: false,
     lastUsed: null
   });
-
-  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
-
-  const { addNotification } = useNotifications();
 
   // Fetch current settings from backend
   const fetchSettings = async () => {
@@ -487,24 +412,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
     fetchPowerModes();
   }, []);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Element;
-      if (!target.closest('.dropdown-container')) {
-        setExportDropdownOpen(false);
-      }
-    };
-
-    if (exportDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [exportDropdownOpen]);
 
   // Sudo authentication functions
   const requestSudoPassword = (action: any): Promise<string> => {
@@ -769,85 +676,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     }
   };
 
-  const handleClearInferenceLogs = async () => {
-    if (window.confirm('Are you sure you want to clear all inference logs? This action cannot be undone.')) {
-      setLoading(prev => ({ ...prev, clearInferenceLogs: true }));
-      
-      try {
-        const response = await fetch(`${getBackendUrl()}/api/logs/inference/clear`, {
-          method: 'POST'
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-          addNotification({
-            type: 'success',
-            title: 'Success',
-            message: `Successfully cleared ${data.data.cleared_count} inference logs`
-          });
-        } else {
-          addNotification({
-            type: 'error',
-            title: 'Error',
-            message: data.error || 'Failed to clear inference logs'
-          });
-        }
-      } catch (error) {
-        console.error('Error clearing inference logs:', error);
-        addNotification({
-          type: 'error',
-          title: 'Error',
-          message: 'Failed to clear inference logs'
-        });
-      } finally {
-        setLoading(prev => ({ ...prev, clearInferenceLogs: false }));
-      }
-    }
-  };
-
-  const handleExportInferenceLogs = async (format: 'json' | 'csv' | 'txt') => {
-    setLoading(prev => ({ ...prev, exportInferenceLogs: true }));
-    
-    try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/export/${format}`);
-      
-      if (response.ok) {
-        // Handle file download
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `inference_logs.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        addNotification({
-          type: 'success',
-          title: 'Success',
-          message: `Inference logs exported as ${format.toUpperCase()}`
-        });
-      } else {
-        const data = await response.json();
-        addNotification({
-          type: 'error',
-          title: 'Error',
-          message: data.error || 'Failed to export inference logs'
-        });
-      }
-    } catch (error) {
-      console.error('Error exporting inference logs:', error);
-      addNotification({
-        type: 'error',
-        title: 'Error',
-        message: 'Failed to export inference logs'
-      });
-    } finally {
-      setLoading(prev => ({ ...prev, exportInferenceLogs: false }));
-    }
-  };
-
   return (
     <Container>
       <SectionHeader>
@@ -1050,89 +878,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
             >
               <i className={loading.shutdown ? "fas fa-spinner fa-spin" : "fas fa-power-off"}></i> 
               {loading.shutdown ? ' Shutting down...' : ' Shutdown'}
-            </Button>
-          </SettingItem>
-        </SettingsCard>
-
-        {/* Inference Management */}
-        <SettingsCard>
-          <h3>
-            <i className="fas fa-rocket"></i>
-            Inference Management
-          </h3>
-
-          <SettingItem>
-            <div>
-              <div className="label">Clear Inference Logs</div>
-              <div className="description">Remove stored inference history</div>
-            </div>
-            <Button 
-              $variant="danger"
-              onClick={handleClearInferenceLogs}
-              disabled={loading.clearInferenceLogs}
-              style={{ opacity: loading.clearInferenceLogs ? 0.6 : 1 }}
-            >
-              <i className={loading.clearInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-trash"}></i>  
-              {loading.clearInferenceLogs ? ' Clearing...' : ' Clear Logs'}
-            </Button>
-          </SettingItem>
-
-          <SettingItem>
-            <div>
-              <div className="label">Export Inference Data</div>
-              <div className="description">Download logs</div>
-            </div>
-            <DropdownContainer className="dropdown-container">
-              <DropdownButton 
-                $variant="primary"
-                className={exportDropdownOpen ? 'open' : ''}
-                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
-                disabled={loading.exportInferenceLogs}
-                style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1 }}
-              >
-                <i className={loading.exportInferenceLogs ? "fas fa-spinner fa-spin" : "fas fa-download"}></i>  
-                {" Export"}
-                <i className="fas fa-chevron-down chevron"></i>
-              </DropdownButton>
-              <DropdownMenu $isOpen={exportDropdownOpen}>
-                <DropdownItem onClick={() => {
-                  handleExportInferenceLogs('json');
-                  setExportDropdownOpen(false);
-                }}>
-                  <i className="fas fa-file-code"></i>
-                  JSON
-                </DropdownItem>
-                <DropdownItem onClick={() => {
-                  handleExportInferenceLogs('csv');
-                  setExportDropdownOpen(false);
-                }}>
-                  <i className="fas fa-file-csv"></i>
-                  CSV
-                </DropdownItem>
-                <DropdownItem onClick={() => {
-                  handleExportInferenceLogs('txt');
-                  setExportDropdownOpen(false);
-                }}>
-                  <i className="fas fa-file-alt"></i>
-                  TXT
-                </DropdownItem>
-              </DropdownMenu>
-            </DropdownContainer>
-          </SettingItem>
-
-          <SettingItem>
-            <div>
-              <div className="label">Inference Analytics</div>
-              <div className="description">View charts and performance metrics</div>
-            </div>
-            <Button 
-              $variant="primary"
-              onClick={() => {
-                onNavigate && onNavigate('inference/analytics');
-              }}
-            >
-              <i className="fas fa-chart-line"></i>  
-              {" View"}
             </Button>
           </SettingItem>
         </SettingsCard>

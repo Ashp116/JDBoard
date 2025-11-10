@@ -65,6 +65,8 @@ After installation, you may need to reboot your system.
         
         self.monitoring = False
         self.monitor_thread = None
+        self.broken_pipe_count = 0  # Track consecutive broken pipe errors
+        self.last_successful_update = time.time()
         self.system_data = {
             'cpu': {'usage': 0, 'frequency': 0, 'temperature': 0, 'cores': 0},
             'memory': {'total': 0, 'used': 0, 'available': 0, 'percent': 0},
@@ -151,25 +153,49 @@ After installation, you may need to reboot your system.
                 
                 # Clear any previous errors on successful update
                 self.system_data['error'] = None
+                self.broken_pipe_count = 0  # Reset counter on success
+                self.last_successful_update = time.time()
                 
         except Exception as e:
             error_str = str(e)
             logger.error(f"Failed to update system data from jetson-stats: {e}")
             print(f"ERROR: Failed to read from jetson-stats: {e}")
             
+            # Handle broken pipe errors specially with cooling-off period
+            if "broken pipe" in error_str.lower() or "errno 32" in error_str.lower():
+                self.broken_pipe_count += 1
+                logger.warning(f"Broken pipe error #{self.broken_pipe_count}")
+                
+                # If we've had multiple broken pipe errors, implement cooling-off
+                if self.broken_pipe_count >= 3:
+                    logger.info("Multiple broken pipe errors detected, implementing cooling-off period")
+                    time.sleep(5)  # Wait 5 seconds before next attempt
+                    
+                    # If it's been more than 10 broken pipe errors, something is seriously wrong
+                    if self.broken_pipe_count >= 10:
+                        logger.error("Too many broken pipe errors, stopping monitoring temporarily")
+                        self.monitoring = False
+                        # Set a special error that requires manual intervention
+                        self.system_data['error'] = {
+                            'type': 'jtop_critical_failure',
+                            'message': f'Critical jtop connection failure after {self.broken_pipe_count} broken pipe errors. Manual restart required.',
+                            'command': 'Restart Backend Server',
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        return
+                
+                self.system_data['error'] = {
+                    'type': 'jtop_service_inactive',
+                    'message': f'Connection to jtop service lost (broken pipe #{self.broken_pipe_count}). Service needs to be restarted.',
+                    'command': 'sudo systemctl restart jtop.service',
+                    'timestamp': datetime.now().isoformat()
+                }
             # Check for specific jtop service error
-            if "jtop.service is not active" in error_str or "jtop service" in error_str.lower():
+            elif "jtop.service is not active" in error_str or "jtop service" in error_str.lower():
                 self.system_data['error'] = {
                     'type': 'jtop_service_inactive',
                     'message': 'The jtop.service is not active. Please run: sudo jtop --install-service',
                     'command': 'sudo jtop --install-service',
-                    'timestamp': datetime.now().isoformat()
-                }
-            elif "broken pipe" in error_str.lower() or "errno 32" in error_str.lower():
-                self.system_data['error'] = {
-                    'type': 'jtop_service_inactive',
-                    'message': 'Connection to jtop service lost (broken pipe). Service needs to be restarted.',
-                    'command': 'sudo systemctl restart jtop.service',
                     'timestamp': datetime.now().isoformat()
                 }
             elif "permission" in error_str.lower() or "access" in error_str.lower():

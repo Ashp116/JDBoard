@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
+import React, { useState } from 'react';
 import styled, { ThemeProvider } from 'styled-components';
 import { GlobalStyles } from './styles/GlobalStyles';
 import { nvidiaTheme } from './styles/theme';
@@ -38,17 +37,8 @@ const ContentSection = styled.section<{ $active: boolean }>`
 
 type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'terminal' | 'logs' | 'settings';
 
-interface RouteParams {
-  section?: string;
-  tab?: string;
-  view?: string;
-}
-
 const AppContent: React.FC = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
   const [activeSection, setActiveSection] = useState<SectionKey>('dashboard');
-  
   const { 
     socket, 
     isConnected, 
@@ -57,20 +47,6 @@ const AppContent: React.FC = () => {
     getBufferStats, 
     clearDataBuffer 
   } = useSocket();
-
-  // Update active section based on current route
-  useEffect(() => {
-    const pathSegments = location.pathname.split('/').filter(Boolean);
-    const currentSection = pathSegments[0] as SectionKey;
-    
-    if (location.pathname === '/') {
-      setActiveSection('dashboard');
-    } else if (currentSection && ['models', 'inference', 'monitoring', 'terminal', 'logs', 'settings'].includes(currentSection)) {
-      setActiveSection(currentSection);
-    } else {
-      setActiveSection('dashboard');
-    }
-  }, [location.pathname]);
 
   const sections: Record<SectionKey, any> = {
     dashboard: Dashboard,
@@ -82,25 +58,45 @@ const AppContent: React.FC = () => {
     settings: SettingsSection
   };
 
-  const handleSectionChange = (section: string) => {
-    setActiveSection(section as SectionKey);
-    if (section === 'dashboard') {
-      navigate('/');
-    } else {
-      navigate(`/${section}`);
+  const renderSection = () => {
+    const SectionComponent = sections[activeSection];
+    if (!SectionComponent) return null;
+    
+    // Pass additional props to MonitoringSection
+    if (activeSection === 'monitoring') {
+      return (
+        <SectionComponent 
+          systemData={systemData} 
+          socket={socket}
+          isConnected={isConnected}
+          getBufferedData={getBufferedData}
+          getBufferStats={getBufferStats}
+          clearDataBuffer={clearDataBuffer}
+        />
+      );
     }
+    
+    // Pass specific props to TerminalSection
+    if (activeSection === 'terminal') {
+      return (
+        <SectionComponent 
+          socket={socket}
+          isConnected={isConnected}
+        />
+      );
+    }
+    
+    return (
+      <SectionComponent 
+        systemData={systemData} 
+        socket={socket}
+        isConnected={isConnected}
+      />
+    );
   };
 
-  const renderSectionWithProps = (SectionComponent: any, additionalProps?: any) => {
-    const baseProps = {
-      systemData,
-      socket,
-      isConnected,
-      onNavigate: handleSectionChange,
-      ...additionalProps
-    };
-
-    return <SectionComponent {...baseProps} />;
+  const handleSectionChange = (section: string) => {
+    setActiveSection(section as SectionKey);
   };
 
   return (
@@ -112,57 +108,9 @@ const AppContent: React.FC = () => {
           isConnected={isConnected}
         />
         <MainContent>
-          <Routes>
-            <Route 
-              path="/" 
-              element={renderSectionWithProps(Dashboard)} 
-            />
-            <Route 
-              path="/models" 
-              element={renderSectionWithProps(ModelsSection)} 
-            />
-            <Route 
-              path="/inference" 
-              element={renderSectionWithProps(InferenceSection)} 
-            />
-            <Route 
-              path="/inference/:tab" 
-              element={renderSectionWithProps(InferenceSection)} 
-            />
-            <Route 
-              path="/inference/:tab/:view" 
-              element={renderSectionWithProps(InferenceSection)} 
-            />
-            <Route 
-              path="/monitoring" 
-              element={renderSectionWithProps(MonitoringSection, {
-                getBufferedData,
-                getBufferStats,
-                clearDataBuffer
-              })} 
-            />
-            <Route 
-              path="/monitoring/:tab" 
-              element={renderSectionWithProps(MonitoringSection, {
-                getBufferedData,
-                getBufferStats,
-                clearDataBuffer
-              })} 
-            />
-            <Route 
-              path="/terminal" 
-              element={renderSectionWithProps(TerminalSection)} 
-            />
-            <Route 
-              path="/logs" 
-              element={renderSectionWithProps(LogsSection)} 
-            />
-            <Route 
-              path="/settings" 
-              element={renderSectionWithProps(SettingsSection)} 
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <ContentSection $active={true}>
+            {renderSection()}
+          </ContentSection>
         </MainContent>
         <GlobalNotifications />
       </AppContainer>
@@ -171,13 +119,12 @@ const AppContent: React.FC = () => {
 };
 
 function App(): JSX.Element {
+
   return (
     <ThemeProvider theme={nvidiaTheme}>
       <NotificationProvider>
         <GlobalStyles />
-        <Router>
-          <AppContent />
-        </Router>
+        <AppContent />
       </NotificationProvider>
     </ThemeProvider>
   );

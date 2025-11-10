@@ -254,9 +254,7 @@ export interface MetricCardProps {
   details?: string;
 }
 
-export interface SettingsSectionProps extends ComponentProps {
-  onNavigate?: (section: string) => void;
-}
+export interface SettingsSectionProps extends ComponentProps {}
 
 export interface InferenceSectionProps extends ComponentProps {}
 

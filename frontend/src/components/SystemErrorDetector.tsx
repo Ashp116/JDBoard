@@ -16,8 +16,7 @@ const SystemErrorDetector: React.FC<{ children: React.ReactNode }> = ({ children
         message: systemData.error.message,
         command: systemData.error.command,
         timestamp: systemData.error.timestamp,
-        persistent: true,
-        errorType: systemData.error.type // Add error type for conditional resolve button
+        persistent: true
       });
     } else {
       // Clear system error when it's resolved
