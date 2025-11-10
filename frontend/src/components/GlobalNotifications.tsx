@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { useNotifications, Notification } from '../contexts/NotificationContext';
+import { getBackendUrl } from '../utils/api';
 
 const slideIn = keyframes`
   from {
@@ -126,6 +127,31 @@ const SystemErrorBanner = styled.div`
 
     &:hover {
       background: rgba(255, 255, 255, 0.3);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+
+  .resolve-btn {
+    background: rgba(118, 185, 0, 0.3);
+    border: 1px solid rgba(118, 185, 0, 0.5);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: rgba(118, 185, 0, 0.5);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
   }
 
@@ -262,6 +288,68 @@ const getNotificationIcon = (type: Notification['type']) => {
 
 const GlobalNotifications: React.FC = () => {
   const { notifications, removeNotification, systemError, setSystemError } = useNotifications();
+  const [isResolving, setIsResolving] = useState(false);
+
+  const handleResolveJtopError = async () => {
+    if (!systemError || systemError.errorType !== 'jtop_service_inactive') return;
+
+    setIsResolving(true);
+    
+    try {
+      // For broken pipe errors, try force reconnect first (no sudo needed)
+      if (systemError.message?.toLowerCase().includes('broken pipe')) {
+        console.log('Attempting force reconnect for broken pipe error...');
+        
+        const reconnectResponse = await fetch(`${getBackendUrl()}/api/system/jtop-force-reconnect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const reconnectResult = await reconnectResponse.json();
+        
+        if (reconnectResult.success) {
+          setSystemError(null);
+          alert('jtop connection restored successfully!');
+          return;
+        } else {
+          console.log('Force reconnect failed, falling back to service restart...');
+        }
+      }
+
+      // Determine which service action to take
+      const isRestartCommand = systemError.command?.includes('restart');
+      const actionText = isRestartCommand ? 'restart jtop service' : 'install jtop service';
+      const endpoint = isRestartCommand ? '/api/system/jtop-restart-service' : '/api/system/jtop-install-service';
+
+      // Ask user for sudo password
+      const password = prompt(`Enter your sudo password to ${actionText}:`);
+      if (!password) return;
+
+      const response = await fetch(`${getBackendUrl()}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sudo_password: password })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Clear the error as it should be resolved
+        setSystemError(null);
+        alert(`jtop service ${isRestartCommand ? 'restarted' : 'installed'} successfully! The connection should be restored.`);
+      } else {
+        alert(`Failed to ${actionText}: ${result.error}`);
+      }
+    } catch (error) {
+      alert(`Error resolving jtop service: ${error}`);
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   return (
     <>
@@ -287,6 +375,16 @@ const GlobalNotifications: React.FC = () => {
               </div>
             </div>
             <div className="error-actions">
+              {systemError.errorType === 'jtop_service_inactive' && (
+                <button 
+                  className="resolve-btn"
+                  onClick={handleResolveJtopError}
+                  disabled={isResolving}
+                >
+                  <i className={isResolving ? "fas fa-spinner fa-spin" : "fas fa-wrench"}></i> 
+                  {isResolving ? ' Resolving...' : ' Resolve'}
+                </button>
+              )}
               <button 
                 className="dismiss-btn"
                 onClick={() => setSystemError(null)}

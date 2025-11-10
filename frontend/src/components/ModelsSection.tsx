@@ -84,68 +84,100 @@ const AddButton = styled.button`
 `;
 
 const Modal = styled.div<{ $show: boolean }>`
-  display: ${props => props.$show ? 'flex' : 'none'};
   position: fixed;
   top: 0;
   left: 0;
-  width: 100%;
-  height: 100%;
+  right: 0;
+  bottom: 0;
   background: rgba(0, 0, 0, 0.8);
-  z-index: 1000;
+  z-index: 10000;
+  display: ${props => props.$show ? 'flex' : 'none'};
   align-items: center;
   justify-content: center;
+  padding: 20px;
 `;
 
 const ModalContent = styled.div`
   background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.primary};
-  border-radius: 12px;
-  padding: 30px;
-  width: 90%;
-  max-width: 600px;
-  max-height: 80vh;
-  overflow-y: auto;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 16px;
+  max-width: 650px;
+  width: 100%;
+  max-height: 90vh;
   position: relative;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
 `;
 
 const ModalHeader = styled.div`
+  padding: 24px;
+  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 25px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
+  flex-shrink: 0;
+  border-radius: 16px 16px 0 0;
 
   h3 {
     color: ${props => props.theme.colors.text.primary};
     margin: 0;
     font-size: 20px;
+    font-weight: 600;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
+      font-size: 18px;
     }
   }
 `;
 
 const CloseButton = styled.button`
-  background: none;
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: transparent;
   border: none;
   color: ${props => props.theme.colors.text.secondary};
-  font-size: 24px;
   cursor: pointer;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
+  font-size: 18px;
+  padding: 5px;
 
   &:hover {
-    background: ${props => props.theme.colors.background.tertiary};
     color: ${props => props.theme.colors.text.primary};
+  }
+`;
+
+const ModalBody = styled.div`
+  padding: 24px;
+  background: ${props => props.theme.colors.background.primary};
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  border-radius: 0 0 16px 16px;
+
+  /* Custom scrollbar styling for webkit browsers */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 0 0 16px 0;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: ${props => props.theme.colors.border.secondary};
+    border-radius: 4px;
+    
+    &:hover {
+      background: ${props => props.theme.colors.text.secondary};
+    }
   }
 `;
 
@@ -287,11 +319,29 @@ const FormGroup = styled.div`
       outline: none;
       border-color: ${props => props.theme.colors.nvidia.green};
     }
+
+    &.error {
+      border-color: #ff6b6b;
+      background: rgba(255, 107, 107, 0.1);
+    }
   }
 
   textarea {
     resize: vertical;
     min-height: 80px;
+  }
+`;
+
+const ErrorMessage = styled.div`
+  color: #ff6b6b;
+  font-size: 12px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  i {
+    font-size: 10px;
   }
 `;
 
@@ -775,13 +825,54 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [selectedYOLO, setSelectedYOLO] = useState<YOLOModelOption | null>(null);
   const [selectedFormat, setSelectedFormat] = useState('PyTorch');
   const [yoloModelName, setYoloModelName] = useState('');
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load models on component mount
+  
+  // Validation states
+  const [nameError, setNameError] = useState<string>('');
+  const [yoloNameError, setYoloNameError] = useState<string>('');
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);  // Load models on component mount
   useEffect(() => {
     loadModels();
   }, []);
+
+  // Validation functions
+  const validateModelName = (name: string, isYolo: boolean = false): string => {
+    if (!name.trim()) {
+      return 'Model name is required';
+    }
+    
+    if (name.length < 2) {
+      return 'Model name must be at least 2 characters long';
+    }
+    
+    if (name.length > 50) {
+      return 'Model name must be less than 50 characters';
+    }
+    
+    // Check for invalid characters
+    if (!/^[a-zA-Z0-9\s\-_\.()]+$/.test(name)) {
+      return 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed';
+    }
+    
+    // Check for uniqueness (case-insensitive)
+    const existingNames = models.map(model => model.name.toLowerCase());
+    if (existingNames.includes(name.toLowerCase())) {
+      return 'A model with this name already exists. Please choose a different name.';
+    }
+    
+    return '';
+  };
+  
+  const validateAndSetName = (name: string, isYolo: boolean = false) => {
+    const error = validateModelName(name, isYolo);
+    if (isYolo) {
+      setYoloNameError(error);
+      setYoloModelName(name);
+    } else {
+      setNameError(error);
+      setModelName(name);
+    }
+  };
 
   const loadModels = async () => {
     try {
@@ -856,8 +947,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       
       if (data.success) {
         await loadModels();
-        resetUploadForm();
-        setShowModal(false);
+        resetModal();
         alert('Model uploaded successfully!');
       } else {
         alert(data.error || 'Upload failed');
@@ -906,8 +996,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
       if (data.success) {
         await loadModels();
-        resetYOLOForm();
-        setShowModal(false);
+        resetModal();
         alert(`YOLO model ${selectedYOLO.name} downloaded successfully!`);
       } else {
         alert(data.error || 'Download failed');
@@ -920,19 +1009,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
-  const resetUploadForm = () => {
-    setSelectedFile(null);
-    setModelName('');
-    setModelType('vision');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
   const resetYOLOForm = () => {
     setSelectedYOLO(null);
     setSelectedFormat('PyTorch');
     setYoloModelName('');
+    setYoloNameError('');
+  };
+
+  const resetUploadForm = () => {
+    setSelectedFile(null);
+    setModelName('');
+    setModelType('vision');
+    setNameError('');
+  };
+
+  const resetModal = () => {
+    resetUploadForm();
+    resetYOLOForm();
+    setActiveTab('upload');
+    setShowModal(false);
   };
 
   const handleLoadModel = async (modelId: string) => {
@@ -1118,87 +1213,95 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               <i className="fas fa-plus"></i>
               Add New Model
             </h3>
-            <CloseButton onClick={() => setShowModal(false)}>
+            <CloseButton onClick={() => resetModal()}>
               <i className="fas fa-times"></i>
             </CloseButton>
           </ModalHeader>
 
-          <OptionTabs>
-            <Tab 
-              $active={activeTab === 'upload'} 
-              onClick={() => setActiveTab('upload')}
-            >
-              <i className="fas fa-upload"></i>
-              File Upload
-            </Tab>
-            <Tab 
-              $active={activeTab === 'yolo'} 
-              onClick={() => setActiveTab('yolo')}
-            >
-              <i className="fas fa-download"></i>
-              YOLO Models
-            </Tab>
-          </OptionTabs>
-
-          {activeTab === 'upload' && (
-            <div>
-              <UploadArea
-                $dragOver={dragOver}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
+          <ModalBody>
+            <OptionTabs>
+              <Tab 
+                $active={activeTab === 'upload'} 
+                onClick={() => setActiveTab('upload')}
               >
-                <i className="fas fa-cloud-upload-alt"></i>
-                <h4>
-                  {selectedFile ? selectedFile.name : 'Drop model file here or click to browse'}
-                </h4>
-                <p>
-                  Supported formats: .onnx, .trt, .engine, .pb, .pth, .pt (Max 500MB)
-                </p>
-              </UploadArea>
+                <i className="fas fa-upload"></i>
+                File Upload
+              </Tab>
+              <Tab 
+                $active={activeTab === 'yolo'} 
+                onClick={() => setActiveTab('yolo')}
+              >
+                <i className="fas fa-download"></i>
+                YOLO Models
+              </Tab>
+            </OptionTabs>
 
-              <HiddenFileInput
-                ref={fileInputRef}
-                type="file"
-                accept=".onnx,.trt,.engine,.pb,.pth,.pt"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFileSelect(file);
-                }}
-              />
-
-              <FormGroup>
-                <label>Model Name *</label>
-                <input
-                  type="text"
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  placeholder="Enter a descriptive name for your model"
-                />
-              </FormGroup>
-
-              <FormGroup>
-                <label>Model Type</label>
-                <select
-                  value={modelType}
-                  onChange={(e) => setModelType(e.target.value)}
+            {activeTab === 'upload' && (
+              <div>
+                <UploadArea
+                  $dragOver={dragOver}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  <option value="vision">Computer Vision</option>
-                  <option value="nlp">Natural Language Processing</option>
-                  <option value="audio">Audio Processing</option>
+                  <i className="fas fa-cloud-upload-alt"></i>
+                  <h4>
+                    {selectedFile ? selectedFile.name : 'Drop model file here or click to browse'}
+                  </h4>
+                  <p>
+                    Supported formats: .onnx, .trt, .engine, .pb, .pth, .pt (Max 500MB)
+                  </p>
+                </UploadArea>
+
+                <HiddenFileInput
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".onnx,.trt,.engine,.pb,.pth,.pt"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFileSelect(file);
+                  }}
+                />
+
+                <FormGroup>
+                  <label>Model Name *</label>
+                  <input
+                    type="text"
+                    value={modelName}
+                    className={nameError ? 'error' : ''}
+                    onChange={(e) => validateAndSetName(e.target.value, false)}
+                    placeholder="Enter a descriptive name for your model"
+                  />
+                  {nameError && (
+                    <ErrorMessage>
+                      <i className="fas fa-exclamation-triangle"></i>
+                      {nameError}
+                    </ErrorMessage>
+                  )}
+                </FormGroup>
+
+                <FormGroup>
+                  <label>Model Type</label>
+                  <select
+                    value={modelType}
+                    onChange={(e) => setModelType(e.target.value)}
+                  >
+                    <option value="vision">Computer Vision</option>
+                    <option value="nlp">Natural Language Processing</option>
+                    <option value="audio">Audio Processing</option>
                   <option value="other">Other</option>
                 </select>
               </FormGroup>
 
               <ActionButtons>
-                <Button variant="secondary" onClick={() => setShowModal(false)}>
+                <Button variant="secondary" onClick={() => resetModal()}>
                   Cancel
                 </Button>
                 <Button 
                   variant="primary" 
                   onClick={handleFileUpload}
-                  disabled={loading || !selectedFile || !modelName.trim()}
+                  disabled={loading || !selectedFile || !modelName.trim() || !!nameError}
                 >
                   {loading ? <LoadingSpinner /> : 'Upload Model'}
                 </Button>
@@ -1240,7 +1343,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                           onClick={() => {
                             setSelectedYOLO(model);
                             if (!yoloModelName) {
-                              setYoloModelName(model.name);
+                              validateAndSetName(model.name, true);
                             }
                           }}
                         >
@@ -1266,9 +1369,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <input
                       type="text"
                       value={yoloModelName}
-                      onChange={(e) => setYoloModelName(e.target.value)}
+                      className={yoloNameError ? 'error' : ''}
+                      onChange={(e) => validateAndSetName(e.target.value, true)}
                       placeholder="Enter a name for this model instance"
                     />
+                    {yoloNameError && (
+                      <ErrorMessage>
+                        <i className="fas fa-exclamation-triangle"></i>
+                        {yoloNameError}
+                      </ErrorMessage>
+                    )}
                   </FormGroup>
 
                   <FormatSelector>
@@ -1289,19 +1399,20 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               )}
 
               <ActionButtons>
-                <Button variant="secondary" onClick={() => setShowModal(false)}>
+                <Button variant="secondary" onClick={() => resetModal()}>
                   Cancel
                 </Button>
                 <Button 
                   variant="primary" 
                   onClick={handleYOLODownload}
-                  disabled={loading || !selectedYOLO || !yoloModelName.trim()}
+                  disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError}
                 >
                   {loading ? <LoadingSpinner /> : 'Download & Convert'}
                 </Button>
               </ActionButtons>
             </div>
           )}
+          </ModalBody>
         </ModalContent>
       </Modal>
     </Container>

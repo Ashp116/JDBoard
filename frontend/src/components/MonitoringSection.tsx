@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import {
   Chart as ChartJS,
@@ -14,6 +15,8 @@ import {
 } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
 import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
+import { getBackendUrl } from '../utils/api';
+import { useNotifications } from '../contexts/NotificationContext';
 
 // Styled component interfaces
 interface StyledConnectionProps {
@@ -127,6 +130,7 @@ const MetricRow = styled.div`
   }
 `;
 
+// Monitoring styled components
 const ChartSection = styled.div`
   background: ${props => props.theme.colors.background.secondary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
@@ -210,8 +214,21 @@ const PauseButton = styled.button<StyledPausedProps>`
 `;
 
 const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socket, isConnected, getBufferedData, getBufferStats, clearDataBuffer }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { tab } = useParams<{ tab?: string }>();
+  
+  // Initialize tab from URL parameter, default to 'cpu'
+  const getValidTab = (urlTab?: string): string => {
+    const validTabs = ['cpu', 'gpu', 'memory', 'network', 'fan'];
+    if (urlTab && validTabs.includes(urlTab)) {
+      return urlTab;
+    }
+    return 'cpu';
+  };
+
   const [refreshTime, setRefreshTime] = useState(new Date());
-  const [activeTab, setActiveTab] = useState('cpu');
+  const [activeTab, setActiveTab] = useState(getValidTab(tab));
   const [lastDataUpdate, setLastDataUpdate] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [historicalData, setHistoricalData] = useState<{
@@ -230,6 +247,21 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   const [bufferedDataStats, setBufferedDataStats] = useState<BufferStats | null>(null);
   const maxDataPoints = 50; // Increased since we have buffered data
   const updateInterval = 2000; // Update charts every 2 seconds
+
+  // Sync state with URL parameters
+  useEffect(() => {
+    const newTab = getValidTab(tab);
+    if (newTab !== activeTab) {
+      setActiveTab(newTab);
+    }
+  }, [tab]);
+
+  // Navigation helper function
+  const navigateToTab = (newTab: string) => {
+    navigate(`/monitoring/${newTab}`);
+  };
+  
+  const { addNotification } = useNotifications();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -782,31 +814,31 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <TabButtons>
           <TabButton 
             $active={activeTab === 'cpu'} 
-            onClick={() => setActiveTab('cpu')}
+            onClick={() => navigateToTab('cpu')}
           >
             <i className="fas fa-microchip"></i> CPU
           </TabButton>
           <TabButton 
             $active={activeTab === 'gpu'} 
-            onClick={() => setActiveTab('gpu')}
+            onClick={() => navigateToTab('gpu')}
           >
             <i className="fas fa-tv"></i> GPU
           </TabButton>
           <TabButton 
             $active={activeTab === 'memory'} 
-            onClick={() => setActiveTab('memory')}
+            onClick={() => navigateToTab('memory')}
           >
             <i className="fas fa-memory"></i> Memory
           </TabButton>
           <TabButton 
             $active={activeTab === 'network'} 
-            onClick={() => setActiveTab('network')}
+            onClick={() => navigateToTab('network')}
           >
             <i className="fas fa-network-wired"></i> Network
           </TabButton>
           <TabButton 
             $active={activeTab === 'fan'} 
-            onClick={() => setActiveTab('fan')}
+            onClick={() => navigateToTab('fan')}
           >
             <i className="fas fa-fan"></i> Fan
           </TabButton>

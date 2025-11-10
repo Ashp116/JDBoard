@@ -606,12 +606,22 @@ def run_inference():
         result = ai_manager.run_inference(model_id, image)
         inference_time = time.time() - start_time
         
-        # Log inference
+        # Get image dimensions for metadata
+        image_size = f"{image.shape[1]}x{image.shape[0]}" if image is not None else None
+        
+        # Extract framework info from result if available
+        framework = result.get('framework', 'unknown') if isinstance(result, dict) else 'unknown'
+        
+        # Log inference with enhanced metadata
         request_logger.log_inference(
             model_id=model_id,
             client_ip=client_ip,
             inference_time=inference_time,
-            result=result
+            result=result,
+            image_data=image_bytes,
+            user_agent=user_agent,
+            framework=framework,
+            image_size=image_size
         )
         
         logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s by {client_ip}")
@@ -684,6 +694,201 @@ def get_log_stats():
         })
     except Exception as e:
         logger.error(f"Error getting log stats: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/logs/inference')
+def get_inference_logs():
+    """Get inference logs with pagination and filtering"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/logs/inference',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    # Parse query parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    filter_client_ip = request.args.get('client_ip', None)
+    filter_model_id = request.args.get('model_id', None)
+    filter_device_info = request.args.get('device_info', None)
+    search = request.args.get('search', None)
+    start_date = request.args.get('start_date', None)
+    end_date = request.args.get('end_date', None)
+    
+    try:
+        logs = request_logger.get_logs(
+            log_type='inference',
+            page=page,
+            per_page=per_page,
+            client_ip=filter_client_ip,
+            start_date=start_date,
+            end_date=end_date,
+            model_id=filter_model_id,
+            search=search,
+            device_info=filter_device_info
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': logs
+        })
+    except Exception as e:
+        logger.error(f"Error getting inference logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/logs/inference/export/<format>')
+def export_inference_logs(format):
+    """Export inference logs in different formats"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/api/logs/inference/export/{format}',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        if format.lower() not in ['json', 'csv', 'txt']:
+            return jsonify({
+                'success': False,
+                'error': 'Unsupported format. Use json, csv, or txt'
+            }), 400
+        
+        # Get all inference logs without pagination
+        logs_data = request_logger.get_logs(
+            log_type='inference',
+            page=1,
+            per_page=10000  # Large number to get all logs
+        )
+        
+        if format.lower() == 'json':
+            from flask import Response
+            import json
+            
+            response = Response(
+                json.dumps(logs_data, indent=2),
+                mimetype='application/json',
+                headers={'Content-Disposition': f'attachment; filename=inference_logs.json'}
+            )
+            return response
+            
+        elif format.lower() == 'csv':
+            import csv
+            import io
+            
+            output = io.StringIO()
+            if logs_data.get('logs'):
+                fieldnames = logs_data['logs'][0].keys() if logs_data['logs'] else []
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(logs_data['logs'])
+            
+            from flask import Response
+            response = Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={'Content-Disposition': f'attachment; filename=inference_logs.csv'}
+            )
+            return response
+            
+        elif format.lower() == 'txt':
+            import io
+            
+            output = io.StringIO()
+            output.write("Inference Logs Export\n")
+            output.write("=" * 50 + "\n\n")
+            
+            if logs_data.get('logs'):
+                for log in logs_data['logs']:
+                    output.write(f"Timestamp: {log.get('timestamp', 'N/A')}\n")
+                    output.write(f"Model ID: {log.get('model_id', 'N/A')}\n")
+                    output.write(f"Client IP: {log.get('client_ip', 'N/A')}\n")
+                    output.write(f"Inference Time: {log.get('inference_time', 'N/A')}s\n")
+                    output.write(f"Session ID: {log.get('session_id', 'N/A')}\n")
+                    output.write("-" * 30 + "\n")
+            
+            from flask import Response
+            response = Response(
+                output.getvalue(),
+                mimetype='text/plain',
+                headers={'Content-Disposition': f'attachment; filename=inference_logs.txt'}
+            )
+            return response
+            
+    except Exception as e:
+        logger.error(f"Error exporting inference logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/logs/inference/clear', methods=['POST'])
+def clear_inference_logs():
+    """Clear all inference logs"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/logs/inference/clear',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        result = request_logger.clear_inference_logs()
+        
+        # Log the clear operation as a system event
+        request_logger.log_system_event(
+            event_type='inference_logs_cleared',
+            event_data={'cleared_count': result.get('cleared_count', 0), 'client_ip': client_ip},
+            severity='INFO'
+        )
+        
+        return jsonify({
+            'success': True,
+            'data': result
+        })
+    except Exception as e:
+        logger.error(f"Error clearing inference logs: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/logs/inference/stats')
+def get_inference_stats():
+    """Get detailed inference statistics"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/api/logs/inference/stats',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        stats = request_logger.get_inference_stats()
+        return jsonify({
+            'success': True,
+            'data': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting inference stats: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -1317,6 +1522,204 @@ def shutdown_system():
         
     except Exception as e:
         logger.error(f"Error shutting down system: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/system/jtop-install-service', methods=['POST'])
+def install_jtop_service():
+    """Install and start the jtop service"""
+    try:
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        logger.info("Installing jtop service")
+        
+        # Run jtop --install-service
+        result = subprocess.run(
+            ['sudo', '-S', 'jtop', '--install-service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            # Wait a moment for service to start
+            time.sleep(2)
+            
+            # Check if service is now active
+            check_result = subprocess.run(
+                ['systemctl', 'is-active', 'jtop.service'],
+                capture_output=True,
+                text=True
+            )
+            
+            if check_result.returncode == 0:
+                # Force restart the entire monitoring process to completely reinitialize
+                restart_success = system_monitor.force_restart_monitoring()
+                
+                if restart_success:
+                    return jsonify({
+                        'success': True,
+                        'message': 'jtop service installed and monitoring connected successfully'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Service installed but monitoring reconnection failed'
+                    })
+            else:
+                # Try to start the service manually
+                start_result = subprocess.run(
+                    ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
+                    input=sudo_password + '\n',
+                    capture_output=True,
+                    text=True
+                )
+                
+                if start_result.returncode == 0:
+                    restart_success = system_monitor.force_restart_monitoring()
+                    if restart_success:
+                        return jsonify({
+                            'success': True,
+                            'message': 'jtop service installed and monitoring connected successfully'
+                        })
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Service started but monitoring reconnection failed'
+                        })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Service installed but failed to start: {start_result.stderr}'
+                    })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to install jtop service: {result.stderr}'
+            })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'jtop service installation timed out'
+        }), 500
+    except Exception as e:
+        logger.error(f"Error installing jtop service: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/system/jtop-restart-service', methods=['POST'])
+def restart_jtop_service():
+    """Restart the jtop service to fix broken pipe issues"""
+    try:
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        logger.info("Restarting jtop service to fix broken pipe")
+        
+        # Stop the service first
+        stop_result = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'stop', 'jtop.service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        # Wait a moment
+        time.sleep(2)
+        
+        # Start the service
+        start_result = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if start_result.returncode == 0:
+            # Wait for service to be fully ready
+            time.sleep(3)
+            
+            # Check if service is active
+            check_result = subprocess.run(
+                ['systemctl', 'is-active', 'jtop.service'],
+                capture_output=True,
+                text=True
+            )
+            
+            if check_result.returncode == 0:
+                # Force restart the entire monitoring process to completely reinitialize
+                restart_success = system_monitor.force_restart_monitoring()
+                
+                if restart_success:
+                    return jsonify({
+                        'success': True,
+                        'message': 'jtop service restarted and monitoring reconnected successfully'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Service restarted but monitoring reconnection failed'
+                    })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Service restarted but is not active'
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to start jtop service: {start_result.stderr}'
+            })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'jtop service restart timed out'
+        }), 500
+    except Exception as e:
+        logger.error(f"Error restarting jtop service: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/system/jtop-force-reconnect', methods=['POST'])
+def force_reconnect_jtop():
+    """Force reconnect to jtop without restarting the service (no sudo required)"""
+    try:
+        logger.info("Forcing jtop reconnection without service restart")
+        
+        # Force restart the entire monitoring process
+        restart_success = system_monitor.force_restart_monitoring()
+        
+        if restart_success:
+            return jsonify({
+                'success': True,
+                'message': 'jtop monitoring reconnected successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to reconnect jtop monitoring'
+            })
+        
+    except Exception as e:
+        logger.error(f"Error force reconnecting jtop: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
