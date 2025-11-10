@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { SidebarProps } from '../types';
+import packageJson from "../../package.json"
 
 // Styled component interfaces
 interface StyledActiveProps {
@@ -199,7 +200,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     <SidebarContainer>
       <SidebarBrand>
         <SidebarLogo>
-          <span className="brand-text">JBoard</span>
+          <img src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
+          <span className="brand-text" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '0px' }}>
+            v{packageJson.version}
+          </span>
         </SidebarLogo>
       </SidebarBrand>
 

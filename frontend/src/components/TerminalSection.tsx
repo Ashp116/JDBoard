@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { TerminalSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import packageJson from "../../package.json"
 
 const Container = styled.div`
   padding: 30px;
@@ -123,7 +124,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
   const [terminalLines, setTerminalLines] = useState<TerminalLine[]>([
     {
       type: 'output',
-      content: 'Welcome to JBoard Terminal v1.0.0',
+      content: `Welcome to JBoard Terminal v${packageJson.version}`,
       timestamp: new Date()
     },
     {
