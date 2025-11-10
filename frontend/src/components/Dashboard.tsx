@@ -199,14 +199,17 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
   return (
     <DashboardContainer>
       <ContentHeader>
-        <HeaderInfo>
-          <h1>JBoard</h1>
-          <HeaderMeta>
-            <span>Jetson Edge Computing Platform</span>
-            <span className="separator">•</span>
-            <span>{currentTime}</span>
-          </HeaderMeta>
-        </HeaderInfo>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <img src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '90px', width: 'auto', maxHeight: '100%' }} />
+          <HeaderInfo>
+            <h1>Jetson Board</h1>
+            <HeaderMeta>
+              <span>Edge Computing Platform</span>
+              <span className="separator">•</span>
+              <span>{currentTime}</span>
+            </HeaderMeta>
+          </HeaderInfo>
+        </div>
         <SystemStatus isConnected={isConnected} />
       </ContentHeader>
 
