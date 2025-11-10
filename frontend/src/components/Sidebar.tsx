@@ -53,6 +53,11 @@ const SidebarLogo = styled.div`
     min-width: 24px;
   }
 
+  .brand-icon {
+    opacity: 0;
+    transition: opacity ${props => props.theme.transitions.medium};
+  }
+
   .brand-text {
     opacity: 0;
     transition: opacity ${props => props.theme.transitions.medium};
@@ -60,6 +65,10 @@ const SidebarLogo = styled.div`
   }
 
   ${SidebarContainer}:hover & .brand-text {
+    opacity: 1;
+  }
+
+  ${SidebarContainer}:hover & .brand-icon {
     opacity: 1;
   }
 `;
@@ -200,7 +209,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     <SidebarContainer>
       <SidebarBrand>
         <SidebarLogo>
-          <img src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
+          <img className='brand-icon' src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
           <span className="brand-text" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '0px' }}>
             v{packageJson.version}
           </span>
