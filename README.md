@@ -1,4 +1,9 @@
-# NVIDIA Jetson Edge AI Dashboard
+
+<p align="center">
+   <img src="frontend/public/JetsonBoard.svg" alt="Jetson Board Icon" width="120" />
+</p>
+
+# JBoard
 
 A modern, React-based edge AI dashboard designed for NVIDIA Jetson devices. This dashboard provides real-time system monitoring, AI model management, inference capabilities, and comprehensive analytics with a professional NVIDIA-themed interface.
 
