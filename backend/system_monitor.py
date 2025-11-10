@@ -4,12 +4,16 @@ System Monitor for Jetson Edge AI Dashboard
 Monitors CPU, GPU, memory, temperature, fan, and system information using jetson-stats
 """
 
+import signal
 import threading
 import time
 import json
 import math
 from datetime import datetime
 import logging
+
+# Ignore SIGPIPE signal to handle broken pipe errors gracefully
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 # Check for jetson-stats availability
 try:
@@ -152,6 +156,24 @@ After installation, you may need to reboot your system.
                 # Clear any previous errors on successful update
                 self.system_data['error'] = None
                 
+        except BrokenPipeError:
+            # Handle broken pipe specifically - this is usually a temporary connection issue
+            # logger.warning("Broken pipe error detected - jtop connection lost")
+            self.system_data['error'] = {
+                'type': 'jtop_service_inactive',
+                'message': 'Connection to jtop service lost (broken pipe). Service needs to be restarted.',
+                'command': 'sudo systemctl restart jtop.service',
+                'timestamp': datetime.now().isoformat()
+            }
+        except ConnectionResetError:
+            # Handle connection reset
+            # logger.warning("Connection reset by peer - jtop connection lost")
+            self.system_data['error'] = {
+                'type': 'jtop_service_inactive',
+                'message': 'Connection to jtop service reset. Service needs to be restarted.',
+                'command': 'sudo systemctl restart jtop.service',
+                'timestamp': datetime.now().isoformat()
+            }
         except Exception as e:
             error_str = str(e)
             logger.error(f"Failed to update system data from jetson-stats: {e}")
@@ -656,32 +678,42 @@ After installation, you may need to reboot your system.
     def _force_jtop_reconnection(self):
         """Force a complete jtop reconnection by creating a new connection"""
         try:
-            # Create a completely fresh jtop connection
-            with jtop() as jt:
-                # Test the connection by reading some basic stats
-                stats = jt.stats
-                
-                # If we can read stats, the connection is working
-                if stats:
-                    # Update our system data with the fresh connection
-                    self._update_cpu_data(stats)
-                    self._update_memory_data(stats)
-                    self._update_gpu_data(stats)
-                    self._update_disk_data(stats)
-                    self._update_network_data(stats)
-                    self._update_fan_data(stats)
-                    self._update_process_data()
-                    self._update_system_logs()
-                    self._update_system_info(stats, jt)
-                    self.system_data['last_updated'] = datetime.now().isoformat()
-                    self.system_data['error'] = None
+            # Set up signal handling for this specific operation
+            old_handler = signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+            
+            try:
+                # Create a completely fresh jtop connection
+                with jtop() as jt:
+                    # Test the connection by reading some basic stats
+                    stats = jt.stats
                     
-                    logger.info("Successfully tested new jtop connection")
-                    return True
-                else:
-                    logger.warning("jtop connection established but no stats available")
-                    return False
-                    
+                    # If we can read stats, the connection is working
+                    if stats:
+                        # Update our system data with the fresh connection
+                        self._update_cpu_data(stats)
+                        self._update_memory_data(stats)
+                        self._update_gpu_data(stats)
+                        self._update_disk_data(stats)
+                        self._update_network_data(stats)
+                        self._update_fan_data(stats)
+                        self._update_process_data()
+                        self._update_system_logs()
+                        self._update_system_info(stats, jt)
+                        self.system_data['last_updated'] = datetime.now().isoformat()
+                        self.system_data['error'] = None
+                        
+                        logger.info("Successfully tested new jtop connection")
+                        return True
+                    else:
+                        logger.warning("jtop connection established but no stats available")
+                        return False
+            finally:
+                # Restore the original signal handler
+                signal.signal(signal.SIGPIPE, old_handler)
+                        
+        except (BrokenPipeError, ConnectionResetError) as e:
+            logger.warning(f"Socket error during force reconnection: {e}")
+            return False
         except Exception as e:
             logger.warning(f"Force reconnection failed: {e}")
             return False
@@ -695,20 +727,43 @@ After installation, you may need to reboot your system.
         self.stop_monitoring()
         
         # Wait for thread to fully stop
-        time.sleep(2)
+        time.sleep(3)
         
         # Clear error state
         self.system_data['error'] = None
+        
+        # Wait additional time for jtop service to be fully ready
+        time.sleep(5)
+        
+        # Test jtop connection before restarting monitoring
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                with jtop() as jt:
+                    # Try to read stats to verify connection works
+                    stats = jt.stats
+                    if stats:
+                        logger.info(f"jtop connection verified on attempt {attempt + 1}")
+                        break
+            except Exception as e:
+                logger.warning(f"jtop connection test failed (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                else:
+                    logger.error("Failed to establish jtop connection after all retries")
+                    return False
         
         # Restart monitoring if it was running before
         if was_monitoring:
             self.start_monitoring()
             logger.info("Monitoring process restarted successfully")
             
-            # Test the connection immediately
-            time.sleep(1)
+            # Give monitoring time to stabilize
+            time.sleep(2)
+            
+            # Test the connection one more time
             try:
-                self._force_jtop_reconnection()
+                self._update_system_data()
                 logger.info("Force restart completed successfully")
                 return True
             except Exception as e:

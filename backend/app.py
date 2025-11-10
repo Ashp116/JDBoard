@@ -4,10 +4,11 @@ Jetson Edge AI Dashboard - Backend Server
 A cyberpunk-themed dashboard for Jetson devices with AI model management
 """
 
+import signal
+import os
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
-import os
 import json
 import time
 import logging
@@ -18,6 +19,9 @@ import threading
 from pathlib import Path
 import psutil
 import GPUtil
+
+# Ignore SIGPIPE signal to handle broken pipe errors gracefully
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
@@ -156,7 +160,7 @@ def get_gpu_status():
 
 @app.route('/api/system/logs')
 def get_system_logs():
-    """Get system logs"""
+    """Get system logs with optional filtering for broken pipe monitoring"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -168,6 +172,65 @@ def get_system_logs():
     )
     
     try:
+        # Check for filtering parameters
+        since_timestamp = request.args.get('since', type=int)
+        filter_term = request.args.get('filter', '')
+        
+        # If filtering parameters are provided, use enhanced log parsing
+        if since_timestamp or filter_term:
+            logs = []
+            log_file_path = '../logs/app.log'
+            
+            if os.path.exists(log_file_path):
+                with open(log_file_path, 'r') as f:
+                    lines = f.readlines()
+                    
+                # Parse recent logs
+                for line in reversed(lines[-1000:]):  # Check last 1000 lines
+                    try:
+                        # Parse log line format: timestamp - logger - level - message
+                        parts = line.strip().split(' - ', 3)
+                        if len(parts) >= 4:
+                            timestamp_str = parts[0]
+                            # Handle both comma and period in timestamp
+                            timestamp_str = timestamp_str.replace(',', '.')
+                            try:
+                                timestamp = datetime.fromisoformat(timestamp_str).timestamp() * 1000
+                            except:
+                                continue
+                            
+                            # Filter by timestamp if provided
+                            if since_timestamp and timestamp < since_timestamp:
+                                continue
+                                
+                            logger_name = parts[1]
+                            level = parts[2]
+                            message = parts[3]
+                            
+                            # Filter by term if provided
+                            if filter_term and filter_term.lower() not in message.lower():
+                                continue
+                            
+                            logs.append({
+                                'timestamp': timestamp,
+                                'logger': logger_name,
+                                'level': level,
+                                'message': message
+                            })
+                            
+                    except (ValueError, IndexError):
+                        continue
+            
+            # Sort by timestamp (newest first)
+            logs.sort(key=lambda x: x['timestamp'], reverse=True)
+            
+            return jsonify({
+                'success': True,
+                'logs': logs,
+                'count': len(logs)
+            })
+        
+        # Default behavior - use the system_monitor method
         logs_data = system_monitor.get_system_logs()
         return jsonify({
             'success': True,
@@ -1539,6 +1602,22 @@ def install_jtop_service():
         
         logger.info("Installing jtop service")
         
+        # First, validate the sudo password using the same method as SettingsSection  
+        validate_result = subprocess.run(
+            ['sudo', '-S', '-k', 'true'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if validate_result.returncode != 0:
+            logger.warning(f"Sudo password validation failed: {validate_result.stderr}")
+            return jsonify({
+                'success': False, 
+                'error': 'Invalid sudo password'
+            }), 401
+        
         # Run jtop --install-service
         result = subprocess.run(
             ['sudo', '-S', 'jtop', '--install-service'],
@@ -1549,17 +1628,28 @@ def install_jtop_service():
         )
         
         if result.returncode == 0:
-            # Wait a moment for service to start
-            time.sleep(2)
+            # Wait longer for service to fully start and initialize
+            time.sleep(5)
             
-            # Check if service is now active
-            check_result = subprocess.run(
-                ['systemctl', 'is-active', 'jtop.service'],
-                capture_output=True,
-                text=True
-            )
+            # Check if service is now active with retries
+            max_retries = 3
+            service_active = False
             
-            if check_result.returncode == 0:
+            for attempt in range(max_retries):
+                check_result = subprocess.run(
+                    ['systemctl', 'is-active', 'jtop.service'],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if check_result.returncode == 0:
+                    service_active = True
+                    break
+                else:
+                    logger.info(f"Service not ready yet (attempt {attempt + 1}/{max_retries}), waiting...")
+                    time.sleep(3)
+            
+            if service_active:
                 # Force restart the entire monitoring process to completely reinitialize
                 restart_success = system_monitor.force_restart_monitoring()
                 
@@ -1629,6 +1719,21 @@ def restart_jtop_service():
         
         logger.info("Restarting jtop service to fix broken pipe")
         
+        # First, validate the sudo password using the same method as SettingsSection
+        validate_result = subprocess.run(
+            ['sudo', '-S', '-k', 'true'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if validate_result.returncode != 0:
+            return jsonify({
+                'success': False, 
+                'error': 'Invalid sudo password'
+            }), 401
+        
         # Stop the service first
         stop_result = subprocess.run(
             ['sudo', '-S', 'systemctl', 'stop', 'jtop.service'],
@@ -1651,17 +1756,28 @@ def restart_jtop_service():
         )
         
         if start_result.returncode == 0:
-            # Wait for service to be fully ready
-            time.sleep(3)
+            # Wait longer for service to be fully ready
+            time.sleep(5)
             
-            # Check if service is active
-            check_result = subprocess.run(
-                ['systemctl', 'is-active', 'jtop.service'],
-                capture_output=True,
-                text=True
-            )
+            # Check if service is active with retries
+            max_retries = 3
+            service_active = False
             
-            if check_result.returncode == 0:
+            for attempt in range(max_retries):
+                check_result = subprocess.run(
+                    ['systemctl', 'is-active', 'jtop.service'],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if check_result.returncode == 0:
+                    service_active = True
+                    break
+                else:
+                    logger.info(f"Service not ready yet after restart (attempt {attempt + 1}/{max_retries}), waiting...")
+                    time.sleep(3)
+            
+            if service_active:
                 # Force restart the entire monitoring process to completely reinitialize
                 restart_success = system_monitor.force_restart_monitoring()
                 
