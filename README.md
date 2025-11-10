@@ -1,6 +1,6 @@
 
 <p align="center">
-   <img src="frontend/public/JetsonBoard.svg" alt="Jetson Board Icon" width="120" />
+   <img src="/JBoardIcon.svg" alt="Jetson Board Icon" width="120" />
 </p>
 
 # JBoard
