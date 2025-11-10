@@ -1527,6 +1527,204 @@ def shutdown_system():
             'error': str(e)
         }), 500
 
+@app.route('/api/system/jtop-install-service', methods=['POST'])
+def install_jtop_service():
+    """Install and start the jtop service"""
+    try:
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        logger.info("Installing jtop service")
+        
+        # Run jtop --install-service
+        result = subprocess.run(
+            ['sudo', '-S', 'jtop', '--install-service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode == 0:
+            # Wait a moment for service to start
+            time.sleep(2)
+            
+            # Check if service is now active
+            check_result = subprocess.run(
+                ['systemctl', 'is-active', 'jtop.service'],
+                capture_output=True,
+                text=True
+            )
+            
+            if check_result.returncode == 0:
+                # Force restart the entire monitoring process to completely reinitialize
+                restart_success = system_monitor.force_restart_monitoring()
+                
+                if restart_success:
+                    return jsonify({
+                        'success': True,
+                        'message': 'jtop service installed and monitoring connected successfully'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Service installed but monitoring reconnection failed'
+                    })
+            else:
+                # Try to start the service manually
+                start_result = subprocess.run(
+                    ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
+                    input=sudo_password + '\n',
+                    capture_output=True,
+                    text=True
+                )
+                
+                if start_result.returncode == 0:
+                    restart_success = system_monitor.force_restart_monitoring()
+                    if restart_success:
+                        return jsonify({
+                            'success': True,
+                            'message': 'jtop service installed and monitoring connected successfully'
+                        })
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Service started but monitoring reconnection failed'
+                        })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': f'Service installed but failed to start: {start_result.stderr}'
+                    })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to install jtop service: {result.stderr}'
+            })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'jtop service installation timed out'
+        }), 500
+    except Exception as e:
+        logger.error(f"Error installing jtop service: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/system/jtop-restart-service', methods=['POST'])
+def restart_jtop_service():
+    """Restart the jtop service to fix broken pipe issues"""
+    try:
+        data = request.json
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        logger.info("Restarting jtop service to fix broken pipe")
+        
+        # Stop the service first
+        stop_result = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'stop', 'jtop.service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        # Wait a moment
+        time.sleep(2)
+        
+        # Start the service
+        start_result = subprocess.run(
+            ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
+            input=sudo_password + '\n',
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if start_result.returncode == 0:
+            # Wait for service to be fully ready
+            time.sleep(3)
+            
+            # Check if service is active
+            check_result = subprocess.run(
+                ['systemctl', 'is-active', 'jtop.service'],
+                capture_output=True,
+                text=True
+            )
+            
+            if check_result.returncode == 0:
+                # Force restart the entire monitoring process to completely reinitialize
+                restart_success = system_monitor.force_restart_monitoring()
+                
+                if restart_success:
+                    return jsonify({
+                        'success': True,
+                        'message': 'jtop service restarted and monitoring reconnected successfully'
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Service restarted but monitoring reconnection failed'
+                    })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Service restarted but is not active'
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to start jtop service: {start_result.stderr}'
+            })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'jtop service restart timed out'
+        }), 500
+    except Exception as e:
+        logger.error(f"Error restarting jtop service: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/system/jtop-force-reconnect', methods=['POST'])
+def force_reconnect_jtop():
+    """Force reconnect to jtop without restarting the service (no sudo required)"""
+    try:
+        logger.info("Forcing jtop reconnection without service restart")
+        
+        # Force restart the entire monitoring process
+        restart_success = system_monitor.force_restart_monitoring()
+        
+        if restart_success:
+            return jsonify({
+                'success': True,
+                'message': 'jtop monitoring reconnected successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to reconnect jtop monitoring'
+            })
+        
+    except Exception as e:
+        logger.error(f"Error force reconnecting jtop: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 # Terminal session management
 terminal_sessions = {}
 

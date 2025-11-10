@@ -165,6 +165,13 @@ After installation, you may need to reboot your system.
                     'command': 'sudo jtop --install-service',
                     'timestamp': datetime.now().isoformat()
                 }
+            elif "broken pipe" in error_str.lower() or "errno 32" in error_str.lower():
+                self.system_data['error'] = {
+                    'type': 'jtop_service_inactive',
+                    'message': 'Connection to jtop service lost (broken pipe). Service needs to be restarted.',
+                    'command': 'sudo systemctl restart jtop.service',
+                    'timestamp': datetime.now().isoformat()
+                }
             elif "permission" in error_str.lower() or "access" in error_str.lower():
                 self.system_data['error'] = {
                     'type': 'permission_error',
@@ -612,6 +619,104 @@ After installation, you may need to reboot your system.
             logger.debug(f"Error getting Jetson info: {e}")
         
         return info
+    
+    def restart_jtop_connection(self):
+        """Restart the jtop connection after service installation"""
+        logger.info("Restarting jtop connection...")
+        
+        # Clear any existing error state
+        self.system_data['error'] = None
+        
+        # Wait a moment for the service to be fully ready
+        time.sleep(2)
+        
+        # Try multiple times to reconnect with complete reinitialization
+        for attempt in range(3):
+            try:
+                logger.info(f"Attempting jtop reconnection (attempt {attempt + 1}/3)")
+                
+                # Force complete reinitialization by calling jtop() fresh each time
+                # This ensures we don't reuse any corrupted connection state
+                success = self._force_jtop_reconnection()
+                
+                if success:
+                    logger.info("jtop connection restarted successfully")
+                    return
+                else:
+                    logger.warning(f"jtop reconnection attempt {attempt + 1} failed")
+                    
+            except Exception as e:
+                logger.warning(f"jtop connection attempt {attempt + 1} failed: {e}")
+                
+            if attempt < 2:  # Don't wait after the last attempt
+                time.sleep(3)
+        
+        logger.error("Failed to restart jtop connection after 3 attempts")
+
+    def _force_jtop_reconnection(self):
+        """Force a complete jtop reconnection by creating a new connection"""
+        try:
+            # Create a completely fresh jtop connection
+            with jtop() as jt:
+                # Test the connection by reading some basic stats
+                stats = jt.stats
+                
+                # If we can read stats, the connection is working
+                if stats:
+                    # Update our system data with the fresh connection
+                    self._update_cpu_data(stats)
+                    self._update_memory_data(stats)
+                    self._update_gpu_data(stats)
+                    self._update_disk_data(stats)
+                    self._update_network_data(stats)
+                    self._update_fan_data(stats)
+                    self._update_process_data()
+                    self._update_system_logs()
+                    self._update_system_info(stats, jt)
+                    self.system_data['last_updated'] = datetime.now().isoformat()
+                    self.system_data['error'] = None
+                    
+                    logger.info("Successfully tested new jtop connection")
+                    return True
+                else:
+                    logger.warning("jtop connection established but no stats available")
+                    return False
+                    
+        except Exception as e:
+            logger.warning(f"Force reconnection failed: {e}")
+            return False
+
+    def force_restart_monitoring(self):
+        """Completely restart the monitoring process to recover from persistent errors"""
+        logger.info("Force restarting monitoring process...")
+        
+        # Stop current monitoring
+        was_monitoring = self.monitoring
+        self.stop_monitoring()
+        
+        # Wait for thread to fully stop
+        time.sleep(2)
+        
+        # Clear error state
+        self.system_data['error'] = None
+        
+        # Restart monitoring if it was running before
+        if was_monitoring:
+            self.start_monitoring()
+            logger.info("Monitoring process restarted successfully")
+            
+            # Test the connection immediately
+            time.sleep(1)
+            try:
+                self._force_jtop_reconnection()
+                logger.info("Force restart completed successfully")
+                return True
+            except Exception as e:
+                logger.error(f"Force restart test failed: {e}")
+                return False
+        else:
+            logger.info("Monitoring was not running, just cleared error state")
+            return True
     
     def get_system_logs(self):
         """Get current system logs data"""
