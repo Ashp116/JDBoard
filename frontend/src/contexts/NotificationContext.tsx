@@ -8,6 +8,7 @@ export interface Notification {
   command?: string;
   timestamp: string;
   persistent?: boolean; // If true, notification won't auto-dismiss
+  errorType?: string; // For system error types like 'jtop_service_inactive'
   action?: {
     label: string;
     onClick: () => void;
