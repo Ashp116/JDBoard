@@ -157,7 +157,6 @@ After installation, you may need to reboot your system.
                 self.system_data['error'] = None
                 
         except BrokenPipeError:
-
             # Handle broken pipe specifically - this is usually a temporary connection issue
             # logger.warning("Broken pipe error detected - jtop connection lost")
             self.system_data['error'] = {
@@ -167,7 +166,6 @@ After installation, you may need to reboot your system.
                 'timestamp': datetime.now().isoformat()
             }
         except ConnectionResetError:
-            
             # Handle connection reset
             # logger.warning("Connection reset by peer - jtop connection lost")
             self.system_data['error'] = {
