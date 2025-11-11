@@ -33,6 +33,10 @@ const SidebarBrand = styled.div`
   padding: 20px;
   text-align: center;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60px;
 `;
 
 const SidebarLogo = styled.div`
@@ -42,11 +46,12 @@ const SidebarLogo = styled.div`
   color: ${props => props.theme.colors.nvidia.green};
   text-shadow: 0 0 10px ${props => props.theme.colors.nvidia.green};
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  position: relative;
 
   i {
     font-size: 1.5rem;
@@ -54,22 +59,37 @@ const SidebarLogo = styled.div`
   }
 
   .brand-icon {
-    opacity: 0;
+    opacity: 1;
     transition: opacity ${props => props.theme.transitions.medium};
+    flex-shrink: 0;
+    min-width: 32px;
   }
 
   .brand-text {
     opacity: 0;
     transition: opacity ${props => props.theme.transitions.medium};
     font-size: 1rem;
+    position: absolute;
+    left: 100%;
+    margin-left: 10px;
+    background: ${props => props.theme.colors.background.primary};
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+    z-index: 1000;
   }
 
   ${SidebarContainer}:hover & .brand-text {
     opacity: 1;
-  }
-
-  ${SidebarContainer}:hover & .brand-icon {
-    opacity: 1;
+    position: static;
+    background: transparent;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    margin-left: 0;
+    z-index: auto;
   }
 `;
 
