@@ -19,6 +19,7 @@ interface NotificationContextType {
   notifications: Notification[];
   addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void;
   removeNotification: (id: string) => void;
+  updateNotification: (id: string, updates: Partial<Notification>) => void;
   clearNotifications: () => void;
   systemError: Notification | null;
   setSystemError: (error: Notification | null) => void;
@@ -59,6 +60,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
+  const updateNotification = useCallback((id: string, updates: Partial<Notification>) => {
+    setNotifications(prev => prev.map(n => 
+      n.id === id ? { ...n, ...updates } : n
+    ));
+  }, []);
+
   const clearNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
@@ -69,6 +76,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         notifications,
         addNotification,
         removeNotification,
+        updateNotification,
         clearNotifications,
         systemError,
         setSystemError

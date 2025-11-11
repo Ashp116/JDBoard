@@ -1154,29 +1154,85 @@ class AIModelManager:
         
         return detailed_models
 
-    def download_yolo_model(self, model_url, model_name, target_format='PyTorch'):
-        """Download a YOLO model and optionally convert it to different format"""
+    def download_yolo_model(self, model_url, model_name, target_format='PyTorch', progress_callback=None, cancel_check_callback=None):
+        """Download a YOLO model and optionally convert it to different format with progress tracking and cancellation support"""
         import urllib.request
         import shutil
         from pathlib import Path
+        
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+        
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("Download cancelled by user")
         
         try:
             # Create downloads directory
             download_dir = self.models_dir / 'downloads'
             download_dir.mkdir(exist_ok=True)
             
+            update_progress(5, 'Initializing download...')
+            check_cancelled()
+            
             # Generate filename
             url_filename = model_url.split('/')[-1]
             download_path = download_dir / url_filename
             
             logger.info(f"Downloading YOLO model from {model_url}")
+            logger.info(f"Target file: {download_path}")
+            logger.info(f"Model name: {model_name}")
+            logger.info(f"Target format: {target_format}")
+            update_progress(15, 'Starting download...')
+            check_cancelled()
             
-            # Download the model
-            with urllib.request.urlopen(model_url) as response:
-                with open(download_path, 'wb') as f:
-                    shutil.copyfileobj(response, f)
+            # Download the model with progress tracking and cancellation checks
+            def download_with_progress():
+                try:
+                    response = urllib.request.urlopen(model_url)
+                    total_size = int(response.getheader('Content-Length', 0))
+                    downloaded = 0
+                    
+                    update_progress(20, 'Downloading model weights...')
+                    check_cancelled()
+                    
+                    with open(download_path, 'wb') as f:
+                        while True:
+                            chunk = response.read(8192)
+                            if not chunk:
+                                break
+                            
+                            # Check for cancellation every chunk
+                            check_cancelled()
+                            
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            if total_size > 0:
+                                progress = 20 + int((downloaded / total_size) * 50)  # 20-70%
+                                update_progress(progress, f'Downloading... {progress-20}% of model data')
+                    
+                    response.close()
+                except Exception as e:
+                    # Clean up partial download on cancellation/error
+                    try:
+                        if download_path.exists():
+                            os.remove(download_path)
+                    except:
+                        pass
+                    
+                    if "cancelled" in str(e).lower():
+                        logger.info(f"Download cancelled: {url_filename}")
+                    else:
+                        logger.error(f"Download failed: {str(e)}")
+                    raise
+            
+            download_with_progress()
             
             logger.info(f"Downloaded model to {download_path}")
+            update_progress(75, 'Processing model file...')
+            check_cancelled()
             
             # Handle format conversion if needed
             final_path = download_path
@@ -1184,7 +1240,12 @@ class AIModelManager:
             
             if target_format != 'PyTorch':
                 logger.info(f"Converting model to {target_format}")
-                final_path, final_format = self._convert_yolo_model(download_path, target_format)
+                update_progress(80, f'Converting to {target_format} format...')
+                check_cancelled()
+                final_path, final_format = self._convert_yolo_model(download_path, target_format, progress_callback, cancel_check_callback)
+            
+            update_progress(90, 'Registering model...')
+            check_cancelled()
             
             # Register the model
             model_info = self.register_model(
@@ -1193,6 +1254,8 @@ class AIModelManager:
                 model_type='vision',
                 original_filename=url_filename
             )
+            
+            update_progress(100, 'Model ready for use!')
             
             logger.info(f"YOLO model {model_name} successfully downloaded and registered")
             
@@ -1260,10 +1323,18 @@ class AIModelManager:
         
         # Never clean up .onnx files for ONNX target format or other scenarios
     
-    def _convert_yolo_model(self, source_path, target_format):
-        """Convert YOLO model to different format and delete original"""
+    def _convert_yolo_model(self, source_path, target_format, progress_callback=None, cancel_check_callback=None):
+        """Convert YOLO model to different format with progress tracking and cancellation support"""
         import shutil
         from pathlib import Path
+        
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+        
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("Conversion cancelled by user")
         
         conversion_map = {
             'ONNX': ('onnx', '.onnx'),
@@ -1285,17 +1356,25 @@ class AIModelManager:
         converted_path = source_path.with_suffix(extension)
         
         try:
+            update_progress(82, f'Starting {target_format} conversion...')
+            check_cancelled()
+            
             # Attempt real conversion using ultralytics
             if target_format == 'ONNX':
-                converted_path = self._convert_to_onnx(source_path)
+                converted_path = self._convert_to_onnx(source_path, progress_callback, cancel_check_callback)
             elif target_format == 'TensorRT':
-                converted_path = self._convert_to_tensorrt(source_path)
+                converted_path = self._convert_to_tensorrt(source_path, progress_callback, cancel_check_callback)
             elif target_format == 'CoreML':
-                converted_path = self._convert_to_coreml(source_path)
+                converted_path = self._convert_to_coreml(source_path, progress_callback, cancel_check_callback)
             else:
                 # Fallback: copy with new extension (placeholder)
                 logger.warning(f"Real conversion for {target_format} not implemented, copying file")
+                update_progress(85, f'Creating {target_format} placeholder...')
+                check_cancelled()
                 shutil.copy2(source_path, converted_path)
+            
+            update_progress(88, 'Finalizing conversion...')
+            check_cancelled()
             
             # Delete the original PyTorch file after successful conversion
             if converted_path != source_path and source_path.exists():
@@ -1305,6 +1384,7 @@ class AIModelManager:
             # Clean up any intermediate files created during conversion
             self._cleanup_intermediate_files(source_path, target_format, converted_path)
             
+            update_progress(90, f'Model converted to {target_format}')
             logger.info(f"Model converted to {target_format}: {converted_path}")
             return converted_path, framework
             
@@ -1313,8 +1393,19 @@ class AIModelManager:
             # If conversion fails, keep original file and raise error
             raise RuntimeError(f"Failed to convert model to {target_format}: {str(e)}")
     
-    def _convert_to_onnx(self, source_path):
-        """Convert YOLO model to ONNX format"""
+    def _convert_to_onnx(self, source_path, progress_callback=None, cancel_check_callback=None):
+        """Convert YOLO model to ONNX format with progress tracking and cancellation"""
+        import threading
+        import time
+        
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+        
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("ONNX conversion cancelled by user")
+        
         try:
             # Check if ultralytics is available
             if not ULTRALYTICS_AVAILABLE:
@@ -1322,15 +1413,80 @@ class AIModelManager:
                 
             from ultralytics import YOLO
             
+            update_progress(83, 'Loading model for ONNX conversion...')
+            check_cancelled()
+            
             # Load the model
             model = YOLO(str(source_path))
             
-            # Export to ONNX
-            onnx_path = source_path.with_suffix('.onnx')
-            model.export(format='onnx')
+            update_progress(85, 'Exporting to ONNX format...')
+            check_cancelled()
             
-            # Ultralytics saves the exported file with the same name but different extension
-            # in the same directory as the source
+            # Use threading for ONNX conversion too
+            onnx_path = source_path.with_suffix('.onnx')
+            conversion_completed = threading.Event()
+            conversion_error = None
+            conversion_cancelled = threading.Event()
+            
+            def run_onnx_conversion():
+                nonlocal conversion_error
+                try:
+                    if conversion_cancelled.is_set():
+                        return
+                        
+                    model.export(format='onnx')
+                    
+                    if not conversion_cancelled.is_set():
+                        conversion_completed.set()
+                except Exception as e:
+                    if not conversion_cancelled.is_set():
+                        conversion_error = e
+                        conversion_completed.set()
+            
+            # Start conversion in background thread
+            conversion_thread = threading.Thread(target=run_onnx_conversion)
+            conversion_thread.daemon = True
+            conversion_thread.start()
+            
+            # Monitor for cancellation
+            start_time = time.time()
+            try:
+                while not conversion_completed.is_set():
+                    check_cancelled()
+                    time.sleep(0.5)  # Check more frequently for ONNX (usually faster)
+                    
+                    # Update progress during conversion
+                    elapsed = time.time() - start_time
+                    if elapsed > 5:
+                        fake_progress = min(87, 85 + int(elapsed / 5))
+                        update_progress(fake_progress, f'Converting to ONNX... ({int(elapsed)}s elapsed)')
+                        
+            except Exception as e:
+                conversion_cancelled.set()
+                logger.info("ONNX conversion cancelled, cleaning up...")
+                
+                conversion_thread.join(timeout=3)
+                
+                # Clean up partial file
+                if onnx_path.exists():
+                    try:
+                        onnx_path.unlink()
+                        logger.info(f"Cleaned up partial ONNX file: {onnx_path}")
+                    except:
+                        pass
+                
+                raise e
+            
+            # Wait for thread to complete
+            conversion_thread.join(timeout=5)
+            
+            if conversion_error:
+                raise conversion_error
+            
+            update_progress(88, 'Verifying ONNX export...')
+            check_cancelled()
+            
+            # Check if the exported file exists
             expected_onnx = source_path.with_suffix('.onnx')
             if expected_onnx.exists():
                 logger.info(f"Successfully converted to ONNX: {expected_onnx}")
@@ -1341,46 +1497,285 @@ class AIModelManager:
         except ImportError:
             logger.warning("ultralytics not available, using fallback conversion")
             # Fallback: copy file with .onnx extension
+            update_progress(85, 'Creating ONNX placeholder...')
+            check_cancelled()
             onnx_path = source_path.with_suffix('.onnx')
             shutil.copy2(source_path, onnx_path)
             return onnx_path
         except Exception as e:
+            if "cancelled" in str(e).lower():
+                # Clean up partial conversion on cancellation
+                onnx_path = source_path.with_suffix('.onnx')
+                if onnx_path.exists():
+                    try:
+                        onnx_path.unlink()
+                    except:
+                        pass
             logger.error(f"ONNX conversion failed: {str(e)}")
             raise
     
-    def _convert_to_tensorrt(self, source_path):
-        """Convert YOLO model to TensorRT format using ultralytics"""
+    def _convert_to_tensorrt(self, source_path, progress_callback=None, cancel_check_callback=None):
+        """Convert YOLO model to TensorRT format with true cancellation support"""
+        import subprocess
+        import time
+        import sys
+        import signal
+        import os
+        import tempfile
+        
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+        
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("TensorRT conversion cancelled by user")
+        
         try:
             # Check if ultralytics is available
             if not ULTRALYTICS_AVAILABLE:
                 raise ImportError("ultralytics not available")
+            
+            # Check if source file exists and is readable
+            if not source_path.exists():
+                raise FileNotFoundError(f"Source model file not found: {source_path}")
                 
-            from ultralytics import YOLO
+            file_size = source_path.stat().st_size / (1024 * 1024)  # MB
+            logger.info(f"Source model file size: {file_size:.1f} MB")
+                
+            update_progress(83, 'Loading model for TensorRT conversion...')
+            logger.info(f"Starting TensorRT conversion for {source_path}")
+            logger.info(f"This conversion process may take several minutes depending on model complexity")
+            logger.info(f"Model size: {file_size:.1f} MB")
+            check_cancelled()
             
-            # Load the model
-            model = YOLO(str(source_path))
+            update_progress(85, 'Converting to TensorRT (this may take several minutes)...')
+            logger.info("Launching TensorRT conversion subprocess...")
+            check_cancelled()
             
-            # Export to TensorRT with memory optimizations for Jetson
-            logger.info("Converting to TensorRT with optimized settings for Jetson...")
+            # Create a standalone conversion script that can be killed
+            conversion_script = f'''
+import sys
+import os
+import signal
+import logging
+import traceback
+
+# Allow TensorRT logs to show but reduce ultralytics noise
+os.environ["YOLO_VERBOSE"] = "True"  # Keep verbose for TensorRT info
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+
+try:
+    from ultralytics import YOLO
+    
+    def signal_handler(signum, frame):
+        print("CONVERSION_CANCELLED")
+        sys.exit(1)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    print("STARTING_CONVERSION")
+    sys.stdout.flush()
+    
+    model = YOLO(r"{source_path}")
+    print("MODEL_LOADED")
+    sys.stdout.flush()
+    
+    print("BEGINNING_TENSORRT_EXPORT")
+    sys.stdout.flush()
+    
+    # Export with full verbosity to see TensorRT progress
+    result = model.export(format="engine", verbose=True)
+    print(f"EXPORT_RESULT: {{result}}")
+    print("CONVERSION_SUCCESS")
+    
+except KeyboardInterrupt:
+    print("CONVERSION_CANCELLED")
+    sys.exit(1)
+except Exception as e:
+    print(f"CONVERSION_ERROR: {{str(e)}}")
+    print(f"CONVERSION_ERROR_DETAIL: {{repr(e)}}")
+    print(f"TRACEBACK: {{traceback.format_exc()}}")
+    sys.exit(1)
+'''
             
-            # Keep track of intermediate ONNX file for cleanup
+            # Create a temporary script file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(conversion_script)
+                script_path = f.name
+            
+            process = None
+            try:
+                # Start the conversion process
+                process = subprocess.Popen([
+                    sys.executable, script_path
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                   text=True, bufsize=1, universal_newlines=True)
+                
+                logger.info(f"Started TensorRT conversion process: PID {process.pid}")
+                
+                # Monitor the process
+                start_time = time.time()
+                model_loaded = False
+                output_lines = []
+                
+                while True:
+                    # Check if process has finished
+                    if process.poll() is not None:
+                        break
+                    
+                    # Check for cancellation
+                    try:
+                        check_cancelled()
+                    except Exception as e:
+                        # Cancel was requested - kill the process
+                        logger.info(f"Cancellation requested, terminating process {process.pid}")
+                        
+                        try:
+                            # Try graceful termination first
+                            process.terminate()
+                            time.sleep(2)
+                            
+                            # If still running, force kill
+                            if process.poll() is None:
+                                process.kill()
+                                logger.info(f"Force killed conversion process {process.pid}")
+                                
+                        except ProcessLookupError:
+                            pass  # Process already dead
+                        
+                        # Clean up partial files
+                        expected_trt = source_path.with_suffix('.engine')
+                        intermediate_onnx = source_path.with_suffix('.onnx')
+                        
+                        for cleanup_file in [expected_trt, intermediate_onnx]:
+                            if cleanup_file.exists():
+                                try:
+                                    cleanup_file.unlink()
+                                    logger.info(f"Cleaned up partial file: {cleanup_file}")
+                                except:
+                                    pass
+                        
+                        raise e
+                    
+                    # Read any output
+                    try:
+                        line = process.stdout.readline()
+                        if line:
+                            line = line.strip()
+                            output_lines.append(line)
+                            
+                            # Forward subprocess output to main logger
+                            if line.startswith('[') or 'TRT' in line or 'Tactic' in line:
+                                # This looks like TensorRT output - log it
+                                logger.info(f"TensorRT: {line}")
+                            elif "STARTING_CONVERSION" in line:
+                                logger.info("TensorRT conversion: Starting conversion process")
+                            elif "MODEL_LOADED" in line:
+                                model_loaded = True
+                                logger.info("TensorRT conversion: Model loaded successfully")
+                            elif "BEGINNING_TENSORRT_EXPORT" in line:
+                                logger.info("TensorRT conversion: Beginning TensorRT export")
+                            elif "CONVERSION_SUCCESS" in line:
+                                logger.info("TensorRT conversion completed successfully")
+                                break
+                            elif "CONVERSION_ERROR" in line:
+                                logger.error(f"TensorRT conversion failed: {line}")
+                                break
+                            elif "CONVERSION_CANCELLED" in line:
+                                logger.info("TensorRT conversion was cancelled")
+                                break
+                            elif line and not any(skip in line for skip in ['HTTP/1.1', 'werkzeug', 'GET /api']):
+                                # Log other interesting output but skip HTTP requests
+                                logger.info(f"TensorRT subprocess: {line}")
+                                
+                    except:
+                        pass
+                    
+                    # Update progress with elapsed time
+                    elapsed = time.time() - start_time
+                    if elapsed > 10:
+                        base_progress = 87 if model_loaded else 85
+                        fake_progress = min(89, base_progress + int(elapsed / 30))
+                        status = "Converting to TensorRT..." if model_loaded else "Loading model for conversion..."
+                        update_progress(fake_progress, f'{status} ({int(elapsed)}s elapsed)')
+                    
+                    time.sleep(1)
+                
+                # Get final output
+                try:
+                    stdout, stderr = process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    logger.error("TensorRT conversion process timed out")
+                
+                all_output = '\\n'.join(output_lines) + '\\n' + (stdout or '')
+                stderr_output = stderr or ''
+                
+                # Check results
+                return_code = process.returncode
+                
+                logger.info(f"TensorRT conversion process finished with return code: {return_code}")
+                
+                if stderr_output:
+                    logger.error(f"TensorRT conversion stderr: {stderr_output}")
+                
+                if return_code != 0:
+                    if "CONVERSION_CANCELLED" in all_output:
+                        raise Exception("TensorRT conversion cancelled by user")
+                    elif "CONVERSION_ERROR" in all_output:
+                        error_lines = [line for line in all_output.split('\\n') if 'CONVERSION_ERROR' in line]
+                        if error_lines:
+                            main_error = error_lines[0].split('CONVERSION_ERROR: ')[-1] if 'CONVERSION_ERROR:' in error_lines[0] else error_lines[0]
+                            detailed_error = [line.split('CONVERSION_ERROR_DETAIL: ')[-1] for line in error_lines if 'CONVERSION_ERROR_DETAIL:' in line]
+                            traceback_lines = [line.split('TRACEBACK: ')[-1] for line in all_output.split('\\n') if 'TRACEBACK:' in line]
+                            
+                            error_detail = main_error
+                            if detailed_error:
+                                error_detail += f" | Details: {detailed_error[0]}"
+                            if traceback_lines:
+                                logger.error(f"TensorRT conversion traceback: {traceback_lines[0]}")
+                                
+                            raise RuntimeError(f"TensorRT conversion failed: {error_detail}")
+                        else:
+                            raise RuntimeError(f"TensorRT conversion failed with unknown error (return code {return_code})")
+                    else:
+                        error_msg = f"TensorRT conversion failed with return code {return_code}"
+                        if stderr_output:
+                            error_msg += f" | stderr: {stderr_output[:200]}..."
+                        raise RuntimeError(error_msg)
+                
+                if "CONVERSION_SUCCESS" not in all_output:
+                    raise RuntimeError("TensorRT conversion did not complete successfully")
+                    
+            finally:
+                # Clean up the temporary script
+                try:
+                    if os.path.exists(script_path):
+                        os.unlink(script_path)
+                except:
+                    pass
+                
+                # Make sure process is dead
+                if process and process.poll() is None:
+                    try:
+                        process.kill()
+                    except:
+                        pass
+            
+            update_progress(90, 'Finalizing TensorRT engine...')
+            check_cancelled()
+            
+            # Verify the output file
+            expected_trt = source_path.with_suffix('.engine')
             intermediate_onnx = source_path.with_suffix('.onnx')
             
-            try:
-                # First attempt with moderate settings
-                model.export(
-                    format='engine',
-		            verbose=True
-                )
-            except Exception as e:
-                raise e
-            
-            # Check if the exported file exists
-            expected_trt = source_path.with_suffix('.engine')
             if expected_trt.exists():
                 logger.info(f"Successfully converted to TensorRT: {expected_trt}")
                 
-                # Clean up intermediate ONNX file if it exists
+                # Clean up intermediate ONNX file
                 if intermediate_onnx.exists():
                     intermediate_onnx.unlink()
                     logger.info(f"Cleaned up intermediate ONNX file: {intermediate_onnx}")
@@ -1388,6 +1783,106 @@ class AIModelManager:
                 return expected_trt
             else:
                 raise RuntimeError("TensorRT conversion completed but engine file not found")
+                
+        except ImportError:
+            logger.warning("ultralytics not available, using fallback conversion")
+            # Fallback: copy file with .engine extension
+            update_progress(85, 'Creating TensorRT placeholder...')
+            check_cancelled()
+            trt_path = source_path.with_suffix('.engine')
+            shutil.copy2(source_path, trt_path)
+            return trt_path
+        except Exception as e:
+            if "cancelled" in str(e).lower():
+                # Clean up partial conversion files on cancellation
+                trt_path = source_path.with_suffix('.engine')
+                intermediate_onnx = source_path.with_suffix('.onnx')
+                for cleanup_file in [trt_path, intermediate_onnx]:
+                    if cleanup_file.exists():
+                        try:
+                            cleanup_file.unlink()
+                        except:
+                            pass
+            
+            error_msg = str(e)
+            logger.error(f"TensorRT conversion failed: {error_msg}")
+            
+            # Provide helpful error message and suggest alternatives
+            if "ImportError" in error_msg or "ModuleNotFoundError" in error_msg:
+                suggestion = "TensorRT or ultralytics dependencies missing. Try ONNX format instead."
+            elif "CUDA" in error_msg or "GPU" in error_msg:
+                suggestion = "GPU/CUDA issue detected. Check GPU availability or try ONNX format."
+            elif "Memory" in error_msg or "memory" in error_msg:
+                suggestion = "Insufficient memory for TensorRT conversion. Try a smaller model or ONNX format."
+            elif "permission" in error_msg.lower() or "access" in error_msg.lower():
+                suggestion = "File permission issue. Check file access rights."
+            else:
+                suggestion = "TensorRT conversion failed. Try ONNX format for better compatibility."
+            
+            # Create a more user-friendly error message
+            user_friendly_error = f"Failed to convert model to TensorRT: {error_msg}. Suggestion: {suggestion}"
+            raise RuntimeError(user_friendly_error)
+    
+    def _convert_to_coreml(self, source_path, progress_callback=None, cancel_check_callback=None):
+        """Convert YOLO model to CoreML format with progress tracking and cancellation"""
+        
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+        
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("CoreML conversion cancelled by user")
+        
+        try:
+            # Check if ultralytics is available
+            if not ULTRALYTICS_AVAILABLE:
+                raise ImportError("ultralytics not available")
+                
+            from ultralytics import YOLO
+            
+            update_progress(83, 'Loading model for CoreML conversion...')
+            check_cancelled()
+            
+            # Load the model
+            model = YOLO(str(source_path))
+            
+            update_progress(85, 'Converting to CoreML format...')
+            check_cancelled()
+            
+            # Export to CoreML
+            model.export(format='coreml')
+            
+            update_progress(88, 'Finalizing CoreML export...')
+            check_cancelled()
+            
+            # Check if the exported file exists
+            expected_coreml = source_path.with_suffix('.mlmodel')
+            if expected_coreml.exists():
+                logger.info(f"Successfully converted to CoreML: {expected_coreml}")
+                return expected_coreml
+            else:
+                raise RuntimeError("CoreML conversion completed but model file not found")
+                
+        except ImportError:
+            logger.warning("ultralytics not available, using fallback conversion")
+            # Fallback: copy file with .mlmodel extension
+            update_progress(85, 'Creating CoreML placeholder...')
+            check_cancelled()
+            coreml_path = source_path.with_suffix('.mlmodel')
+            shutil.copy2(source_path, coreml_path)
+            return coreml_path
+        except Exception as e:
+            if "cancelled" in str(e).lower():
+                # Clean up partial conversion on cancellation
+                coreml_path = source_path.with_suffix('.mlmodel')
+                if coreml_path.exists():
+                    try:
+                        coreml_path.unlink()
+                    except:
+                        pass
+            logger.error(f"CoreML conversion failed: {str(e)}")
+            raise
                 
         except ImportError:
             logger.warning("ultralytics not available for TensorRT conversion")

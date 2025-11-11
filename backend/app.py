@@ -46,10 +46,40 @@ socketio = SocketIO(app,
                    ping_timeout=60,
                    ping_interval=25)
 
-# Configuration
-UPLOAD_FOLDER = '../models'
+# Global dict to track active downloads and their cancel flags
+active_downloads = {}
+download_cancel_flags = {}
+download_threads = {}  # Track download/conversion threads
+
+def set_download_cancelled(download_id):
+    """Mark a download as cancelled"""
+    download_cancel_flags[download_id] = True
+    
+    # Also attempt to interrupt the thread if it exists
+    if download_id in download_threads:
+        thread = download_threads[download_id]
+        if thread and thread.is_alive():
+            logger.info(f"Attempting to interrupt download thread {download_id}")
+            # Note: Python threads can't be forcibly killed, but we rely on
+            # the cancel check callback in the download process
+
+def is_download_cancelled(download_id):
+    """Check if a download has been cancelled"""
+    return download_cancel_flags.get(download_id, False)
+
+def cleanup_download(download_id):
+    """Clean up download tracking"""
+    active_downloads.pop(download_id, None)
+    download_cancel_flags.pop(download_id, None)
+    download_threads.pop(download_id, None)
+
+# Configuration constants
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
 ALLOWED_EXTENSIONS = {'onnx', 'trt', 'engine', 'pb', 'pth', 'pt'}
 MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB max file size
+
+# Ensure upload folder exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
@@ -69,8 +99,39 @@ logging.basicConfig(
     ]
 )
 
+# Custom logging handler to forward logs to frontend
+class WebSocketLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            log_entry = self.format(record)
+            # Parse timestamp and message
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            level = record.levelname.lower()
+            message = record.getMessage()
+            
+            # Emit to all connected clients
+            socketio.emit('log_message', {
+                'id': str(uuid.uuid4()),
+                'timestamp': timestamp,
+                'type': level if level in ['info', 'error', 'warning'] else 'info',
+                'message': message,
+                'raw_log': log_entry
+            })
+        except Exception:
+            pass  # Don't let logging errors break the app
+
+# Add WebSocket handler to root logger
+websocket_handler = WebSocketLogHandler()
+websocket_handler.setLevel(logging.INFO)
+websocket_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+websocket_handler.setFormatter(websocket_formatter)
+
+# Get the root logger and add our handler
+root_logger = logging.getLogger()
+root_logger.addHandler(websocket_handler)
+
 logger = logging.getLogger(__name__)
-logger.disabled = True
+logger.disabled = False  # Enable logging to capture messages
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -300,7 +361,7 @@ def get_gpu_memory():
 
 @app.route('/api/models/upload', methods=['POST'])
 def upload_model():
-    """Upload a new AI model"""
+    """Upload a new AI model with real-time progress updates"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -321,6 +382,7 @@ def upload_model():
     file = request.files['file']
     model_name = request.form.get('model_name', '')
     model_type = request.form.get('model_type', 'vision')
+    download_id = request.form.get('download_id', str(uuid.uuid4()))
     
     if file.filename == '':
         return jsonify({
@@ -330,34 +392,101 @@ def upload_model():
     
     if file and allowed_file(file.filename):
         try:
-            filename = secure_filename(file.filename)
-            if not model_name:
-                model_name = filename.rsplit('.', 1)[0]
+            def progress_callback(progress, status):
+                socketio.emit('download_progress', {
+                    'download_id': download_id,
+                    'progress': progress,
+                    'status': status,
+                    'stage': 'upload'
+                })
             
-            # Create unique filename to avoid conflicts
-            unique_filename = f"{uuid.uuid4().hex}_{filename}"
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            # Start async upload process
+            def upload_async():
+                try:
+                    # Track this download
+                    active_downloads[download_id] = {
+                        'type': 'upload',
+                        'model_name': model_name,
+                        'started_at': datetime.now()
+                    }
+                    
+                    progress_callback(10, 'Preparing upload...')
+                    
+                    # Check for cancellation
+                    if is_download_cancelled(download_id):
+                        cleanup_download(download_id)
+                        return
+                    
+                    filename = secure_filename(file.filename)
+                    if not model_name:
+                        model_name = filename.rsplit('.', 1)[0]
+                    
+                    progress_callback(30, 'Saving file...')
+                    
+                    # Check for cancellation
+                    if is_download_cancelled(download_id):
+                        cleanup_download(download_id)
+                        return
+                    
+                    # Create unique filename to avoid conflicts
+                    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+                    
+                    file.save(file_path)
+                    
+                    progress_callback(70, 'Registering model...')
+                    
+                    # Check for cancellation
+                    if is_download_cancelled(download_id):
+                        # Clean up uploaded file if cancelled
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                        cleanup_download(download_id)
+                        return
+                    
+                    # Register the model with absolute path
+                    model_info = ai_manager.register_model(
+                        model_name=model_name,
+                        file_path=os.path.abspath(file_path),
+                        model_type=model_type,
+                        original_filename=filename
+                    )
+                    
+                    progress_callback(100, 'Upload complete')
+                    
+                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}")
+                    
+                    socketio.emit('download_complete', {
+                        'download_id': download_id,
+                        'success': True,
+                        'model_name': model_name,
+                        'message': f'Model {model_name} uploaded and ready for use!'
+                    })
+                    
+                    cleanup_download(download_id)
+                    
+                except Exception as e:
+                    logger.error(f"Error uploading model: {str(e)}")
+                    socketio.emit('download_error', {
+                        'download_id': download_id,
+                        'error': str(e)
+                    })
+                    cleanup_download(download_id)
             
-            file.save(file_path)
-            
-            # Register the model with absolute path
-            model_info = ai_manager.register_model(
-                model_name=model_name,
-                file_path=os.path.abspath(file_path),
-                model_type=model_type,
-                original_filename=filename
-            )
-            
-            logger.info(f"Model uploaded successfully: {model_name} from {client_ip}")
+            # Start upload in background thread
+            threading.Thread(target=upload_async, daemon=True).start()
             
             return jsonify({
                 'success': True,
-                'data': model_info,
-                'message': f'Model {model_name} uploaded successfully'
+                'download_started': True,
+                'download_id': download_id,
+                'message': f'Upload started for {model_name}'
             })
             
         except Exception as e:
-            logger.error(f"Error uploading model: {str(e)}")
+            logger.error(f"Error starting upload: {str(e)}")
             return jsonify({
                 'success': False,
                 'error': str(e)
@@ -508,7 +637,7 @@ def delete_model(model_id):
 
 @app.route('/api/models/download-yolo', methods=['POST'])
 def download_yolo_model():
-    """Download and optionally convert a YOLO model"""
+    """Download and optionally convert a YOLO model with real-time progress updates"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -530,6 +659,7 @@ def download_yolo_model():
     model_url = data.get('model_url')
     model_name = data.get('model_name')
     target_format = data.get('target_format', 'PyTorch')
+    download_id = data.get('download_id', str(uuid.uuid4()))
     
     if not model_url or not model_name:
         return jsonify({
@@ -538,21 +668,155 @@ def download_yolo_model():
         }), 400
     
     try:
-        result = ai_manager.download_yolo_model(
-            model_url=model_url,
-            model_name=model_name,
-            target_format=target_format
-        )
+        def progress_callback(progress, status):
+            socketio.emit('download_progress', {
+                'download_id': download_id,
+                'progress': progress,
+                'status': status,
+                'stage': 'download'
+            })
         
-        logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}")
+        # Start async download process
+        def download_async():
+            try:
+                # Track this download
+                active_downloads[download_id] = {
+                    'type': 'yolo_download',
+                    'model_name': model_name,
+                    'started_at': datetime.now()
+                }
+                
+                result = ai_manager.download_yolo_model(
+                    model_url=model_url,
+                    model_name=model_name,
+                    target_format=target_format,
+                    progress_callback=progress_callback,
+                    cancel_check_callback=lambda: is_download_cancelled(download_id)
+                )
+                
+                # Check if cancelled before completion
+                if is_download_cancelled(download_id):
+                    cleanup_download(download_id)
+                    return
+                
+                logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}")
+                
+                socketio.emit('download_complete', {
+                    'download_id': download_id,
+                    'success': True,
+                    'model_name': model_name,
+                    'message': f'YOLO model {model_name} is ready for inference!'
+                })
+                
+                cleanup_download(download_id)
+                
+            except Exception as e:
+                logger.error(f"Error downloading YOLO model: {str(e)}")
+                socketio.emit('download_error', {
+                    'download_id': download_id,
+                    'error': str(e)
+                })
+                cleanup_download(download_id)
+        
+        # Start download in background thread and track it
+        download_thread = threading.Thread(target=download_async, daemon=True)
+        download_threads[download_id] = download_thread
+        download_thread.start()
         
         return jsonify({
             'success': True,
-            'data': result,
-            'message': f'YOLO model {model_name} downloaded successfully'
+            'download_started': True,
+            'download_id': download_id,
+            'message': f'Download started for {model_name}'
         })
+        
     except Exception as e:
-        logger.error(f"Error downloading YOLO model: {str(e)}")
+        logger.error(f"Error starting YOLO model download: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/models/cancel-download', methods=['POST'])
+def cancel_download():
+    """Cancel an active download"""
+    client_ip = request.remote_addr
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({
+            'success': False,
+            'error': 'No JSON data provided'
+        }), 400
+    
+    download_id = data.get('download_id')
+    if not download_id:
+        return jsonify({
+            'success': False,
+            'error': 'download_id is required'
+        }), 400
+    
+    request_logger.log_request(
+        endpoint='/api/models/cancel-download',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method,
+        data={'download_id': download_id}
+    )
+    
+    try:
+        # Check if download exists
+        if download_id not in active_downloads:
+            return jsonify({
+                'success': False,
+                'error': 'Download not found or already completed'
+            }), 404
+        
+        # Get download info for cleanup
+        download_info = active_downloads[download_id]
+        
+        # Set the cancel flag
+        set_download_cancelled(download_id)
+        
+        # Clean up any partial files
+        try:
+            # Clean up based on download type and progress
+            model_name = download_info.get('model_name', '')
+            if model_name:
+                # Clean up model directory and partial files
+                models_dir = os.path.join(UPLOAD_FOLDER, model_name)
+                if os.path.exists(models_dir):
+                    import shutil
+                    shutil.rmtree(models_dir)
+                    logger.info(f"Cleaned up model directory: {models_dir}")
+                
+                # Clean up any partial downloads in downloads directory
+                downloads_dir = os.path.join(UPLOAD_FOLDER, 'downloads')
+                if os.path.exists(downloads_dir):
+                    for file in os.listdir(downloads_dir):
+                        if model_name.lower() in file.lower():
+                            file_path = os.path.join(downloads_dir, file)
+                            if os.path.isfile(file_path):
+                                os.remove(file_path)
+                                logger.info(f"Cleaned up partial file: {file_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"Error during cleanup for download {download_id}: {cleanup_error}")
+        
+        logger.info(f"Download {download_id} cancelled by {client_ip}")
+        
+        # Emit cancellation event
+        socketio.emit('download_cancelled', {
+            'download_id': download_id
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Download cancellation requested'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error cancelling download: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

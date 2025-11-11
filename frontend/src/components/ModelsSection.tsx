@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { ModelsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import { useNotifications } from '../contexts/NotificationContext';
 
 // Model-related interfaces
 interface ModelInfo {
@@ -43,6 +44,7 @@ const SectionHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 20px;
 
   h2 {
     display: flex;
@@ -52,11 +54,253 @@ const SectionHeader = styled.div`
     font-size: 24px;
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
+    flex-shrink: 0;
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
     }
   }
+`;
+
+const SearchAndActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 15px;
+`;
+
+const SearchContainer = styled.div`
+  position: relative;
+  width: 300px;
+`;
+
+const SearchInput = styled.input`
+  width: 100%;
+  padding: 12px 40px 12px 12px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  background: ${props => props.theme.colors.background.secondary};
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  transition: all 0.3s ease;
+
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.colors.nvidia.green};
+    box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.2);
+  }
+
+  &::placeholder {
+    color: ${props => props.theme.colors.text.muted};
+  }
+`;
+
+const SearchIcon = styled.div`
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: ${props => props.theme.colors.text.muted};
+  pointer-events: none;
+
+  i {
+    font-size: 14px;
+  }
+`;
+
+const ClearSearch = styled.button`
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: ${props => props.theme.colors.text.muted};
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: ${props => props.theme.colors.text.primary};
+    background: rgba(118, 185, 0, 0.1);
+  }
+
+  i {
+    font-size: 12px;
+  }
+`;
+
+const DownloadsSection = styled.div`
+  margin-bottom: 20px;
+`;
+
+const DownloadCard = styled.div`
+  background: ${props => props.theme.gradients.card};
+  border: 1px solid ${props => props.theme.colors.nvidia.green};
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const CancelButton = styled.button`
+  background: ${props => props.theme.colors.status.error};
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 55px;
+
+  &:hover {
+    background: #d32f2f;
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  i {
+    margin-right: 4px;
+  }
+`;
+
+const DownloadHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const DownloadContent = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 40px;
+`;
+
+const DownloadActions = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+`;
+
+const LogsSection = styled.div<{ $expanded: boolean }>`
+  border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  padding-top: 8px;
+  margin-top: 4px;
+  transition: all 0.3s ease;
+  max-height: ${props => props.$expanded ? '350px' : '0'};
+  overflow: hidden;
+  opacity: ${props => props.$expanded ? 1 : 0};
+`;
+
+const LogsTerminal = styled.div`
+  background: #1e1e1e;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  height: 250px;
+  padding: 6px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  
+  /* Terminal-like scrollbar */
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #2d2d2d;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+  }
+  
+  &::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
+`;
+
+const LogsHeaderInline = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 2px 0;
+  
+  h4 {
+    margin: 0;
+    color: ${props => props.theme.colors.nvidia.green};
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    
+    i {
+      color: #00ff00;
+    }
+  }
+`;
+
+const DownloadIcon = styled.div`
+  color: ${props => props.theme.colors.nvidia.green};
+  font-size: 18px;
+  animation: spin 1s linear infinite;
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+`;
+
+const DownloadInfo = styled.div`
+  flex: 1;
+  
+  h4 {
+    margin: 0 0 4px 0;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    font-weight: 600;
+  }
+  
+  p {
+    margin: 0;
+    color: ${props => props.theme.colors.text.muted};
+    font-size: 12px;
+  }
+`;
+
+const ProgressBar = styled.div`
+  width: 120px;
+  height: 4px;
+  background: ${props => props.theme.colors.background.secondary};
+  border-radius: 2px;
+  overflow: hidden;
+`;
+
+const ProgressFill = styled.div<{ progress: number }>`
+  height: 100%;
+  width: ${props => props.progress}%;
+  background: linear-gradient(90deg, ${props => props.theme.colors.nvidia.green}, ${props => props.theme.colors.nvidia.lightGreen});
+  transition: width 0.3s ease;
+`;
+
+const ProgressText = styled.span`
+  color: ${props => props.theme.colors.text.secondary};
+  font-size: 11px;
+  font-weight: 500;
+  min-width: 35px;
+  text-align: right;
 `;
 
 const AddButton = styled.button`
@@ -81,6 +325,145 @@ const AddButton = styled.button`
   i {
     font-size: 16px;
   }
+`;
+
+const LogsButton = styled.button`
+  background: ${props => props.theme.colors.background.tertiary};
+  color: ${props => props.theme.colors.text.primary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.3s ease;
+  position: relative;
+
+  &:hover {
+    background: ${props => props.theme.colors.background.hover};
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  i {
+    font-size: 14px;
+  }
+`;
+
+const LogsDropdown = styled.div<{ $show: boolean }>`
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1000;
+  background: #1e1e1e;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  width: 600px;
+  height: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: ${props => props.$show ? 'block' : 'none'};
+  margin-top: 4px;
+  font-family: 'Courier New', monospace;
+`;
+
+const LogsHeader = styled.div`
+  padding: 8px 12px;
+  border-bottom: 1px solid #404040;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #2d2d2d;
+  border-radius: 4px 4px 0 0;
+  
+  h4 {
+    margin: 0;
+    color: #00ff00;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+  }
+`;
+
+const LogsContent = styled.div`
+  height: 350px;
+  overflow-y: auto;
+  padding: 8px;
+  background: #1e1e1e;
+  border-radius: 0 0 4px 4px;
+  
+  /* Terminal-like scrollbar */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #2d2d2d;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 4px;
+  }
+  
+  &::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
+`;
+
+const LogEntry = styled.div`
+  padding: 2px 4px;
+  margin: 1px 0;
+  border-radius: 2px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.3;
+  background: transparent;
+  color: #cccccc;
+  white-space: pre-wrap;
+  word-break: break-word;
+  
+  &.info {
+    color: #00ff00;
+  }
+  
+  &.error {
+    color: #ff4444;
+  }
+  
+  &.warning {
+    color: #ffaa00;
+  }
+  
+  &.tensorrt {
+    color: #00aaff;
+  }
+  
+  &.debug {
+    color: #888888;
+  }
+`;
+
+const ClearLogsButton = styled.button`
+  background: transparent;
+  border: 1px solid #555;
+  color: #cccccc;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Courier New', monospace;
+
+  &:hover {
+    background: #333;
+    color: #ffffff;
+    border-color: #777;
+  }
+`;
+
+const LogsContainer = styled.div`
+  position: relative;
 `;
 
 const Modal = styled.div<{ $show: boolean }>`
@@ -809,11 +1192,22 @@ const YOLO_VERSIONS: YOLOVersion[] = [
 ];
 
 const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isConnected }) => {
+  const { addNotification, removeNotification, updateNotification } = useNotifications();
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'yolo'>('upload');
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [filteredModels, setFilteredModels] = useState<ModelInfo[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  
+  // Download tracking states
+  const [activeDownloads, setActiveDownloads] = useState<Map<string, { 
+    name: string; 
+    progress: number; 
+    notificationId: string;
+    status?: string;
+  }>>(new Map());
   
   // File upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -830,10 +1224,319 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [nameError, setNameError] = useState<string>('');
   const [yoloNameError, setYoloNameError] = useState<string>('');
   
-  const fileInputRef = useRef<HTMLInputElement>(null);  // Load models on component mount
+  // Logs dropdown states
+  const [showLogs, setShowLogs] = useState<Map<string, boolean>>(new Map()); // Per-download logs state
+  const [logs, setLogs] = useState<Array<{
+    id: string;
+    timestamp: string;
+    type: 'info' | 'error' | 'warning' | 'tensorrt';
+    message: string;
+  }>>([]);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load models function (defined early to be available in useEffect dependency arrays)
+  const loadModels = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/models/list`);
+      const data = await response.json();
+      
+      if (data.success && Array.isArray(data.models)) {
+        setModels(data.models);
+      } else {
+        console.error('Failed to load models:', data.error);
+        setModels([]);
+      }
+    } catch (error) {
+      console.error('Error loading models:', error);
+      setModels([]);
+    }
+  };
+
+  // Logs management functions
+  const addLog = (type: 'info' | 'error' | 'warning' | 'tensorrt', message: string) => {
+    const newLog = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+      timestamp: new Date().toLocaleTimeString(),
+      type,
+      message
+    };
+    
+    setLogs(prev => {
+      const updated = [...prev, newLog];
+      // Keep only the last 100 logs to prevent memory issues
+      return updated.slice(-100);
+    });
+  };
+
+  const clearLogs = () => {
+    setLogs([]);
+  };
+
+  const toggleLogs = (downloadId: string) => {
+    setShowLogs(prev => {
+      const updated = new Map(prev);
+      updated.set(downloadId, !updated.get(downloadId));
+      return updated;
+    });
+  };  
+  
+  // Load models on component mount
   useEffect(() => {
     loadModels();
   }, []);
+
+  // Listen for real-time download progress updates
+  useEffect(() => {
+    if (!socket) return () => {};
+
+    const handleDownloadProgress = (data: { 
+      download_id: string; 
+      progress: number; 
+      status: string;
+      stage: string;
+    }) => {
+      updateDownloadProgress(data.download_id, data.progress, data.status);
+      
+      // Add logs for significant progress updates
+      if (data.status) {
+        const logType = data.status.toLowerCase().includes('converting') ? 'tensorrt' : 'info';
+        addLog(logType, `${data.download_id}: ${data.status}`);
+      }
+    };
+
+    const handleDownloadComplete = (data: { 
+      download_id: string; 
+      success: boolean; 
+      message?: string;
+      model_name?: string;
+    }) => {
+      completeDownload(data.download_id, data.success, data.message);
+      if (data.success) {
+        loadModels(); // Refresh models list
+        addLog('info', `✅ ${data.model_name || 'Model'} download completed successfully`);
+      } else {
+        addLog('error', `❌ ${data.model_name || 'Model'} download failed: ${data.message}`);
+      }
+    };
+
+    const handleDownloadError = (data: { 
+      download_id: string; 
+      error: string;
+    }) => {
+      completeDownload(data.download_id, false, data.error);
+      addLog('error', `❌ Download ${data.download_id} failed: ${data.error}`);
+    };
+
+    const handleDownloadCancelled = (data: { 
+      download_id: string; 
+    }) => {
+      const download = activeDownloads.get(data.download_id);
+      if (download) {
+        removeNotification(download.notificationId);
+        setActiveDownloads(prev => {
+          const updated = new Map(prev);
+          updated.delete(data.download_id);
+          return updated;
+        });
+
+        addNotification({
+          type: 'info',
+          title: 'Download Cancelled',
+          message: `${download.name} download has been cancelled`
+        });
+        
+        addLog('warning', `⚠️ ${download.name} download was cancelled`);
+      }
+    };
+
+    const handleLogMessage = (data: any) => {
+      // Add all backend log messages to the logs state for full transparency
+      setLogs(prev => {
+        const newLogs = [...prev, {
+          id: data.id,
+          timestamp: data.timestamp,
+          type: data.type,
+          message: data.raw_log || data.message // Use raw log for full transparency
+        }];
+        
+        // Limit logs to last 500 entries to prevent memory issues
+        return newLogs.slice(-500);
+      });
+    };
+
+    socket.on('download_progress', handleDownloadProgress);
+    socket.on('download_complete', handleDownloadComplete);
+    socket.on('download_error', handleDownloadError);
+    socket.on('download_cancelled', handleDownloadCancelled);
+    socket.on('log_message', handleLogMessage);
+
+    return () => {
+      socket.off('download_progress', handleDownloadProgress);
+      socket.off('download_complete', handleDownloadComplete);
+      socket.off('download_error', handleDownloadError);
+      socket.off('download_cancelled', handleDownloadCancelled);
+      socket.off('log_message', handleLogMessage);
+    };
+  }, [socket, activeDownloads, removeNotification, addNotification, loadModels]);
+
+  // Filter models based on search query
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setFilteredModels(models);
+    } else {
+      const filtered = models.filter(model => 
+        model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        model.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        model.framework.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredModels(filtered);
+    }
+  }, [models, searchQuery]);
+
+  // Search handlers
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  };
+
+  const clearSearch = () => {
+    setSearchQuery('');
+  };
+
+  // Download progress management
+  const startDownload = (downloadId: string, modelName: string) => {
+    const notificationId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    
+    const notification = {
+      id: notificationId,
+      type: 'info' as const,
+      title: 'Downloading Model',
+      message: `${modelName} - Initializing download...`,
+      persistent: true,
+      timestamp: new Date().toISOString()
+    };
+
+    addNotification(notification);
+    addLog('info', `🚀 Starting download: ${modelName}`);
+    
+    setActiveDownloads(prev => new Map(prev.set(downloadId, {
+      name: modelName,
+      progress: 0,
+      notificationId
+    })));
+
+    return notificationId;
+  };
+
+  const updateDownloadProgress = (downloadId: string, progress: number, status?: string) => {
+    setActiveDownloads(prev => {
+      const download = prev.get(downloadId);
+      if (download) {
+        const updated = new Map(prev);
+        updated.set(downloadId, { 
+          ...download, 
+          progress, 
+          status: status || download.status 
+        });
+        
+        // Update the notification with progress and status
+        const message = status || `${download.name} - ${progress}% complete`;
+        updateNotification(download.notificationId, {
+          message: message
+        });
+        
+        return updated;
+      }
+      return prev;
+    });
+  };
+
+  const completeDownload = (downloadId: string, success: boolean, message?: string) => {
+    const download = activeDownloads.get(downloadId);
+    if (download) {
+      // Remove the progress notification
+      removeNotification(download.notificationId);
+      
+      // Remove from active downloads
+      setActiveDownloads(prev => {
+        const updated = new Map(prev);
+        updated.delete(downloadId);
+        return updated;
+      });
+
+      // Clean up logs state for this download
+      setShowLogs(prev => {
+        const updated = new Map(prev);
+        updated.delete(downloadId);
+        return updated;
+      });
+
+      // Add completion notification
+      addNotification({
+        type: success ? 'success' : 'error',
+        title: success ? 'Model Ready' : 'Download Failed',
+        message: message || `${download.name} ${success ? 'is ready for use!' : 'download failed'}`
+      });
+    }
+  };
+
+  const cancelDownload = async (downloadId: string) => {
+    const download = activeDownloads.get(downloadId);
+    if (!download) return;
+
+    try {
+      // Send cancel request to backend
+      const response = await fetch(`${getBackendUrl()}/api/models/cancel-download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ download_id: downloadId })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Remove from active downloads immediately
+        removeNotification(download.notificationId);
+        setActiveDownloads(prev => {
+          const updated = new Map(prev);
+          updated.delete(downloadId);
+          return updated;
+        });
+
+        // Clean up logs state for this download
+        setShowLogs(prev => {
+          const updated = new Map(prev);
+          updated.delete(downloadId);
+          return updated;
+        });
+
+        // Show cancellation notification
+        addNotification({
+          type: 'info',
+          title: 'Download Cancelled',
+          message: `${download.name} download has been cancelled and files cleaned up`
+        });
+
+        // Refresh models list to reflect any cleanup
+        setTimeout(loadModels, 500);
+      } else {
+        addNotification({
+          type: 'warning',
+          title: 'Cancel Failed',
+          message: data.error || 'Could not cancel download'
+        });
+      }
+    } catch (error) {
+      console.error('Error cancelling download:', error);
+      addNotification({
+        type: 'error',
+        title: 'Cancel Error',
+        message: 'Failed to cancel download'
+      });
+    }
+  };
 
   // Validation functions
   const validateModelName = (name: string, isYolo: boolean = false): string => {
@@ -871,18 +1574,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     } else {
       setNameError(error);
       setModelName(name);
-    }
-  };
-
-  const loadModels = async () => {
-    try {
-      const response = await fetch(`${getBackendUrl()}/api/models/list`);
-      const data = await response.json();
-      if (data.success) {
-        setModels(data.models || []);
-      }
-    } catch (error) {
-      console.error('Error loading models:', error);
     }
   };
 
@@ -926,10 +1617,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleFileUpload = async () => {
     if (!selectedFile || !modelName.trim()) {
-      alert('Please select a file and enter a model name');
+      addNotification({
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please select a file and enter a model name'
+      });
       return;
     }
 
+    const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    startDownload(uploadId, modelName.trim());
+    
     setLoading(true);
     
     try {
@@ -937,6 +1635,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       formData.append('file', selectedFile);
       formData.append('model_name', modelName.trim());
       formData.append('model_type', modelType);
+      formData.append('download_id', uploadId); // Send download ID to backend
+
+      // Close modal immediately to allow user to continue
+      resetModal();
 
       const response = await fetch(`${getBackendUrl()}/api/models/upload`, {
         method: 'POST',
@@ -945,16 +1647,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
       const data = await response.json();
       
-      if (data.success) {
-        await loadModels();
-        resetModal();
-        alert('Model uploaded successfully!');
-      } else {
-        alert(data.error || 'Upload failed');
+      if (!data.success && !data.download_started) {
+        // If upload failed immediately (validation error, etc.)
+        completeDownload(uploadId, false, data.error || 'Upload failed');
       }
+      // If successful or download started, progress will be handled by WebSocket
     } catch (error) {
       console.error('Upload error:', error);
-      alert('Upload failed: ' + error);
+      completeDownload(uploadId, false, 'Upload failed: ' + error);
     } finally {
       setLoading(false);
     }
@@ -962,13 +1662,23 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleYOLODownload = async () => {
     if (!selectedYOLO || !yoloModelName.trim()) {
-      alert('Please select a YOLO model and enter a name');
+      addNotification({
+        type: 'warning',
+        title: 'Missing Information',
+        message: 'Please select a YOLO model and enter a name'
+      });
       return;
     }
+
+    const downloadId = `yolo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    startDownload(downloadId, yoloModelName.trim()); // Use user-entered name, not template name
 
     setLoading(true);
 
     try {
+      // Close modal immediately to allow user to continue
+      resetModal();
+
       const response = await fetch(`${getBackendUrl()}/api/models/download-yolo`, {
         method: 'POST',
         headers: {
@@ -978,7 +1688,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           model_url: selectedYOLO.url,
           model_name: yoloModelName.trim(),
           target_format: selectedFormat,
-          original_format: 'PyTorch'
+          original_format: 'PyTorch',
+          download_id: downloadId // Send download ID to backend
         })
       });
 
@@ -994,16 +1705,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
       const data = await response.json();
 
-      if (data.success) {
-        await loadModels();
-        resetModal();
-        alert(`YOLO model ${selectedYOLO.name} downloaded successfully!`);
-      } else {
-        alert(data.error || 'Download failed');
+      if (!data.success && !data.download_started) {
+        // If download failed immediately (validation error, etc.)
+        completeDownload(downloadId, false, data.error || 'Download failed');
       }
+      // If successful or download started, progress will be handled by WebSocket
     } catch (error) {
       console.error('Download error:', error);
-      alert('Download failed: ' + error);
+      completeDownload(downloadId, false, 'Download failed: ' + error);
     } finally {
       setLoading(false);
     }
@@ -1039,13 +1748,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       const data = await response.json();
       if (data.success) {
         await loadModels();
-        alert('Model loaded successfully!');
+        addNotification({
+          type: 'success',
+          title: 'Model Loaded',
+          message: 'Model loaded successfully!'
+        });
       } else {
-        alert(data.error || 'Failed to load model');
+        addNotification({
+          type: 'error',
+          title: 'Load Failed',
+          message: data.error || 'Failed to load model'
+        });
       }
     } catch (error) {
       console.error('Load error:', error);
-      alert('Failed to load model');
+      addNotification({
+        type: 'error',
+        title: 'Load Error',
+        message: 'Failed to load model'
+      });
     }
   };
 
@@ -1058,13 +1779,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       const data = await response.json();
       if (data.success) {
         await loadModels();
-        alert('Model force reloaded successfully!');
+        addNotification({
+          type: 'success',
+          title: 'Model Reloaded',
+          message: 'Model force reloaded successfully!'
+        });
       } else {
-        alert(data.error || 'Failed to force reload model');
+        addNotification({
+          type: 'error',
+          title: 'Reload Failed',
+          message: data.error || 'Failed to force reload model'
+        });
       }
     } catch (error) {
       console.error('Force reload error:', error);
-      alert('Failed to force reload model');
+      addNotification({
+        type: 'error',
+        title: 'Reload Error',
+        message: 'Failed to force reload model'
+      });
     }
   };
 
@@ -1077,13 +1810,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       const data = await response.json();
       if (data.success) {
         await loadModels();
-        alert('Model unloaded successfully!');
+        addNotification({
+          type: 'success',
+          title: 'Model Unloaded',
+          message: 'Model unloaded successfully!'
+        });
       } else {
-        alert(data.error || 'Failed to unload model');
+        addNotification({
+          type: 'error',
+          title: 'Unload Failed',
+          message: data.error || 'Failed to unload model'
+        });
       }
     } catch (error) {
       console.error('Unload error:', error);
-      alert('Failed to unload model');
+      addNotification({
+        type: 'error',
+        title: 'Unload Error',
+        message: 'Failed to unload model'
+      });
     }
   };
 
@@ -1100,13 +1845,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       const data = await response.json();
       if (data.success) {
         await loadModels();
-        alert('Model deleted successfully!');
+        addNotification({
+          type: 'success',
+          title: 'Model Deleted',
+          message: 'Model deleted successfully!'
+        });
       } else {
-        alert(data.error || 'Failed to delete model');
+        addNotification({
+          type: 'error',
+          title: 'Delete Failed',
+          message: data.error || 'Failed to delete model'
+        });
       }
     } catch (error) {
       console.error('Delete error:', error);
-      alert('Failed to delete model');
+      addNotification({
+        type: 'error',
+        title: 'Delete Error',
+        message: 'Failed to delete model'
+      });
     }
   };
 
@@ -1125,11 +1882,113 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <i className="fas fa-brain"></i>
           AI Models
         </h2>
-        <AddButton onClick={() => setShowModal(true)}>
-          <i className="fas fa-plus"></i>
-          Add Model
-        </AddButton>
+        <SearchAndActions>
+          <SearchContainer>
+            <SearchInput
+              type="text"
+              placeholder="Search models by name, type, or framework..."
+              value={searchQuery}
+              onChange={handleSearchChange}
+            />
+            {searchQuery ? (
+              <ClearSearch onClick={clearSearch}>
+                <i className="fas fa-times"></i>
+              </ClearSearch>
+            ) : (
+              <SearchIcon>
+                <i className="fas fa-search"></i>
+              </SearchIcon>
+            )}
+          </SearchContainer>
+          <AddButton onClick={() => setShowModal(true)}>
+            <i className="fas fa-plus"></i>
+            Add Model
+          </AddButton>
+        </SearchAndActions>
       </SectionHeader>
+
+      {/* Active Downloads Section */}
+      {activeDownloads.size > 0 && (
+        <DownloadsSection>
+          {Array.from(activeDownloads.entries()).map(([downloadId, download]) => (
+            <DownloadCard key={downloadId}>
+              <DownloadContent>
+                <DownloadIcon>
+                  {download.status && download.status.toLowerCase().includes('convert') ? (
+                    <i className="fas fa-cog fa-spin"></i>
+                  ) : (
+                    <i className="fas fa-download"></i>
+                  )}
+                </DownloadIcon>
+                <DownloadInfo>
+                  <h4>{download.name}</h4>
+                  <p>{download.status || 'Downloading and processing model...'}</p>
+                </DownloadInfo>
+                <ProgressBar>
+                  <ProgressFill progress={download.progress} />
+                </ProgressBar>
+                <ProgressText>{download.progress}%</ProgressText>
+                <DownloadActions>
+                  <LogsButton onClick={() => toggleLogs(downloadId)}>
+                    <i className="fas fa-terminal"></i>
+                    Logs
+                  </LogsButton>
+                  <CancelButton onClick={() => cancelDownload(downloadId)}>
+                    <i className="fas fa-times"></i>
+                    Cancel
+                  </CancelButton>
+                </DownloadActions>
+              </DownloadContent>
+              
+              <LogsSection $expanded={showLogs.get(downloadId) || false}>
+                <LogsHeaderInline>
+                  <h4>
+                    <i className="fas fa-terminal"></i>
+                    Download & Conversion Logs
+                  </h4>
+                  <ClearLogsButton onClick={clearLogs}>
+                    Clear
+                  </ClearLogsButton>
+                </LogsHeaderInline>
+                <LogsTerminal>
+                  {logs.length === 0 ? (
+                    <div style={{ 
+                      padding: '20px', 
+                      textAlign: 'center', 
+                      color: '#666',
+                      fontStyle: 'italic',
+                      fontSize: '12px'
+                    }}>
+                      No logs yet for this download...
+                    </div>
+                  ) : (
+                    logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name))
+                       .slice().reverse().map(log => (
+                      <LogEntry key={log.id} className={log.type}>
+                        <span style={{ opacity: 0.7, marginRight: '8px' }}>
+                          [{log.timestamp}]
+                        </span>
+                        {log.message}
+                      </LogEntry>
+                    ))
+                  )}
+                  {/* Show all logs if no specific download logs found */}
+                  {logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name)).length === 0 && logs.length > 0 && (
+                    logs.slice().reverse().map(log => (
+                      <LogEntry key={log.id} className={log.type}>
+                        <span style={{ opacity: 0.7, marginRight: '8px' }}>
+                          [{log.timestamp}]
+                        </span>
+                        {log.message}
+                      </LogEntry>
+                    ))
+                  )}
+                </LogsTerminal>
+              </LogsSection>
+            </DownloadCard>
+          ))}
+        </DownloadsSection>
+      )}
 
       {models.length === 0 ? (
         <EmptyState>
@@ -1137,9 +1996,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <h3>No Models Found</h3>
           <p>Upload your AI models or download YOLO models to get started with inference</p>
         </EmptyState>
+      ) : filteredModels.length === 0 ? (
+        <EmptyState>
+          <i className="fas fa-search"></i>
+          <h3>No Models Match Your Search</h3>
+          <p>Try adjusting your search terms or clear the search to see all models</p>
+        </EmptyState>
       ) : (
         <ModelsList>
-          {models.map((model) => (
+          {filteredModels.map((model) => (
             <ModelCard key={model.id}>
               <div className="model-header">
                 <h4>{model.name}</h4>
