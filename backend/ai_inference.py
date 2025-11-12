@@ -1516,7 +1516,7 @@ class AIModelManager:
                     result = model.export(
                         format='onnx',
                         verbose=True,
-                        simplify=True,  # Simplify the model
+                        #simplify=True,  # Simplify the model
                         dynamic=False,  # Static input shapes
                         half=False      # Use FP32 for better compatibility
                     )
@@ -1737,7 +1737,7 @@ try:
         workspace=4,  # 4GB workspace for optimization
         int8=False,
         dynamic=False,
-        simplify=True
+        #simplify=True
     )
     
     print(f"EXPORT_RESULT: {{result}}")
