@@ -8,6 +8,12 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // Bind to all network interfaces for LAN access
     port: 3000,
+
+
+    // !!!!SECURITY: Replace 'all' with specific hostnames/IPs for production
+    // Examples: ['localhost', '192.168.1.100', 'jetson.local', 'your-domain.com']
+    // true allows any host - I use it for development/testing
+    allowedHosts: true
     // Remove proxy - let frontend connect directly to backend
   },
   build: {
