@@ -1190,16 +1190,41 @@ class AIModelManager:
             # Download the model with progress tracking and cancellation checks
             def download_with_progress():
                 try:
-                    response = urllib.request.urlopen(model_url)
-                    total_size = int(response.getheader('Content-Length', 0))
-                    downloaded = 0
+                    import time
+                    start_time = time.time()
                     
-                    update_progress(20, 'Downloading model weights...')
+                    # Open URL with detailed headers and info
+                    req = urllib.request.Request(model_url)
+                    req.add_header('User-Agent', 'JetsonEdge-ModelDownloader/1.0')
+                    
+                    update_progress(18, f'Connecting to {model_url.split("/")[2]}...')
+                    response = urllib.request.urlopen(req)
+                    
+                    # Get detailed file information
+                    total_size = int(response.getheader('Content-Length', 0))
+                    content_type = response.getheader('Content-Type', 'unknown')
+                    server = response.getheader('Server', 'unknown')
+                    
+                    # Log detailed download info
+                    size_mb = total_size / (1024 * 1024) if total_size > 0 else 0
+                    logger.info(f"Download details - Size: {size_mb:.1f}MB, Type: {content_type}, Server: {server}")
+                    
+                    downloaded = 0
+                    last_update_time = time.time()
+                    last_downloaded = 0
+                    
+                    if total_size > 0:
+                        update_progress(20, f'Downloading {size_mb:.1f}MB model from {server}...')
+                    else:
+                        update_progress(20, f'Downloading model from {server} (size unknown)...')
                     check_cancelled()
                     
                     with open(download_path, 'wb') as f:
+                        chunk_size = 8192
+                        chunk_count = 0
+                        
                         while True:
-                            chunk = response.read(8192)
+                            chunk = response.read(chunk_size)
                             if not chunk:
                                 break
                             
@@ -1208,12 +1233,56 @@ class AIModelManager:
                             
                             f.write(chunk)
                             downloaded += len(chunk)
+                            chunk_count += 1
                             
-                            if total_size > 0:
-                                progress = 20 + int((downloaded / total_size) * 50)  # 20-70%
-                                update_progress(progress, f'Downloading... {progress-20}% of model data')
+                            # Update progress with detailed info every 50 chunks or 1 second
+                            current_time = time.time()
+                            if chunk_count % 50 == 0 or (current_time - last_update_time) >= 1.0:
+                                if total_size > 0:
+                                    percent = (downloaded / total_size) * 100
+                                    progress = 20 + int((downloaded / total_size) * 50)  # 20-70%
+                                    
+                                    # Calculate download speed
+                                    time_diff = current_time - last_update_time
+                                    if time_diff > 0:
+                                        speed_bytes = (downloaded - last_downloaded) / time_diff
+                                        speed_mb = speed_bytes / (1024 * 1024)
+                                        
+                                        # Calculate ETA
+                                        remaining_bytes = total_size - downloaded
+                                        eta_seconds = remaining_bytes / speed_bytes if speed_bytes > 0 else 0
+                                        eta_str = f"{int(eta_seconds)}s" if eta_seconds < 60 else f"{int(eta_seconds/60)}m{int(eta_seconds%60)}s"
+                                        
+                                        download_msg = f'Downloading: {percent:.1f}% ({downloaded/(1024*1024):.1f}/{size_mb:.1f}MB) at {speed_mb:.1f}MB/s - ETA: {eta_str}'
+                                    else:
+                                        download_msg = f'Downloading: {percent:.1f}% ({downloaded/(1024*1024):.1f}/{size_mb:.1f}MB)'
+                                    
+                                    update_progress(progress, download_msg)
+                                else:
+                                    # Unknown size - just show downloaded amount and speed
+                                    time_diff = current_time - last_update_time
+                                    if time_diff > 0:
+                                        speed_bytes = (downloaded - last_downloaded) / time_diff
+                                        speed_mb = speed_bytes / (1024 * 1024)
+                                        download_msg = f'Downloaded: {downloaded/(1024*1024):.1f}MB at {speed_mb:.1f}MB/s'
+                                    else:
+                                        download_msg = f'Downloaded: {downloaded/(1024*1024):.1f}MB'
+                                    
+                                    update_progress(min(65, 20 + int(downloaded/(1024*1024))), download_msg)
+                                
+                                last_update_time = current_time
+                                last_downloaded = downloaded
                     
                     response.close()
+                    
+                    # Final download summary
+                    total_time = time.time() - start_time
+                    final_size_mb = downloaded / (1024 * 1024)
+                    avg_speed_mb = final_size_mb / total_time if total_time > 0 else 0
+                    
+                    update_progress(70, f'Download completed: {final_size_mb:.1f}MB in {total_time:.1f}s (avg {avg_speed_mb:.1f}MB/s)')
+                    logger.info(f"Download completed - {final_size_mb:.1f}MB downloaded in {total_time:.1f}s at average {avg_speed_mb:.1f}MB/s")
+                    
                 except Exception as e:
                     # Clean up partial download on cancellation/error
                     try:
@@ -1223,8 +1292,10 @@ class AIModelManager:
                         pass
                     
                     if "cancelled" in str(e).lower():
+                        update_progress(15, f"Download cancelled: {url_filename}")
                         logger.info(f"Download cancelled: {url_filename}")
                     else:
+                        update_progress(15, f"Download failed: {str(e)}")
                         logger.error(f"Download failed: {str(e)}")
                     raise
             
@@ -1413,28 +1484,45 @@ class AIModelManager:
                 
             from ultralytics import YOLO
             
-            update_progress(83, 'Loading model for ONNX conversion...')
+            update_progress(83, 'ONNX: Initializing conversion environment...')
+            logger.info(f"Starting ONNX conversion for {source_path}")
             check_cancelled()
             
-            # Load the model
+            # Load the model with verbose logging
+            update_progress(84, 'ONNX: Loading model architecture...')
             model = YOLO(str(source_path))
+            logger.info(f"ONNX: Model loaded - {model.model}")
             
-            update_progress(85, 'Exporting to ONNX format...')
+            update_progress(85, 'ONNX: Starting export to ONNX format...')
             check_cancelled()
             
-            # Use threading for ONNX conversion too
+            # Use threading for ONNX conversion with detailed monitoring
             onnx_path = source_path.with_suffix('.onnx')
             conversion_completed = threading.Event()
             conversion_error = None
             conversion_cancelled = threading.Event()
+            export_stage = "starting"
             
             def run_onnx_conversion():
-                nonlocal conversion_error
+                nonlocal conversion_error, export_stage
                 try:
                     if conversion_cancelled.is_set():
                         return
-                        
-                    model.export(format='onnx')
+                    
+                    logger.info("ONNX: Beginning model export process...")
+                    export_stage = "exporting"
+                    
+                    # Export with verbose logging
+                    result = model.export(
+                        format='onnx',
+                        verbose=True,
+                        simplify=True,  # Simplify the model
+                        dynamic=False,  # Static input shapes
+                        half=False      # Use FP32 for better compatibility
+                    )
+                    
+                    export_stage = "completed"
+                    logger.info(f"ONNX export result: {result}")
                     
                     if not conversion_cancelled.is_set():
                         conversion_completed.set()
@@ -1448,18 +1536,35 @@ class AIModelManager:
             conversion_thread.daemon = True
             conversion_thread.start()
             
-            # Monitor for cancellation
+            # Monitor for cancellation with detailed progress
             start_time = time.time()
+            last_stage = export_stage
+            
             try:
                 while not conversion_completed.is_set():
                     check_cancelled()
                     time.sleep(0.5)  # Check more frequently for ONNX (usually faster)
                     
-                    # Update progress during conversion
+                    # Update progress based on stage and elapsed time
                     elapsed = time.time() - start_time
+                    
+                    if export_stage != last_stage:
+                        if export_stage == "exporting":
+                            update_progress(86, f'ONNX: Exporting model graph structure...')
+                        elif export_stage == "completed":
+                            update_progress(88, f'ONNX: Export completed, verifying output...')
+                        last_stage = export_stage
+                    
+                    # Provide time-based progress updates for long conversions
                     if elapsed > 5:
-                        fake_progress = min(87, 85 + int(elapsed / 5))
-                        update_progress(fake_progress, f'Converting to ONNX... ({int(elapsed)}s elapsed)')
+                        stage_msg = {
+                            "starting": "Preparing model for ONNX export",
+                            "exporting": "Converting model graph to ONNX format",
+                            "completed": "Finalizing ONNX export"
+                        }.get(export_stage, "Converting to ONNX")
+                        
+                        fake_progress = min(87, 85 + int(elapsed / 3))
+                        update_progress(fake_progress, f'ONNX: {stage_msg} ({int(elapsed)}s elapsed)')
                         
             except Exception as e:
                 conversion_cancelled.set()
@@ -1478,18 +1583,22 @@ class AIModelManager:
                 raise e
             
             # Wait for thread to complete
-            conversion_thread.join(timeout=5)
+            conversion_thread.join(timeout=10)
             
             if conversion_error:
+                update_progress(85, f'ONNX: Conversion error - {str(conversion_error)}')
                 raise conversion_error
             
-            update_progress(88, 'Verifying ONNX export...')
+            update_progress(88, 'ONNX: Verifying export integrity...')
             check_cancelled()
             
-            # Check if the exported file exists
+            # Check if the exported file exists and get details
             expected_onnx = source_path.with_suffix('.onnx')
             if expected_onnx.exists():
-                logger.info(f"Successfully converted to ONNX: {expected_onnx}")
+                file_size_mb = expected_onnx.stat().st_size / (1024 * 1024)
+                total_time = time.time() - start_time
+                logger.info(f"ONNX conversion completed - {file_size_mb:.1f}MB file created in {total_time:.1f}s")
+                update_progress(90, f'ONNX: Conversion successful - {file_size_mb:.1f}MB ONNX model created')
                 return expected_onnx
             else:
                 raise RuntimeError("ONNX conversion completed but file not found")
@@ -1497,10 +1606,11 @@ class AIModelManager:
         except ImportError:
             logger.warning("ultralytics not available, using fallback conversion")
             # Fallback: copy file with .onnx extension
-            update_progress(85, 'Creating ONNX placeholder...')
+            update_progress(85, 'ONNX: Creating ONNX placeholder (ultralytics not available)...')
             check_cancelled()
             onnx_path = source_path.with_suffix('.onnx')
             shutil.copy2(source_path, onnx_path)
+            update_progress(88, f'ONNX: Fallback conversion completed')
             return onnx_path
         except Exception as e:
             if "cancelled" in str(e).lower():
@@ -1511,6 +1621,9 @@ class AIModelManager:
                         onnx_path.unlink()
                     except:
                         pass
+                update_progress(85, f'ONNX: Conversion cancelled')
+            else:
+                update_progress(85, f'ONNX: Conversion failed - {str(e)}')
             logger.error(f"ONNX conversion failed: {str(e)}")
             raise
     
@@ -1560,13 +1673,38 @@ import os
 import signal
 import logging
 import traceback
+import io
 
-# Allow TensorRT logs to show but reduce ultralytics noise
-os.environ["YOLO_VERBOSE"] = "True"  # Keep verbose for TensorRT info
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+# Patch print to always flush and capture verbose output
+original_print = print
+def verbose_print(*args, **kwargs):
+    kwargs['flush'] = True
+    original_print(*args, **kwargs)
+print = verbose_print
+
+# Set maximum verbosity for all TensorRT and YOLO operations
+os.environ["PYTHONUNBUFFERED"] = "1"
+os.environ["YOLO_VERBOSE"] = "True"
+os.environ["TENSORRT_LOG_LEVEL"] = "0"  # Maximum verbosity
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+os.environ["TRT_LOGGER_VERBOSITY"] = "VERBOSE"
+
+# Configure logging with maximum verbosity
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr)
+    ]
+)
 
 try:
     from ultralytics import YOLO
+    from ultralytics.utils import LOGGER
+    
+    # Set ultralytics logger to maximum verbosity
+    LOGGER.setLevel(logging.DEBUG)
     
     def signal_handler(signum, frame):
         print("CONVERSION_CANCELLED")
@@ -1576,18 +1714,34 @@ try:
     signal.signal(signal.SIGINT, signal_handler)
     
     print("STARTING_CONVERSION")
+    print(f"Converting model: {source_path}")
+    print("Environment configured for maximum TensorRT verbosity")
     sys.stdout.flush()
     
+    print("LOADING_MODEL")
     model = YOLO(r"{source_path}")
     print("MODEL_LOADED")
+    print(f"Model architecture: {{model.model}}")
     sys.stdout.flush()
     
     print("BEGINNING_TENSORRT_EXPORT")
+    print("Starting TensorRT engine build process...")
+    print("This will show detailed TensorRT build logs:")
     sys.stdout.flush()
     
-    # Export with full verbosity to see TensorRT progress
-    result = model.export(format="engine", verbose=True)
+    # Export with maximum verbosity to capture all TensorRT logs
+    result = model.export(
+        format="engine", 
+        verbose=True,
+        half=False,  # Use FP32 for maximum compatibility
+        workspace=4,  # 4GB workspace for optimization
+        int8=False,
+        dynamic=False,
+        simplify=True
+    )
+    
     print(f"EXPORT_RESULT: {{result}}")
+    print("TensorRT engine build completed successfully!")
     print("CONVERSION_SUCCESS")
     
 except KeyboardInterrupt:
@@ -1607,18 +1761,19 @@ except Exception as e:
             
             process = None
             try:
-                # Start the conversion process
+                # Start the conversion process with unbuffered output
                 process = subprocess.Popen([
-                    sys.executable, script_path
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
-                   text=True, bufsize=1, universal_newlines=True)
+                    sys.executable, '-u', script_path  # -u for unbuffered output
+                ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # Combine stdout and stderr
+                   text=True, bufsize=0, universal_newlines=True)  # Unbuffered
                 
                 logger.info(f"Started TensorRT conversion process: PID {process.pid}")
                 
-                # Monitor the process
+                # Monitor the process and forward detailed output
                 start_time = time.time()
                 model_loaded = False
                 output_lines = []
+                conversion_stage = "initializing"
                 
                 while True:
                     # Check if process has finished
@@ -1659,49 +1814,76 @@ except Exception as e:
                         
                         raise e
                     
-                    # Read any output
-                    try:
+                    # Read any output with timeout to prevent blocking
+                    import select
+                    ready, _, _ = select.select([process.stdout], [], [], 0.5)
+                    
+                    if ready:
                         line = process.stdout.readline()
                         if line:
                             line = line.strip()
                             output_lines.append(line)
                             
-                            # Forward subprocess output to main logger
-                            if line.startswith('[') or 'TRT' in line or 'Tactic' in line:
-                                # This looks like TensorRT output - log it
-                                logger.info(f"TensorRT: {line}")
-                            elif "STARTING_CONVERSION" in line:
-                                logger.info("TensorRT conversion: Starting conversion process")
+                            # Forward ALL subprocess output as verbose progress updates
+                            logger.info(f"TensorRT: {line}")
+                            
+                            # Parse different conversion stages and forward as progress
+                            if "STARTING_CONVERSION" in line:
+                                conversion_stage = "starting"
+                                update_progress(83, f"TensorRT: {line}")
+                            elif "LOADING_MODEL" in line:
+                                conversion_stage = "loading_model"
+                                update_progress(84, f"TensorRT: Loading model for conversion...")
                             elif "MODEL_LOADED" in line:
                                 model_loaded = True
-                                logger.info("TensorRT conversion: Model loaded successfully")
+                                conversion_stage = "model_loaded"
+                                update_progress(85, f"TensorRT: Model loaded successfully")
                             elif "BEGINNING_TENSORRT_EXPORT" in line:
-                                logger.info("TensorRT conversion: Beginning TensorRT export")
+                                conversion_stage = "tensorrt_export"
+                                update_progress(86, f"TensorRT: Beginning TensorRT engine build...")
+                            elif any(keyword in line for keyword in ['Building engine', 'Optimization', 'Calibrat', 'Layer', 'Tactic', 'Profile', 'Memory']):
+                                # These are actual TensorRT build logs - forward them as progress
+                                elapsed = int(time.time() - start_time)
+                                update_progress(87, f"TensorRT Build ({elapsed}s): {line}")
+                            elif 'TRT' in line or 'tensorrt' in line.lower() or 'engine' in line.lower():
+                                # Other TensorRT related output
+                                elapsed = int(time.time() - start_time)
+                                update_progress(87, f"TensorRT ({elapsed}s): {line}")
+                            elif "EXPORT_RESULT" in line:
+                                update_progress(89, f"TensorRT: Export completed - {line.split('EXPORT_RESULT: ')[-1] if 'EXPORT_RESULT:' in line else line}")
                             elif "CONVERSION_SUCCESS" in line:
+                                update_progress(90, "TensorRT: Engine build completed successfully!")
                                 logger.info("TensorRT conversion completed successfully")
                                 break
                             elif "CONVERSION_ERROR" in line:
-                                logger.error(f"TensorRT conversion failed: {line}")
+                                error_msg = line.split('CONVERSION_ERROR: ')[-1] if 'CONVERSION_ERROR:' in line else line
+                                update_progress(85, f"TensorRT Error: {error_msg}")
+                                logger.error(f"TensorRT conversion failed: {error_msg}")
                                 break
                             elif "CONVERSION_CANCELLED" in line:
+                                update_progress(85, "TensorRT: Conversion cancelled")
                                 logger.info("TensorRT conversion was cancelled")
                                 break
                             elif line and not any(skip in line for skip in ['HTTP/1.1', 'werkzeug', 'GET /api']):
-                                # Log other interesting output but skip HTTP requests
-                                logger.info(f"TensorRT subprocess: {line}")
-                                
-                    except:
-                        pass
+                                # Forward any other interesting output with elapsed time
+                                if len(line) > 10:  # Skip very short lines
+                                    elapsed = int(time.time() - start_time)
+                                    update_progress(87, f"TensorRT Build ({elapsed}s): {line}")
                     
-                    # Update progress with elapsed time
+                    # General progress update with elapsed time for long-running conversions
                     elapsed = time.time() - start_time
-                    if elapsed > 10:
-                        base_progress = 87 if model_loaded else 85
-                        fake_progress = min(89, base_progress + int(elapsed / 30))
-                        status = "Converting to TensorRT..." if model_loaded else "Loading model for conversion..."
-                        update_progress(fake_progress, f'{status} ({int(elapsed)}s elapsed)')
+                    if elapsed > 15 and int(elapsed) % 10 == 0:  # Every 10 seconds after 15s
+                        stage_msg = {
+                            "initializing": "Initializing conversion environment",
+                            "starting": "Setting up TensorRT conversion",
+                            "loading_model": "Loading model architecture", 
+                            "model_loaded": "Analyzing model for optimization",
+                            "tensorrt_export": "Building optimized TensorRT engine",
+                        }.get(conversion_stage, "Building TensorRT engine")
+                        
+                        update_progress(87, f"TensorRT: {stage_msg} ({int(elapsed)}s elapsed)")
                     
-                    time.sleep(1)
+                    time.sleep(0.1)  # Shorter sleep for more responsive output capture
                 
                 # Get final output
                 try:
