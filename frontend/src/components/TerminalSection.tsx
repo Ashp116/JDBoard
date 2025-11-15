@@ -173,7 +173,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
   useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        const response = await fetch(`${getBackendUrl()}/api/terminal/userinfo`);
+        const response = await fetch(`${getBackendUrl()}/terminal/userinfo`);
         const result = await response.json();
         
         if (result.success) {
@@ -214,7 +214,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
     setHistoryIndex(-1);
 
     try {
-      const response = await fetch(`${getBackendUrl()}/api/terminal/execute`, {
+      const response = await fetch(`${getBackendUrl()}/terminal/execute`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -256,7 +256,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
     if (!currentCommand.trim()) return;
 
     try {
-      const response = await fetch(`${getBackendUrl()}/api/terminal/complete`, {
+      const response = await fetch(`${getBackendUrl()}/terminal/complete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

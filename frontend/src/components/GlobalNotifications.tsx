@@ -438,7 +438,7 @@ const GlobalNotifications: React.FC = () => {
 
     const monitorLogsForBrokenPipes = async () => {
       try {
-        const response = await fetch(`${getBackendUrl()}/api/system/logs?since=${lastLogCheck}&filter=broken_pipe`);
+        const response = await fetch(`${getBackendUrl()}/system/logs?since=${lastLogCheck}&filter=broken_pipe`);
         if (response.ok) {
           const logData = await response.json();
           
@@ -472,7 +472,7 @@ const GlobalNotifications: React.FC = () => {
         console.log(`Auto-recovery attempt ${recoveryAttempts}/${maxRecoveryAttempts} for broken pipe errors`);
 
         try {
-          const reconnectResponse = await fetch(`${getBackendUrl()}/api/system/jtop-force-reconnect`, {
+          const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
             method: 'POST'
           });
 
@@ -482,7 +482,7 @@ const GlobalNotifications: React.FC = () => {
               // Check if broken pipe errors have stopped for a few seconds
               await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
               
-              const checkResponse = await fetch(`${getBackendUrl()}/api/system/logs?since=${Date.now() - 10000}&filter=broken_pipe`);
+              const checkResponse = await fetch(`${getBackendUrl()}/system/logs?since=${Date.now() - 10000}&filter=broken_pipe`);
               if (checkResponse.ok) {
                 const checkData = await checkResponse.json();
                 const recentBrokenPipes = checkData.logs?.filter((log: any) => 
@@ -560,7 +560,7 @@ const GlobalNotifications: React.FC = () => {
           console.log(`Force reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
           
           try {
-            const reconnectResponse = await fetch(`${getBackendUrl()}/api/system/jtop-force-reconnect`, {
+            const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
@@ -669,7 +669,7 @@ const GlobalNotifications: React.FC = () => {
             console.log(`Force reload attempt ${retryCount}/${maxRetries}`);
             
             // Try force reconnect
-            const reconnectResponse = await fetch(`${getBackendUrl()}/api/system/jtop-force-reconnect`, {
+            const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
               method: 'POST'
             });
 

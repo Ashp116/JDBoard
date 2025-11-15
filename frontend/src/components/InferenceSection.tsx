@@ -3668,7 +3668,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         end_date: searchParams.end_date || filters.end_date
       });
 
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference?${params}`);
+      const response = await fetch(`${getBackendUrl()}/logs/inference?${params}`);
       const data = await response.json();
 
       if (data.success) {
@@ -3694,7 +3694,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const fetchInferenceStats = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/stats`);
+      const response = await fetch(`${getBackendUrl()}/logs/inference/stats`);
       const data = await response.json();
 
       if (data.success) {
@@ -3891,7 +3891,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     }
 
     try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/clear`, {
+      const response = await fetch(`${getBackendUrl()}/logs/inference/clear`, {
         method: 'DELETE'
       });
       const data = await response.json();
@@ -4018,7 +4018,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const fetchModels = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models`);
+      const response = await fetch(`${getBackendUrl()}/models`);
       const data = await response.json();
       if (data.success) {
         const modelList = data.data?.map((model: any) => ({
@@ -4108,7 +4108,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       formData.append('image', selectedImage);
       formData.append('model_id', selectedModel);
 
-      const response = await fetch(`${getBackendUrl()}/api/inference`, {
+      const response = await fetch(`${getBackendUrl()}/inference`, {
         method: 'POST',
         body: formData,
       });
@@ -4965,7 +4965,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           className="route-copy-btn"
                           onClick={(e) => {
                             e.stopPropagation();
-                            copyToClipboard(`${getBackendUrl()}/api/inference`);
+                            copyToClipboard(`${getBackendUrl()}/inference`);
                           }}
                         >
                           <i className="fas fa-copy"></i>
@@ -5042,10 +5042,10 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           {/* cURL Tab */}
                           {getCodeTab('inference') === 'curl' && (
                             <CodeBlock language="curl">
-                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/api/inference" \\
+                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/inference" \\
   -F "image=@/path/to/your/image.jpg" \\
   -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`, 'curl')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/api/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`)}>
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`)}>
                               </i>
                             </CodeBlock>
                           )}
@@ -5057,7 +5057,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 formData.append('image', imageFile);
 formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
 
-const response = await fetch('${getBackendUrl()}/api/inference', {
+const response = await fetch('${getBackendUrl()}/inference', {
   method: 'POST',
   body: formData
 });
@@ -5068,7 +5068,7 @@ console.log(result);`, 'javascript')}
 formData.append('image', imageFile);
 formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
 
-const response = await fetch('${getBackendUrl()}/api/inference', {
+const response = await fetch('${getBackendUrl()}/inference', {
   method: 'POST',
   body: formData
 });
@@ -5084,7 +5084,7 @@ console.log(result);`)}>
                             <CodeBlock language="python">
                               {renderHighlightedCode(`import requests
 
-url = "${getBackendUrl()}/api/inference"
+url = "${getBackendUrl()}/inference"
 files = {'image': open('/path/to/your/image.jpg', 'rb')}
 data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
 
@@ -5093,7 +5093,7 @@ result = response.json()
 print(result)`, 'python')}
                               <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
 
-url = "${getBackendUrl()}/api/inference"
+url = "${getBackendUrl()}/inference"
 files = {'image': open('/path/to/your/image.jpg', 'rb')}
 data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
 

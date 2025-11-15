@@ -324,7 +324,7 @@ export const InferenceMonitoring: React.FC = () => {
         }
       });
 
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference?${params}`);
+      const response = await fetch(`${getBackendUrl()}/logs/inference?${params}`);
       const data = await response.json();
 
       if (data.success) {
@@ -351,7 +351,7 @@ export const InferenceMonitoring: React.FC = () => {
 
   const fetchInferenceStats = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/stats`);
+      const response = await fetch(`${getBackendUrl()}/logs/inference/stats`);
       const data = await response.json();
 
       if (data.success) {

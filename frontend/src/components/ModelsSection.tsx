@@ -1238,7 +1238,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   // Function to restore active downloads on page load/reload
   const restoreActiveDownloads = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/active-downloads`);
+      const response = await fetch(`${getBackendUrl()}/models/active-downloads`);
       const data = await response.json();
       
       if (data.success && data.active_downloads) {
@@ -1286,7 +1286,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   // Load models function (defined early to be available in useEffect dependency arrays)
   const loadModels = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/list`);
+      const response = await fetch(`${getBackendUrl()}/models/list`);
       const data = await response.json();
       
       if (data.success && Array.isArray(data.models)) {
@@ -1539,7 +1539,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
     try {
       // Send cancel request to backend
-      const response = await fetch(`${getBackendUrl()}/api/models/cancel-download`, {
+      const response = await fetch(`${getBackendUrl()}/models/cancel-download`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1693,7 +1693,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // Close modal immediately to allow user to continue
       resetModal();
 
-      const response = await fetch(`${getBackendUrl()}/api/models/upload`, {
+      const response = await fetch(`${getBackendUrl()}/models/upload`, {
         method: 'POST',
         body: formData
       });
@@ -1732,7 +1732,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // Close modal immediately to allow user to continue
       resetModal();
 
-      const response = await fetch(`${getBackendUrl()}/api/models/download-yolo`, {
+      const response = await fetch(`${getBackendUrl()}/models/download-yolo`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -1794,7 +1794,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleLoadModel = async (modelId: string) => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/${modelId}/load`, {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/load`, {
         method: 'POST'
       });
       
@@ -1825,7 +1825,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleForceReloadModel = async (modelId: string) => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/${modelId}/force-reload`, {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/force-reload`, {
         method: 'POST'
       });
       
@@ -1856,7 +1856,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleUnloadModel = async (modelId: string) => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/${modelId}/unload`, {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/unload`, {
         method: 'POST'
       });
       
@@ -1891,7 +1891,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
 
     try {
-      const response = await fetch(`${getBackendUrl()}/api/models/${modelId}`, {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}`, {
         method: 'DELETE'
       });
       

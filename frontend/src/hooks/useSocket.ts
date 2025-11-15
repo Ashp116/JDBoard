@@ -15,11 +15,13 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
     if (serverPath) return serverPath;
     
     // Get current host from browser location
+    const protocol = window.location.protocol;
     const host = window.location.hostname;
     const port = 5000; // Backend port
     
     // Use the same host but different port for backend
-    const backendUrl = `http://${host}:${port}`;
+    const isProxied = (window as any).isProxied
+    const backendUrl = isProxied ? `${protocol}//${host}` : `${protocol}//${host}:${port}`;
     
     console.log(`Auto-detected backend URL: ${backendUrl}`);
     return backendUrl;
@@ -27,11 +29,12 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
 
   useEffect(() => {
     const finalServerPath = getServerPath();
-    console.log('Connecting to backend:', finalServerPath);
+    const isProxied = (window as any).isProxied;
+    
+    console.log('Connecting to backend:', finalServerPath, 'Proxied:', isProxied);
     
     // Create socket connection
-    const newSocket = io(finalServerPath, {
-      path: '/api/socket',
+    const socketOptions: any = {
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 2000,
@@ -42,7 +45,14 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
       transports: ['polling', 'websocket'],
       upgrade: true,
       rememberUpgrade: true
-    });
+    };
+    
+    // Set the correct path based on proxy status
+    if (isProxied) {
+      socketOptions.path = '/api/socket.io';
+    }
+    
+    const newSocket = io(finalServerPath, socketOptions);
 
     // Connection event handlers
     newSocket.on('connect', () => {

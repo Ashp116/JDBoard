@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { LogsSectionProps } from '../types';
+import { getBackendUrl } from '../utils/api';
 
 const Container = styled.div`
   padding: 30px;
@@ -111,7 +112,7 @@ const LogsSection: React.FC<LogsSectionProps> = ({ systemData, socket, isConnect
   
   const refreshLogs = async () => {
     try {
-      const response = await fetch('/api/system/logs');
+      const response = await fetch(`${getBackendUrl()}/system/logs`);
       const data = await response.json();
       if (data.success) {
         setLogs(data.data.recent_logs || []);

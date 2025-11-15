@@ -397,7 +397,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   // Fetch current settings from backend
   const fetchSettings = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/settings`);
+      const response = await fetch(`${getBackendUrl()}/settings`);
       if (response.ok) {
         const settingsData = await response.json();
         setSettings(prev => ({
@@ -416,7 +416,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   // Fetch current fan mode directly from the fan-mode endpoint
   const fetchCurrentFanMode = async () => {
     try {
-      const response = await fetch(`${getBackendUrl()}/api/system/fan-mode`);
+      const response = await fetch(`${getBackendUrl()}/system/fan-mode`);
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.current_mode) {
@@ -465,7 +465,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   useEffect(() => {
     const fetchPowerModes = async () => {
       try {
-        const response = await fetch(`${getBackendUrl()}/api/system/power-modes`);
+        const response = await fetch(`${getBackendUrl()}/system/power-modes`);
         if (response.ok) {
           const data = await response.json();
           if (data.success) {
@@ -774,7 +774,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       setLoading(prev => ({ ...prev, clearInferenceLogs: true }));
       
       try {
-        const response = await fetch(`${getBackendUrl()}/api/logs/inference/clear`, {
+        const response = await fetch(`${getBackendUrl()}/logs/inference/clear`, {
           method: 'POST'
         });
         const data = await response.json();
@@ -809,7 +809,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     setLoading(prev => ({ ...prev, exportInferenceLogs: true }));
     
     try {
-      const response = await fetch(`${getBackendUrl()}/api/logs/inference/export/${format}`);
+      const response = await fetch(`${getBackendUrl()}/logs/inference/export/${format}`);
       
       if (response.ok) {
         // Handle file download

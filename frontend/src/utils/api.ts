@@ -5,11 +5,13 @@
 
 // Get the backend URL based on current location
 export const getBackendUrl = () => {
+  const protocol = window.location.protocol;
   const host = window.location.hostname;
   const port = 5000; // Backend port
   
   // Use the same host but different port for backend
-  const backendUrl = `http://${host}:${port}`;
+  const isProxied = (window as any).isProxied
+  const backendUrl = isProxied ? `${protocol}//${host}/api` : `${protocol}//${host}:${port}`;
   
   console.log(`Backend URL: ${backendUrl}`);
   return backendUrl;

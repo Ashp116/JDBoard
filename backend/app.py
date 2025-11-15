@@ -42,8 +42,7 @@ socketio = SocketIO(app,
                    engineio_logger=False,
                    async_mode='threading',
                    ping_timeout=60,
-                   ping_interval=25,
-                   path='/api/socket')
+                   ping_interval=25)
 
 # Global dict to track active downloads and their cancel flags
 active_downloads = {}
@@ -165,14 +164,14 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/api/system/status')
+@app.route('/system/status')
 def get_system_status():
     """Get comprehensive system status"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/system/status',
+        endpoint='/system/status',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -215,14 +214,14 @@ def get_system_status():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/gpu')
+@app.route('/system/gpu')
 def get_gpu_status():
     """Get GPU status and statistics"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/system/gpu',
+        endpoint='/system/gpu',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -242,14 +241,14 @@ def get_gpu_status():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/logs')
+@app.route('/system/logs')
 def get_system_logs():
     """Get system logs with optional filtering for broken pipe monitoring"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/system/logs',
+        endpoint='/system/logs',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -328,14 +327,14 @@ def get_system_logs():
             'error': str(e)
         }), 500
 
-@app.route('/api/models', methods=['GET'])
+@app.route('/models', methods=['GET'])
 def list_models():
     """List all available AI models"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/models',
+        endpoint='/models',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -355,14 +354,14 @@ def list_models():
             'error': str(e)
         }), 500
 
-@app.route('/api/gpu/memory', methods=['GET'])
+@app.route('/gpu/memory', methods=['GET'])
 def get_gpu_memory():
     """Get GPU memory usage information"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/gpu/memory',
+        endpoint='/gpu/memory',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -382,14 +381,14 @@ def get_gpu_memory():
             'error': str(e)
         }), 500
 
-@app.route('/api/models/upload', methods=['POST'])
+@app.route('/models/upload', methods=['POST'])
 def upload_model():
     """Upload a new AI model with real-time progress updates"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/models/upload',
+        endpoint='/models/upload',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method,
@@ -529,14 +528,14 @@ def upload_model():
             'error': 'Invalid file type'
         }), 400
 
-@app.route('/api/models/<model_id>/load', methods=['POST'])
+@app.route('/models/<model_id>/load', methods=['POST'])
 def load_model(model_id):
     """Load a model for inference"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint=f'/api/models/{model_id}/load',
+        endpoint=f'/models/{model_id}/load',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -565,14 +564,14 @@ def load_model(model_id):
             'error': str(e)
         }), 500
 
-@app.route('/api/models/<model_id>/force-reload', methods=['POST'])
+@app.route('/models/<model_id>/force-reload', methods=['POST'])
 def force_reload_model(model_id):
     """Force unload and reload a model from memory"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint=f'/api/models/{model_id}/force-reload',
+        endpoint=f'/models/{model_id}/force-reload',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -609,14 +608,14 @@ def force_reload_model(model_id):
             'error': str(e)
         }), 500
 
-@app.route('/api/models/<model_id>/unload', methods=['POST'])
+@app.route('/models/<model_id>/unload', methods=['POST'])
 def unload_model(model_id):
     """Unload a model from memory"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint=f'/api/models/{model_id}/unload',
+        endpoint=f'/models/{model_id}/unload',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -638,14 +637,14 @@ def unload_model(model_id):
             'error': str(e)
         }), 500
 
-@app.route('/api/models/<model_id>', methods=['DELETE'])
+@app.route('/models/<model_id>', methods=['DELETE'])
 def delete_model(model_id):
     """Delete a model from the system"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint=f'/api/models/{model_id}',
+        endpoint=f'/models/{model_id}',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -667,7 +666,7 @@ def delete_model(model_id):
             'error': str(e)
         }), 500
 
-@app.route('/api/models/download-yolo', methods=['POST'])
+@app.route('/models/download-yolo', methods=['POST'])
 def download_yolo_model():
     """Download and optionally convert a YOLO model with real-time progress updates"""
     client_ip = request.remote_addr
@@ -681,7 +680,7 @@ def download_yolo_model():
         }), 400
     
     request_logger.log_request(
-        endpoint='/api/models/download-yolo',
+        endpoint='/models/download-yolo',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method,
@@ -779,7 +778,7 @@ def download_yolo_model():
             'error': str(e)
         }), 500
 
-@app.route('/api/models/cancel-download', methods=['POST'])
+@app.route('/models/cancel-download', methods=['POST'])
 def cancel_download():
     """Cancel an active download"""
     client_ip = request.remote_addr
@@ -800,7 +799,7 @@ def cancel_download():
         }), 400
     
     request_logger.log_request(
-        endpoint='/api/models/cancel-download',
+        endpoint='/models/cancel-download',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method,
@@ -864,7 +863,7 @@ def cancel_download():
             'error': str(e)
         }), 500
 
-@app.route('/api/models/active-downloads', methods=['GET'])
+@app.route('/models/active-downloads', methods=['GET'])
 def get_active_downloads():
     """Get list of active downloads/conversions to restore state on page reload"""
     try:
@@ -903,14 +902,14 @@ def get_active_downloads():
             'active_downloads': {}
         }), 500
 
-@app.route('/api/models/list')
+@app.route('/models/list')
 def list_models_detailed():
     """List all models with detailed information"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/models/list',
+        endpoint='/models/list',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -930,14 +929,14 @@ def list_models_detailed():
             'error': str(e)
         }), 500
 
-@app.route('/api/models/emergency-cleanup', methods=['POST'])
+@app.route('/models/emergency-cleanup', methods=['POST'])
 def emergency_cleanup():
     """Emergency cleanup to free all GPU memory"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/models/emergency-cleanup',
+        endpoint='/models/emergency-cleanup',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -969,14 +968,14 @@ def emergency_cleanup():
             'error': str(e)
         }), 500
 
-@app.route('/api/inference', methods=['POST'])
+@app.route('/inference', methods=['POST'])
 def run_inference():
     """Run inference on uploaded image"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/inference',
+        endpoint='/inference',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1070,7 +1069,7 @@ def run_inference():
             'error': error_msg
         }), 500
 
-@app.route('/api/logs/requests')
+@app.route('/logs/requests')
 def get_request_logs():
     """Get request logs with pagination"""
     client_ip = request.remote_addr
@@ -1091,7 +1090,7 @@ def get_request_logs():
             'error': str(e)
         }), 500
 
-@app.route('/api/logs/stats')
+@app.route('/logs/stats')
 def get_log_stats():
     """Get request statistics"""
     try:
@@ -1107,14 +1106,14 @@ def get_log_stats():
             'error': str(e)
         }), 500
 
-@app.route('/api/logs/inference')
+@app.route('/logs/inference')
 def get_inference_logs():
     """Get inference logs with pagination and filtering"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/logs/inference',
+        endpoint='/logs/inference',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1154,14 +1153,14 @@ def get_inference_logs():
             'error': str(e)
         }), 500
 
-@app.route('/api/logs/inference/export/<format>')
+@app.route('/logs/inference/export/<format>')
 def export_inference_logs(format):
     """Export inference logs in different formats"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint=f'/api/logs/inference/export/{format}',
+        endpoint=f'/logs/inference/export/{format}',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1242,14 +1241,14 @@ def export_inference_logs(format):
             'error': str(e)
         }), 500
 
-@app.route('/api/logs/inference/clear', methods=['POST'])
+@app.route('/logs/inference/clear', methods=['POST'])
 def clear_inference_logs():
     """Clear all inference logs"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/logs/inference/clear',
+        endpoint='/logs/inference/clear',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1276,14 +1275,14 @@ def clear_inference_logs():
             'error': str(e)
         }), 500
 
-@app.route('/api/logs/inference/stats')
+@app.route('/logs/inference/stats')
 def get_inference_stats():
     """Get detailed inference statistics"""
     client_ip = request.remote_addr
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
-        endpoint='/api/logs/inference/stats',
+        endpoint='/logs/inference/stats',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1386,7 +1385,7 @@ def handle_system_data_request():
         })
 
 # System Settings API Endpoints
-@app.route('/api/auth/sudo', methods=['POST'])
+@app.route('/auth/sudo', methods=['POST'])
 def authenticate_sudo():
     """Authenticate sudo password"""
     try:
@@ -1435,7 +1434,7 @@ def authenticate_sudo():
             'error': 'Authentication failed'
         }), 500
 
-@app.route('/api/system/info')
+@app.route('/system/info')
 def get_system_info():
     """Get comprehensive system information"""
     try:
@@ -1466,7 +1465,7 @@ def get_system_info():
             'error': str(e)
         }), 500
 
-@app.route('/api/settings', methods=['GET'])
+@app.route('/settings', methods=['GET'])
 def get_settings():
     """Get current dashboard settings"""
     try:
@@ -1519,7 +1518,7 @@ def get_settings():
             'error': str(e)
         }), 500
 
-@app.route('/api/settings', methods=['POST'])
+@app.route('/settings', methods=['POST'])
 def save_settings():
     """Save dashboard settings"""
     try:
@@ -1542,7 +1541,7 @@ def save_settings():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/jetson-clocks', methods=['POST'])
+@app.route('/system/jetson-clocks', methods=['POST'])
 def toggle_jetson_clocks():
     """Toggle Jetson Clocks on/off"""
     try:
@@ -1633,7 +1632,7 @@ def toggle_jetson_clocks():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/power-modes', methods=['GET'])
+@app.route('/system/power-modes', methods=['GET'])
 def get_power_modes():
     """Get available power modes from jtop"""
     try:
@@ -1667,7 +1666,7 @@ def get_power_modes():
             'current_mode': 'MAXN_SUPER'
         })
 
-@app.route('/api/system/power-mode', methods=['POST'])
+@app.route('/system/power-mode', methods=['POST'])
 def set_power_mode():
     """Set system power mode"""
     try:
@@ -1723,7 +1722,7 @@ def set_power_mode():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/fan-mode', methods=['GET'])
+@app.route('/system/fan-mode', methods=['GET'])
 def get_fan_mode():
     """Get current fan profile"""
     try:
@@ -1767,7 +1766,7 @@ def get_fan_mode():
             'available_modes': ['quiet', 'cool']
         })
 
-@app.route('/api/system/fan-mode', methods=['POST'])
+@app.route('/system/fan-mode', methods=['POST'])
 def set_fan_mode():
     """Set fan control mode according to NVIDIA documentation"""
     try:
@@ -1868,7 +1867,7 @@ def set_fan_mode():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/reboot', methods=['POST'])
+@app.route('/system/reboot', methods=['POST'])
 def reboot_system():
     """Reboot the system"""
     try:
@@ -1899,7 +1898,7 @@ def reboot_system():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/shutdown', methods=['POST'])
+@app.route('/system/shutdown', methods=['POST'])
 def shutdown_system():
     """Shutdown the system"""
     try:
@@ -1935,7 +1934,7 @@ def shutdown_system():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/jtop-install-service', methods=['POST'])
+@app.route('/system/jtop-install-service', methods=['POST'])
 def install_jtop_service():
     """Install and start the jtop service"""
     try:
@@ -2052,7 +2051,7 @@ def install_jtop_service():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/jtop-restart-service', methods=['POST'])
+@app.route('/system/jtop-restart-service', methods=['POST'])
 def restart_jtop_service():
     """Restart the jtop service to fix broken pipe issues"""
     try:
@@ -2159,7 +2158,7 @@ def restart_jtop_service():
             'error': str(e)
         }), 500
 
-@app.route('/api/system/jtop-force-reconnect', methods=['POST'])
+@app.route('/system/jtop-force-reconnect', methods=['POST'])
 def force_reconnect_jtop():
     """Force reconnect to jtop without restarting the service (no sudo required)"""
     try:
@@ -2206,7 +2205,7 @@ def get_or_create_terminal_session(session_id=None):
     
     return terminal_sessions[session_id]
 
-@app.route('/api/terminal/execute', methods=['POST'])
+@app.route('/terminal/execute', methods=['POST'])
 def execute_terminal_command():
     """Execute a terminal command safely with session support"""
     try:
@@ -2572,7 +2571,7 @@ Use 'man <command>' for detailed help on specific commands.
             'error': str(e)
         }), 500
 
-@app.route('/api/terminal/complete', methods=['POST'])
+@app.route('/terminal/complete', methods=['POST'])
 def tab_complete():
     """Handle tab completion for terminal commands"""
     try:
@@ -2694,7 +2693,7 @@ def tab_complete():
             'completions': []
         }), 500
 
-@app.route('/api/terminal/userinfo', methods=['GET'])
+@app.route('/terminal/userinfo', methods=['GET'])
 def get_terminal_user_info():
     """Get current user and hostname information for terminal display"""
     try:
@@ -2836,6 +2835,6 @@ if __name__ == '__main__':
     # Start background WebSocket updates
     socketio.start_background_task(background_system_updates)
     
-    logger.info("Starting Jetson Edge AI Dashboard with WebSocket support on /api/socket...")
+    logger.info("Starting Jetson Edge AI Dashboard with WebSocket support on port 5000...")
     # Use app.config['DEBUG'] instead of hardcoded debug=True
     socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
