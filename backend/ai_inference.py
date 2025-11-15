@@ -53,7 +53,9 @@ except ImportError:
 # Import garbage collection for memory management
 import gc
 
-logger = logging.getLogger(__name__)
+# Create a specific logger for model operations
+logger = logging.getLogger('ai_inference')
+logger.setLevel(logging.INFO)
 
 class CUDAMemoryManager:
     """Enhanced CUDA memory manager for Jetson devices with limited GPU memory"""
@@ -1352,36 +1354,61 @@ class AIModelManager:
     def _cleanup_intermediate_files(self, source_path, target_format, final_path):
         """Clean up intermediate files created during model conversion"""
         base_path = source_path.with_suffix('')
+        logger.info(f"Cleaning up intermediate files for {target_format} conversion from {source_path} to {final_path}")
         
         # Only clean up intermediate files for specific conversion scenarios
         # Be very conservative to avoid deleting legitimate model files
         
         if target_format == 'TensorRT':
-            # For TensorRT conversion, only clean up ONNX if:
-            # 1. We started from PT and ended with .engine
-            # 2. The ONNX file has the same base name as source
-            # 3. The ONNX was likely created as an intermediate step
-            intermediate_onnx = base_path.with_suffix('.onnx')
+            # For TensorRT conversion, clean up ONNX intermediate files
+            # Check multiple potential ONNX file locations
+            potential_onnx_files = [
+                base_path.with_suffix('.onnx'),  # Same base name
+                source_path.with_suffix('.onnx'),  # Same path different extension
+                final_path.with_suffix('.onnx')   # Engine path with onnx extension
+            ]
             
-            if (source_path.suffix.lower() == '.pt' and 
-                final_path.suffix.lower() == '.engine' and
-                intermediate_onnx.exists() and
-                intermediate_onnx != final_path and 
-                intermediate_onnx != source_path):
-                
-                # Double-check this is likely an intermediate file by checking timestamps
-                # Only delete if ONNX is newer than source (likely just created)
-                try:
-                    source_time = source_path.stat().st_mtime
-                    onnx_time = intermediate_onnx.stat().st_mtime
+            for intermediate_onnx in potential_onnx_files:
+                if (intermediate_onnx.exists() and
+                    intermediate_onnx != final_path and 
+                    intermediate_onnx != source_path and
+                    source_path.suffix.lower() == '.pt' and 
+                    final_path.suffix.lower() == '.engine'):
                     
-                    if onnx_time >= source_time:
-                        intermediate_onnx.unlink()
-                        logger.info(f"Cleaned up intermediate ONNX file from TensorRT conversion: {intermediate_onnx}")
-                    else:
-                        logger.info(f"Keeping existing ONNX file (older than source): {intermediate_onnx}")
-                except Exception as e:
-                    logger.warning(f"Failed to check timestamps, keeping ONNX file: {e}")
+                    try:
+                        # Check if source file still exists for timestamp comparison
+                        if source_path.exists():
+                            source_time = source_path.stat().st_mtime
+                            onnx_time = intermediate_onnx.stat().st_mtime
+                            
+                            # Delete if ONNX is newer (likely intermediate) or within 1 minute of source
+                            if onnx_time >= source_time - 60:  # 60 second tolerance
+                                intermediate_onnx.unlink()
+                                logger.info(f"Cleaned up intermediate ONNX file: {intermediate_onnx}")
+                            else:
+                                logger.info(f"Keeping existing ONNX file (significantly older): {intermediate_onnx}")
+                        else:
+                            # Source doesn't exist, be more aggressive about cleanup
+                            # Check file size - very small ONNX files are likely failed conversions
+                            file_size = intermediate_onnx.stat().st_size
+                            if file_size < 1024 * 1024:  # Less than 1MB, likely incomplete
+                                intermediate_onnx.unlink()
+                                logger.info(f"Cleaned up small/incomplete ONNX file: {intermediate_onnx} ({file_size} bytes)")
+                            else:
+                                # For larger files, use a more recent timestamp heuristic
+                                import time
+                                current_time = time.time()
+                                onnx_time = intermediate_onnx.stat().st_mtime
+                                
+                                # Delete if created within the last hour (likely from this conversion)
+                                if current_time - onnx_time < 3600:  # 1 hour
+                                    intermediate_onnx.unlink()
+                                    logger.info(f"Cleaned up recent intermediate ONNX file: {intermediate_onnx}")
+                                else:
+                                    logger.info(f"Keeping older ONNX file: {intermediate_onnx}")
+                    
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up ONNX file {intermediate_onnx}: {e}")
         
         # For other formats, be even more conservative - only clean up clearly temporary files
         elif target_format in ['CoreML', 'TensorFlow']:
@@ -1452,13 +1479,13 @@ class AIModelManager:
             update_progress(88, 'Finalizing conversion...')
             check_cancelled()
             
+            # Clean up any intermediate files created during conversion BEFORE deleting source
+            self._cleanup_intermediate_files(source_path, target_format, converted_path)
+            
             # Delete the original PyTorch file after successful conversion
             if converted_path != source_path and source_path.exists():
                 source_path.unlink()
                 logger.info(f"Deleted original PyTorch file: {source_path}")
-            
-            # Clean up any intermediate files created during conversion
-            self._cleanup_intermediate_files(source_path, target_format, converted_path)
             
             update_progress(90, f'Model converted to {target_format}')
             logger.info(f"Model converted to {target_format}: {converted_path}")
@@ -1617,16 +1644,19 @@ class AIModelManager:
                 try:
                     for line in iter(process.stdout.readline, ''):
                         if line.strip():
-                            # Forward all TensorRT-related output to logs
-                            if any(keyword in line for keyword in ['TRT', 'TensorRT', 'Tactic', 'Engine', 'CUDA', 'sm80']):
-                                logger.info(f"TensorRT: {line.strip()}")
-                            elif 'export success' in line.lower():
-                                logger.info(f"Export: {line.strip()}")
-                            elif any(keyword in line for keyword in ['WARNING', 'ERROR', 'WARN']):
-                                logger.warning(f"Export: {line.strip()}")
-                            else:
-                                # Log other conversion messages
-                                logger.info(f"Export: {line.strip()}")
+                            clean_line = line.strip()
+                            
+                            # Forward TensorRT verbose output directly
+                            if any(keyword in clean_line for keyword in ['[TRT]', 'TensorRT:', 'Tactic Name:', 'Chose Runner Type:']):
+                                logger.info(clean_line)  # Direct TensorRT output
+                            elif 'building FP16 engine' in clean_line:
+                                logger.info(clean_line)
+                            elif 'export success' in clean_line.lower():
+                                logger.info(f"✓ {clean_line}")
+                            elif any(keyword in clean_line for keyword in ['WARNING', 'ERROR', 'WARN']):
+                                logger.warning(clean_line)
+                            elif any(keyword in clean_line for keyword in ['input', 'output', 'shape', 'DataType']):
+                                logger.info(clean_line)  # Model structure info
                         
                         # Check for cancellation
                         if cancel_check_callback and cancel_check_callback():

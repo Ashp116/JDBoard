@@ -103,11 +103,26 @@ logging.basicConfig(
 class WebSocketLogHandler(logging.Handler):
     def emit(self, record):
         try:
+            # Filter out HTTP requests and non-model related logs
+            logger_name = record.name
+            message = record.getMessage()
+            
+            # Skip werkzeug HTTP requests
+            if logger_name == 'werkzeug':
+                return
+                
+            # Skip other non-model related logs
+            if any(skip_word in message.lower() for skip_word in ['get /api', 'post /api', '200 -', '404 -', '500 -']):
+                return
+                
+            # Only forward model-related logs
+            model_keywords = ['tensorrt', 'yolo', 'model', 'engine', 'onnx', 'pytorch', 'loading', 'inference', 'tactic', 'profiling']
+            if not any(keyword in message.lower() for keyword in model_keywords):
+                return
+            
             log_entry = self.format(record)
-            # Parse timestamp and message
             timestamp = datetime.now().strftime('%H:%M:%S')
             level = record.levelname.lower()
-            message = record.getMessage()
             
             # Emit to all connected clients
             socketio.emit('log_message', {
@@ -120,13 +135,27 @@ class WebSocketLogHandler(logging.Handler):
         except Exception:
             pass  # Don't let logging errors break the app
 
-# Add WebSocket handler to root logger
+# Add WebSocket handler to specific loggers only
 websocket_handler = WebSocketLogHandler()
 websocket_handler.setLevel(logging.INFO)
 websocket_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 websocket_handler.setFormatter(websocket_formatter)
 
-# Get the root logger and add our handler
+# Add handler to specific loggers instead of root logger
+model_loggers = [
+    'ai_inference',
+    'ultralytics',
+    'torch',
+    'tensorrt',
+    'onnxruntime'
+]
+
+for logger_name in model_loggers:
+    specific_logger = logging.getLogger(logger_name)
+    specific_logger.addHandler(websocket_handler)
+    specific_logger.setLevel(logging.INFO)
+
+# Also add to root logger but with stricter filtering
 root_logger = logging.getLogger()
 root_logger.addHandler(websocket_handler)
 
