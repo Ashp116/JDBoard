@@ -3,23 +3,54 @@ import styled from 'styled-components';
 import { DashboardProps } from '../types';
 import MetricCard from './MetricCard';
 import SystemStatus from './SystemStatus';
+import useResponsive from '../hooks/useResponsive';
 
 const DashboardContainer = styled.div`
-  padding: 30px;
+  padding: 20px;
   min-height: calc(100vh - 120px);
   overflow-y: auto;
+
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 15px;
+  }
+
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 25px;
+  }
+
+  /* Desktop styles */
+  @media (min-width: 992px) {
+    padding: 30px;
+  }
 `;
 
 const ContentHeader = styled.div`
   background: ${props => props.theme.gradients.card};
   border-bottom: 2px solid ${props => props.theme.colors.nvidia.green};
-  padding: 20px 30px;
+  padding: 20px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   box-shadow: 0 2px 10px rgba(118, 185, 0, 0.1);
   margin-bottom: 30px;
   border-radius: 8px;
+
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    flex-direction: column;
+    text-align: center;
+    gap: 15px;
+    padding: 15px;
+    margin-bottom: 20px;
+  }
+
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 18px;
+    margin-bottom: 25px;
+  }
 `;
 
 const HeaderInfo = styled.div`
@@ -29,6 +60,15 @@ const HeaderInfo = styled.div`
     margin: 0;
     font-weight: 700;
     font-family: ${props => props.theme.fonts.display};
+
+    /* Responsive font sizes */
+    @media (max-width: 767px) {
+      font-size: 24px;
+    }
+
+    @media (min-width: 768px) and (max-width: 991px) {
+      font-size: 26px;
+    }
   }
 `;
 
@@ -43,22 +83,50 @@ const HeaderMeta = styled.div`
   .separator {
     color: ${props => props.theme.colors.nvidia.green};
   }
+
+  /* Mobile responsive */
+  @media (max-width: 567px) {
+    flex-direction: column;
+    gap: 4px;
+    
+    .separator {
+      display: none;
+    }
+  }
+
+  @media (max-width: 767px) {
+    font-size: 13px;
+    gap: 8px;
+  }
 `;
 
 const MetricsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
   margin-bottom: 30px;
   
-  @media (max-width: 1200px) {
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 15px;
+  /* Mobile - 1 column */
+  grid-template-columns: 1fr;
+  
+  /* Small tablets - 2 columns */
+  @media (min-width: 576px) {
+    grid-template-columns: repeat(2, 1fr);
   }
   
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
+  /* Large tablets - 3 columns */
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  
+  /* Desktop - auto-fit with minimum width */
+  @media (min-width: 1200px) {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+  
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
     gap: 15px;
+    margin-bottom: 20px;
   }
 `;
 
@@ -82,13 +150,47 @@ const SectionHeader = styled.div`
     i {
       color: ${props => props.theme.colors.nvidia.green};
     }
+
+    /* Mobile responsive */
+    @media (max-width: 767px) {
+      font-size: 20px;
+      gap: 8px;
+    }
+  }
+
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
   }
 `;
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 20px;
+  
+  /* Mobile - 1 column */
+  grid-template-columns: 1fr;
+  
+  /* Small tablets - 2 columns */
+  @media (min-width: 576px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  /* Large tablets and up - 4 columns */
+  @media (min-width: 768px) {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  
+  /* Very large screens - auto-fit */
+  @media (min-width: 1400px) {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
+    gap: 15px;
+  }
 `;
 
 const StatCard = styled.div`
@@ -113,6 +215,15 @@ const StatValue = styled.div`
   text-shadow: 0 0 15px currentColor;
   margin-bottom: 8px;
   font-family: ${props => props.theme.fonts.display};
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    font-size: 28px;
+  }
+
+  @media (min-width: 768px) and (max-width: 991px) {
+    font-size: 30px;
+  }
 `;
 
 const StatLabel = styled.div`
@@ -123,6 +234,7 @@ const StatLabel = styled.div`
 `;
 
 const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
+  const { isMobile } = useResponsive();
   const currentTime = new Date().toLocaleString();
 
   const getMetricCards = () => {
@@ -199,8 +311,22 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
   return (
     <DashboardContainer>
       <ContentHeader>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '90px', width: 'auto', maxHeight: '100%' }} />
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 8,
+          flexDirection: isMobile ? 'column' : 'row',
+          textAlign: isMobile ? 'center' : 'left'
+        }}>
+          <img 
+            src="/JBoardIcon.svg" 
+            alt="JBoard Icon" 
+            style={{ 
+              height: isMobile ? '60px' : '90px', 
+              width: 'auto', 
+              maxHeight: '100%' 
+            }} 
+          />
           <HeaderInfo>
             <h1>Jetson Board</h1>
             <HeaderMeta>

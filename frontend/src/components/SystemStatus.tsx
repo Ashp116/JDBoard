@@ -10,6 +10,12 @@ const StatusContainer = styled.div`
   display: flex;
   align-items: center;
   gap: 20px;
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    gap: 12px;
+    justify-content: center;
+  }
 `;
 
 const StatusIndicator = styled.div<StyledProps>`
@@ -25,6 +31,19 @@ const StatusIndicator = styled.div<StyledProps>`
   i {
     font-size: 8px;
     animation: pulse 2s infinite;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    font-size: 11px;
+    gap: 6px;
+  }
+
+  /* Small mobile - show icon only */
+  @media (max-width: 480px) {
+    span {
+      display: none;
+    }
   }
 `;
 

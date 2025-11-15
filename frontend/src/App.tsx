@@ -20,14 +20,33 @@ const AppContainer = styled.div`
   display: flex;
   min-height: 100vh;
   background: ${(props: any) => props.theme.colors.background.primary};
+  position: relative;
+
+  /* Mobile first - no sidebar margin on mobile */
+  @media (max-width: 991px) {
+    flex-direction: column;
+  }
 `;
 
-const MainContent = styled.main`
-  margin-left: 80px;
+const MainContent = styled.main<{ $isMobileMenuOpen?: boolean }>`
   flex: 1;
   min-height: 100vh;
-  transition: margin-left ${(props: any) => props.theme.transitions.medium};
+  transition: all ${(props: any) => props.theme.transitions.medium};
   background: ${(props: any) => props.theme.colors.background.primary};
+  
+  /* Mobile styles */
+  @media (max-width: 991px) {
+    margin-left: 0;
+    padding-top: 60px; /* Account for mobile header */
+    transform: ${props => props.$isMobileMenuOpen ? 'translateX(250px)' : 'translateX(0)'};
+  }
+
+  /* Desktop styles */
+  @media (min-width: 992px) {
+    margin-left: 80px;
+    padding-top: 0;
+    transform: none;
+  }
 `;
 
 const ContentSection = styled.section<{ $active: boolean }>`
@@ -48,6 +67,7 @@ const AppContent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeSection, setActiveSection] = useState<SectionKey>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   
   const { 
     socket, 
@@ -57,6 +77,11 @@ const AppContent: React.FC = () => {
     getBufferStats, 
     clearDataBuffer 
   } = useSocket();
+
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   // Update active section based on current route
   useEffect(() => {
@@ -84,11 +109,16 @@ const AppContent: React.FC = () => {
 
   const handleSectionChange = (section: string) => {
     setActiveSection(section as SectionKey);
+    setIsMobileMenuOpen(false); // Close mobile menu when navigating
     if (section === 'dashboard') {
       navigate('/');
     } else {
       navigate(`/${section}`);
     }
+  };
+
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
   };
 
   const renderSectionWithProps = (SectionComponent: any, additionalProps?: any) => {
@@ -110,8 +140,10 @@ const AppContent: React.FC = () => {
           activeSection={activeSection}
           onSectionChange={handleSectionChange}
           isConnected={isConnected}
+          isMobileMenuOpen={isMobileMenuOpen}
+          onToggleMobileMenu={toggleMobileMenu}
         />
-        <MainContent>
+        <MainContent $isMobileMenuOpen={isMobileMenuOpen}>
           <Routes>
             <Route 
               path="/" 

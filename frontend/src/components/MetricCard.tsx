@@ -40,6 +40,22 @@ const Card = styled.div<StatusStyleProps>`
     box-shadow: ${props => props.theme.shadows.card};
     border-color: ${props => props.theme.colors.nvidia.green};
   }
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    padding: 16px;
+    
+    &:hover {
+      transform: none; /* Disable hover transform on touch devices */
+    }
+  }
+
+  /* Touch device improvements */
+  @media (hover: none) and (pointer: coarse) {
+    &:hover {
+      transform: none;
+    }
+  }
 `;
 
 const MetricHeader = styled.div`
@@ -51,6 +67,13 @@ const MetricHeader = styled.div`
   i {
     color: ${props => props.theme.colors.nvidia.green};
     font-size: 24px;
+    min-width: 24px;
+    
+    /* Mobile responsive */
+    @media (max-width: 767px) {
+      font-size: 20px;
+      min-width: 20px;
+    }
   }
 
   h3 {
@@ -58,6 +81,17 @@ const MetricHeader = styled.div`
     margin: 0;
     font-size: 18px;
     font-weight: 600;
+    
+    /* Mobile responsive */
+    @media (max-width: 767px) {
+      font-size: 16px;
+    }
+  }
+  
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
+    gap: 8px;
+    margin-bottom: 12px;
   }
 `;
 
@@ -78,6 +112,15 @@ const PrimaryValue = styled.span<StatusStyleProps>`
   display: block;
   margin-bottom: 8px;
   font-family: ${props => props.theme.fonts.display};
+  
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    font-size: 28px;
+  }
+
+  @media (min-width: 768px) and (max-width: 991px) {
+    font-size: 30px;
+  }
 `;
 
 const ProgressBarContainer = styled.div`

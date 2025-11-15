@@ -239,6 +239,8 @@ export interface SidebarProps {
   activeSection: string;
   onSectionChange: (section: string) => void;
   isConnected: boolean;
+  isMobileMenuOpen?: boolean;
+  onToggleMobileMenu?: () => void;
 }
 
 export interface SystemStatusProps {

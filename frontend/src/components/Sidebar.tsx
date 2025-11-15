@@ -12,20 +12,98 @@ interface StyledConnectionProps {
   $connected: boolean;
 }
 
-const SidebarContainer = styled.nav`
-  width: 80px;
+const SidebarContainer = styled.nav<{ $isOpen?: boolean }>`
   background: ${props => props.theme.gradients.sidebar};
   border-right: 2px solid ${props => props.theme.colors.nvidia.green};
-  position: fixed;
-  left: 0;
-  top: 0;
-  height: 100vh;
-  z-index: ${props => props.theme.zIndex.sidebar};
-  transition: width ${props => props.theme.transitions.medium};
+  transition: all ${props => props.theme.transitions.medium};
   box-shadow: ${props => props.theme.shadows.sidebar};
+  z-index: ${props => props.theme.zIndex.sidebar};
+
+  /* Mobile styles */
+  @media (max-width: 991px) {
+    position: fixed;
+    top: 0;
+    left: ${props => props.$isOpen ? '0' : '-250px'};
+    width: 250px;
+    height: 100vh;
+    box-shadow: ${props => props.$isOpen ? '2px 0 20px rgba(0, 0, 0, 0.3)' : 'none'};
+  }
+
+  /* Desktop styles */
+  @media (min-width: 992px) {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 80px;
+    height: 100vh;
+
+    &:hover {
+      width: 250px;
+    }
+  }
+`;
+
+const MobileHeader = styled.div`
+  display: none;
+  
+  @media (max-width: 991px) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: ${props => props.theme.colors.background.secondary};
+    border-bottom: 2px solid ${props => props.theme.colors.nvidia.green};
+    padding: 0 20px;
+    z-index: ${props => props.theme.zIndex.sidebar + 1};
+  }
+`;
+
+const MobileMenuButton = styled.button`
+  background: none;
+  border: none;
+  color: ${props => props.theme.colors.nvidia.green};
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  transition: all ${props => props.theme.transitions.fast};
 
   &:hover {
-    width: 250px;
+    background: rgba(118, 185, 0, 0.1);
+  }
+`;
+
+const MobileTitle = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: ${props => props.theme.colors.nvidia.green};
+  font-family: ${props => props.theme.fonts.display};
+  font-weight: 700;
+  font-size: 1.2rem;
+
+  img {
+    height: 32px;
+    width: auto;
+  }
+`;
+
+const MobileOverlay = styled.div<{ $isOpen?: boolean }>`
+  display: ${props => props.$isOpen ? 'block' : 'none'};
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: ${props => props.theme.zIndex.sidebar - 1};
+  
+  @media (min-width: 992px) {
+    display: none;
   }
 `;
 
@@ -37,6 +115,11 @@ const SidebarBrand = styled.div`
   justify-content: center;
   align-items: center;
   min-height: 60px;
+
+  /* Hide on mobile - brand is in mobile header instead */
+  @media (max-width: 991px) {
+    display: none;
+  }
 `;
 
 const SidebarLogo = styled.div`
@@ -79,6 +162,18 @@ const SidebarLogo = styled.div`
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
     white-space: nowrap;
     z-index: 1000;
+    
+    /* Show on mobile when sidebar is open */
+    @media (max-width: 991px) {
+      opacity: 1;
+      position: static;
+      background: transparent;
+      padding: 0;
+      border: none;
+      box-shadow: none;
+      margin-left: 0;
+      z-index: auto;
+    }
   }
 
   ${SidebarContainer}:hover & .brand-text {
@@ -127,6 +222,11 @@ const NavItem = styled.div<StyledActiveProps>`
     white-space: nowrap;
     opacity: 0;
     transition: opacity ${props => props.theme.transitions.medium};
+    
+    /* Show text on mobile when sidebar is open */
+    @media (max-width: 991px) {
+      opacity: 1;
+    }
   }
 
   ${SidebarContainer}:hover & span {
@@ -173,22 +273,31 @@ const ConnectionStatus = styled.div<StyledConnectionProps>`
   }
 
   /* Text label - hidden when collapsed */
-  span {
-    opacity: 0;
-    transition: opacity ${props => props.theme.transitions.medium};
-    white-space: nowrap;
-    position: absolute;
-    left: 50px;
-    background: ${props => props.theme.colors.background.primary};
-    padding: 4px 8px;
-    border-radius: 4px;
-    border: 1px solid ${props => props.theme.colors.border.secondary};
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    z-index: 1000;
-    pointer-events: none;
-  }
-
-  /* Expanded state - show text and adjust layout */
+    span {
+      opacity: 0;
+      transition: opacity ${props => props.theme.transitions.medium};
+      white-space: nowrap;
+      position: absolute;
+      left: 50px;
+      background: ${props => props.theme.colors.background.primary};
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid ${props => props.theme.colors.border.secondary};
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      z-index: 1000;
+      pointer-events: none;
+      
+      /* Show text on mobile when sidebar is open */
+      @media (max-width: 991px) {
+        opacity: 1;
+        position: static;
+        background: transparent;
+        padding: 0;
+        border: none;
+        box-shadow: none;
+        z-index: auto;
+      }
+    }  /* Expanded state - show text and adjust layout */
   ${SidebarContainer}:hover & {
     width: auto;
     gap: 8px;
@@ -214,7 +323,7 @@ const ConnectionStatus = styled.div<StyledConnectionProps>`
   }
 `;
 
-const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isConnected }) => {
+const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isConnected, isMobileMenuOpen, onToggleMobileMenu }) => {
   const navItems = [
     { id: 'dashboard', icon: 'fas fa-tachometer-alt', label: 'Dashboard', shortcut: 'Ctrl+1' },
     { id: 'models', icon: 'fas fa-brain', label: 'Models', shortcut: 'Ctrl+2' },
@@ -226,37 +335,55 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
   ];
 
   return (
-    <SidebarContainer>
-      <SidebarBrand>
-        <SidebarLogo>
-          <img className='brand-icon' src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
-          <span className="brand-text" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '0px' }}>
-            v{packageJson.version}
-          </span>
-        </SidebarLogo>
-      </SidebarBrand>
+    <>
+      {/* Mobile Header */}
+      <MobileHeader>
+        <MobileMenuButton onClick={onToggleMobileMenu}>
+          <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'}`}></i>
+        </MobileMenuButton>
+        <MobileTitle>
+          <img src="/JBoardIcon.svg" alt="JBoard Icon" />
+          <span>Jetson Board</span>
+        </MobileTitle>
+        <div style={{ width: '44px' }}></div> {/* Spacer for centering */}
+      </MobileHeader>
 
-      <SidebarNav>
-        {navItems.map(item => (
-          <NavItem
-            key={item.id}
-            $active={activeSection === item.id}
-            onClick={() => onSectionChange(item.id)}
-            title={`${item.label} (${item.shortcut})`}
-          >
-            <i className={item.icon}></i>
-            <span>{item.label}</span>
-          </NavItem>
-        ))}
-      </SidebarNav>
+      {/* Mobile Overlay */}
+      <MobileOverlay $isOpen={isMobileMenuOpen} onClick={onToggleMobileMenu} />
 
-      <SidebarFooter>
-        <ConnectionStatus $connected={isConnected}>
-          <i className="fas fa-circle"></i>
-          <span>{isConnected ? 'Connected' : 'Offline'}</span>
-        </ConnectionStatus>
-      </SidebarFooter>
-    </SidebarContainer>
+      {/* Sidebar */}
+      <SidebarContainer $isOpen={isMobileMenuOpen}>
+        <SidebarBrand>
+          <SidebarLogo>
+            <img className='brand-icon' src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
+            <span className="brand-text" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '0px' }}>
+              v{packageJson.version}
+            </span>
+          </SidebarLogo>
+        </SidebarBrand>
+
+        <SidebarNav>
+          {navItems.map(item => (
+            <NavItem
+              key={item.id}
+              $active={activeSection === item.id}
+              onClick={() => onSectionChange(item.id)}
+              title={`${item.label} (${item.shortcut})`}
+            >
+              <i className={item.icon}></i>
+              <span>{item.label}</span>
+            </NavItem>
+          ))}
+        </SidebarNav>
+
+        <SidebarFooter>
+          <ConnectionStatus $connected={isConnected}>
+            <i className="fas fa-circle"></i>
+            <span>{isConnected ? 'Connected' : 'Offline'}</span>
+          </ConnectionStatus>
+        </SidebarFooter>
+      </SidebarContainer>
+    </>
   );
 };
 

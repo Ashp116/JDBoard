@@ -602,7 +602,7 @@ const GlobalNotifications: React.FC = () => {
       // Determine which service action to take
       const isRestartCommand = systemError.command?.includes('restart');
       const actionText = isRestartCommand ? 'restart jtop service' : 'install jtop service';
-      const endpoint = isRestartCommand ? '/api/system/jtop-restart-service' : '/api/system/jtop-install-service';
+      const endpoint = isRestartCommand ? '/system/jtop-restart-service' : '/system/jtop-install-service';
 
       // Show sudo modal instead of prompt
       setPendingAction({

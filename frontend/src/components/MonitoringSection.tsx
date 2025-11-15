@@ -45,7 +45,22 @@ ChartJS.register(
 );
 
 const Container = styled.div`
-  padding: 30px;
+  padding: 20px;
+
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 15px;
+  }
+
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 25px;
+  }
+
+  /* Desktop styles */
+  @media (min-width: 992px) {
+    padding: 30px;
+  }
 `;
 
 const SectionHeader = styled.div`

@@ -225,7 +225,22 @@ const DatePickerGlobalStyle = createGlobalStyle`
 `;
 
 const Container = styled.div`
-  padding: 30px;
+  padding: 20px;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 15px;
+  }
+
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 25px;
+  }
+
+  /* Desktop styles */
+  @media (min-width: 992px) {
+    padding: 30px;
+  }
 `;
 
 const SectionHeader = styled.div`
@@ -245,16 +260,36 @@ const SectionHeader = styled.div`
     i {
       color: ${props => props.theme.colors.nvidia.green};
     }
+
+    /* Mobile responsive */
+    @media (max-width: 767px) {
+      font-size: 20px;
+      gap: 8px;
+    }
+  }
+
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
   }
 `;
 
 const InferenceGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 30px;
   
-  @media (max-width: 768px) {
-    grid-template-columns: 1fr;
+  /* Mobile - single column stack */
+  grid-template-columns: 1fr;
+  
+  /* Large tablets and desktop - two columns */
+  @media (min-width: 1024px) {
+    grid-template-columns: 1fr 1fr;
+  }
+  
+  /* Mobile adjustments */
+  @media (max-width: 767px) {
+    gap: 20px;
   }
 `;
 
@@ -263,6 +298,17 @@ const InferencePanel = styled.div`
   border: 1px solid ${props => props.theme.colors.border.secondary};
   border-radius: 12px;
   padding: 25px;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 16px;
+    border-radius: 8px;
+  }
+  
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 20px;
+  }
 `;
 
 const PanelTitle = styled.h3`
@@ -275,6 +321,18 @@ const PanelTitle = styled.h3`
 
   i {
     color: ${props => props.theme.colors.nvidia.green};
+    font-size: 18px;
+  }
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    font-size: 16px;
+    gap: 8px;
+    margin: 0 0 16px;
+    
+    i {
+      font-size: 16px;
+    }
   }
 `;
 
@@ -291,6 +349,12 @@ const ImageUploadArea = styled.div<{ isDragOver: boolean }>`
   &:hover {
     border-color: ${props => props.theme.colors.nvidia.green};
     background: ${props => props.theme.colors.nvidia.green}10;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    padding: 30px 20px;
+    margin-bottom: 16px;
   }
 
   .upload-icon {
@@ -321,12 +385,14 @@ const ModelSelector = styled.select`
   color: ${props => props.theme.colors.text.primary};
   font-size: 14px;
   margin-bottom: 20px;
+  min-height: 44px; /* Touch target guideline */
 
   &:focus {
     outline: none;
     border-color: ${props => props.theme.colors.nvidia.green};
   }
-`;
+  
+  /* Mobile styles */\n  @media (max-width: 767px) {\n    margin-bottom: 16px;\n    font-size: 16px; /* Prevent zoom on iOS */\n  }\n`;
 
 const RunButton = styled.button`
   width: 100%;
@@ -339,6 +405,7 @@ const RunButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
+  min-height: 44px; /* iOS touch target guideline */
 
   &:hover:not(:disabled) {
     transform: translateY(-2px);
@@ -1250,6 +1317,17 @@ const ResultsPanel = styled.div`
   border: 1px solid ${props => props.theme.colors.border.secondary};
   border-radius: 12px;
   padding: 25px;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 16px;
+    border-radius: 8px;
+  }
+  
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 20px;
+  }
 `;
 
 const ResultItem = styled.div`
@@ -1311,6 +1389,18 @@ const TabHeader = styled.div`
   gap: 0;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
   margin-bottom: 20px;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  /* Small tablet - allow wrapping */
+  @media (min-width: 768px) and (max-width: 900px) {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
 `;
 
 const TabButton = styled.button<{ active: boolean }>`
@@ -1323,6 +1413,7 @@ const TabButton = styled.button<{ active: boolean }>`
   cursor: pointer;
   transition: all 0.2s ease;
   border-radius: 6px 6px 0 0;
+  white-space: nowrap;
 
   &:hover {
     background: ${props => props.theme.colors.background.tertiary};
@@ -1332,6 +1423,28 @@ const TabButton = styled.button<{ active: boolean }>`
   i {
     margin-right: 8px;
     color: ${props => props.active ? props.theme.colors.nvidia.green : 'inherit'};
+  }
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 10px 16px;
+    border-radius: 6px;
+    border-bottom: none;
+    border-left: 3px solid ${props => props.active ? props.theme.colors.nvidia.green : 'transparent'};
+    font-size: 14px;
+    justify-content: center;
+    
+    i {
+      font-size: 14px;
+    }
+  }
+  
+  /* Small tablet adjustments */
+  @media (min-width: 768px) and (max-width: 900px) {
+    padding: 10px 16px;
+    font-size: 14px;
+    flex: 1;
+    min-width: 0;
   }
 `;
 
@@ -1645,12 +1758,22 @@ const AnalyticsContainer = styled.div`
   border-radius: 12px;
   border: 1px solid ${props => props.theme.colors.border.secondary};
   overflow: hidden;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    border-radius: 8px;
+  }
 `;
 
 const SearchBarContainer = styled.div`
   padding: 20px;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
   background: ${props => props.theme.colors.background.primary};
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 16px;
+  }
 `;
 
 const SearchBar = styled.input`
@@ -1738,6 +1861,35 @@ const Table = styled.table`
   td {
     color: ${props => props.theme.colors.text.secondary};
     font-size: 13px;
+  }
+
+  /* Mobile responsive table */
+  @media (max-width: 991px) {
+    font-size: 14px;
+    
+    th, td {
+      padding: 8px 12px;
+    }
+    
+    th {
+      font-size: 13px;
+    }
+    
+    td {
+      font-size: 12px;
+    }
+  }
+
+  /* Very small screens - make scrollable */
+  @media (max-width: 767px) {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    
+    th, td {
+      padding: 6px 8px;
+      min-width: 100px;
+    }
   }
 
   tr:hover {
@@ -2310,6 +2462,28 @@ const ChartCard = styled.div`
     border-color: ${props => props.theme.colors.nvidia.green};
   }
   
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 16px;
+    border-radius: 12px;
+    
+    &:hover {
+      transform: none; /* Disable hover transform on touch devices */
+    }
+  }
+  
+  /* Tablet styles */
+  @media (min-width: 768px) and (max-width: 991px) {
+    padding: 20px;
+  }
+  
+  /* Touch device improvements */
+  @media (hover: none) and (pointer: coarse) {
+    &:hover {
+      transform: none;
+    }
+  }
+  
   h3 {
     margin: 0 0 20px 0;
     color: ${props => props.theme.colors.text.primary};
@@ -2526,7 +2700,14 @@ const ModalContent = styled.div`
   backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
-`;
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    width: 95%;
+    max-height: 95vh;
+    border-radius: 8px;
+    max-width: none;
+  }\n`;
 
 const ModalHeader = styled.div`
   padding: 24px;
@@ -2551,6 +2732,22 @@ const ModalHeader = styled.div`
       color: ${props => props.theme.colors.nvidia.green};
       font-size: 18px;
     }
+    
+    /* Mobile responsive */
+    @media (max-width: 767px) {
+      font-size: 18px;
+      gap: 8px;
+      
+      i {
+        font-size: 16px;
+      }
+    }
+  }
+  
+  /* Mobile styles */
+  @media (max-width: 767px) {
+    padding: 16px;
+    border-radius: 8px 8px 0 0;
   }
 `;
 
@@ -4960,7 +5157,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     >
                       <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
                       <RouteUrlContainer>
-                        <RouteUrl>{getBackendUrl()}/api/inference</RouteUrl>
+                        <RouteUrl>{getBackendUrl()}/inference</RouteUrl>
                         <button 
                           className="route-copy-btn"
                           onClick={(e) => {

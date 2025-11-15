@@ -525,7 +525,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       const backendUrl = getBackendUrl();
       
       // Verify sudo password
-      const response = await fetch(`${backendUrl}/api/auth/sudo`, {
+      const response = await fetch(`${backendUrl}/auth/sudo`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -624,7 +624,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       const newState = !settings.jetsonClocks;
       
       const result = await executeSudoCommand(
-        '/api/system/jetson-clocks',
+        '/system/jetson-clocks',
         { enabled: newState },
         'Toggle Jetson Clocks'
       );
@@ -654,7 +654,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     
     try {
       const result = await executeSudoCommand(
-        '/api/system/power-mode',
+        '/system/power-mode',
         { mode },
         'Change Power Mode'
       );
@@ -684,7 +684,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     
     try {
       const result = await executeSudoCommand(
-        '/api/system/fan-mode',
+        '/system/fan-mode',
         { mode },
         'Change Fan Mode'
       );
@@ -717,7 +717,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       
       try {
         const result = await executeSudoCommand(
-          '/api/system/reboot',
+          '/system/reboot',
           {},
           'Reboot System'
         );
@@ -746,7 +746,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       
       try {
         const result = await executeSudoCommand(
-          '/api/system/shutdown',
+          '/system/shutdown',
           {},
           'Shutdown System'
         );

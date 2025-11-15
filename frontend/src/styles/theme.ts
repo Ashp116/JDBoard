@@ -72,11 +72,28 @@ export const nvidiaTheme = {
     body: "'Inter', sans-serif"
   },
   
-  // Breakpoints
+  // Breakpoints (mobile-first approach)
   breakpoints: {
-    mobile: '768px',
-    tablet: '1024px',
-    desktop: '1200px'
+    mobile: '768px',   // Mobile and below
+    tablet: '992px',   // Tablet and below
+    desktop: '1200px'  // Desktop and above
+  },
+
+  // Media queries
+  media: {
+    mobile: '@media (max-width: 767px)',
+    tablet: '@media (min-width: 768px) and (max-width: 991px)',
+    desktop: '@media (min-width: 992px)'
+  },
+
+  // Spacing scale
+  spacing: {
+    xs: '4px',
+    sm: '8px',
+    md: '16px',
+    lg: '24px',
+    xl: '32px',
+    xxl: '48px'
   },
   
   // Transitions
