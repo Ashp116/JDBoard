@@ -10,10 +10,10 @@ export default defineConfig({
     port: 3000,
 
 
-    // !!!!SECURITY: Replace 'all' with specific hostnames/IPs for production
+    // !!!!SECURITY: Replace 'true' with specific hostnames/IPs for production
     // Examples: ['localhost', '192.168.1.100', 'jetson.local', 'your-domain.com']
     // true allows any host - I use it for development/testing
-    allowedHosts: true
+    allowedHosts: true,
     // Remove proxy - let frontend connect directly to backend
   },
   build: {

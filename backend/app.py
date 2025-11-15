@@ -393,6 +393,11 @@ def upload_model():
     if file and allowed_file(file.filename):
         try:
             def progress_callback(progress, status):
+                # Update persistent state
+                if download_id in active_downloads:
+                    active_downloads[download_id]['progress'] = progress
+                    active_downloads[download_id]['status'] = status
+                
                 socketio.emit('download_progress', {
                     'download_id': download_id,
                     'progress': progress,
@@ -403,11 +408,15 @@ def upload_model():
             # Start async upload process
             def upload_async():
                 try:
-                    # Track this download
+                    # Track this download with persistent information
                     active_downloads[download_id] = {
                         'type': 'upload',
+                        'download_type': 'upload',
                         'model_name': model_name,
-                        'started_at': datetime.now()
+                        'started_at': datetime.now().isoformat(),
+                        'progress': 0,
+                        'status': 'Preparing upload...',
+                        'file_size': file.content_length if hasattr(file, 'content_length') else 0
                     }
                     
                     progress_callback(10, 'Preparing upload...')
@@ -669,6 +678,11 @@ def download_yolo_model():
     
     try:
         def progress_callback(progress, status):
+            # Update persistent state
+            if download_id in active_downloads:
+                active_downloads[download_id]['progress'] = progress
+                active_downloads[download_id]['status'] = status
+            
             socketio.emit('download_progress', {
                 'download_id': download_id,
                 'progress': progress,
@@ -679,11 +693,16 @@ def download_yolo_model():
         # Start async download process
         def download_async():
             try:
-                # Track this download
+                # Track this download with persistent information
                 active_downloads[download_id] = {
                     'type': 'yolo_download',
+                    'download_type': 'yolo_download',
                     'model_name': model_name,
-                    'started_at': datetime.now()
+                    'model_url': model_url,
+                    'target_format': target_format,
+                    'started_at': datetime.now().isoformat(),
+                    'progress': 0,
+                    'status': 'Starting download...'
                 }
                 
                 result = ai_manager.download_yolo_model(
@@ -820,6 +839,45 @@ def cancel_download():
         return jsonify({
             'success': False,
             'error': str(e)
+        }), 500
+
+@app.route('/api/models/active-downloads', methods=['GET'])
+def get_active_downloads():
+    """Get list of active downloads/conversions to restore state on page reload"""
+    try:
+        # Clean up any completed downloads first
+        completed_downloads = []
+        for download_id, download_info in active_downloads.items():
+            if download_info.get('progress', 0) >= 100:
+                completed_downloads.append(download_id)
+        
+        for download_id in completed_downloads:
+            cleanup_download(download_id)
+        
+        # Return sanitized active downloads (remove callback functions)
+        sanitized_downloads = {}
+        for download_id, download_info in active_downloads.items():
+            sanitized_downloads[download_id] = {
+                'model_name': download_info.get('model_name', ''),
+                'progress': download_info.get('progress', 0),
+                'status': download_info.get('status', 'Unknown'),
+                'started_at': download_info.get('started_at', ''),
+                'download_type': download_info.get('download_type', 'unknown'),
+                'model_url': download_info.get('model_url', ''),
+                'target_format': download_info.get('target_format', '')
+            }
+        
+        return jsonify({
+            'success': True,
+            'active_downloads': sanitized_downloads
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting active downloads: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'active_downloads': {}
         }), 500
 
 @app.route('/api/models/list')

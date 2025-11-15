@@ -1235,6 +1235,54 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Function to restore active downloads on page load/reload
+  const restoreActiveDownloads = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/models/active-downloads`);
+      const data = await response.json();
+      
+      if (data.success && data.active_downloads) {
+        const restoredDownloads = new Map<string, { 
+          name: string; 
+          progress: number; 
+          notificationId: string;
+          status?: string;
+        }>();
+        const restoredLogsState = new Map<string, boolean>();
+        
+        // Convert backend format to frontend format
+        Object.entries(data.active_downloads).forEach(([downloadId, downloadInfo]: [string, any]) => {
+          restoredDownloads.set(downloadId, {
+            name: downloadInfo.model_name || 'Unknown Model',
+            progress: downloadInfo.progress || 0,
+            status: downloadInfo.status || 'In Progress...',
+            notificationId: `restored-${downloadId}` // Generate a notification ID for consistency
+          });
+          
+          // Auto-open logs for active downloads to show progress
+          restoredLogsState.set(downloadId, true);
+        });
+        
+        if (restoredDownloads.size > 0) {
+          setActiveDownloads(restoredDownloads);
+          setShowLogs(restoredLogsState); // Restore logs state
+          
+          console.log(`Restored ${restoredDownloads.size} active downloads:`, Object.fromEntries(restoredDownloads));
+          
+          // Show notification about restored downloads
+          addNotification({
+            type: 'info',
+            title: 'Downloads Restored',
+            message: `Restored ${restoredDownloads.size} active download(s) from previous session`
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error restoring active downloads:', error);
+      // Don't show error notification for this as it's not critical
+    }
+  };
+
   // Load models function (defined early to be available in useEffect dependency arrays)
   const loadModels = async () => {
     try {
@@ -1283,7 +1331,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   
   // Load models on component mount
   useEffect(() => {
-    loadModels();
+    const initializeComponent = async () => {
+      await loadModels();
+      await restoreActiveDownloads();
+    };
+    
+    initializeComponent();
   }, []);
 
   // Listen for real-time download progress updates
