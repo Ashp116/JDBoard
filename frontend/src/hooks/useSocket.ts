@@ -31,6 +31,7 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
     
     // Create socket connection
     const newSocket = io(finalServerPath, {
+      path: '/api/socket',
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 2000,

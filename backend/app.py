@@ -6,7 +6,7 @@ A cyberpunk-themed dashboard for Jetson devices with AI model management
 
 import signal
 import os
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import json
@@ -31,9 +31,7 @@ from request_logger import RequestLogger
 
 from jtop import jtop
 
-app = Flask(__name__, 
-           template_folder='../frontend',
-           static_folder='../static')
+app = Flask(__name__)
 
 CORS(app)
 
@@ -44,7 +42,8 @@ socketio = SocketIO(app,
                    engineio_logger=False,
                    async_mode='threading',
                    ping_timeout=60,
-                   ping_interval=25)
+                   ping_interval=25,
+                   path='/api/socket')
 
 # Global dict to track active downloads and their cancel flags
 active_downloads = {}
@@ -165,11 +164,6 @@ logger.disabled = False  # Enable logging to capture messages
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-@app.route('/')
-def index():
-    """Serve the main dashboard page"""
-    return render_template('index.html')
 
 @app.route('/api/system/status')
 def get_system_status():
@@ -2842,6 +2836,6 @@ if __name__ == '__main__':
     # Start background WebSocket updates
     socketio.start_background_task(background_system_updates)
     
-    logger.info("Starting Jetson Edge AI Dashboard with WebSocket support...")
+    logger.info("Starting Jetson Edge AI Dashboard with WebSocket support on /api/socket...")
     # Use app.config['DEBUG'] instead of hardcoded debug=True
     socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
