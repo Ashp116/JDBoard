@@ -1411,7 +1411,7 @@ class AIModelManager:
                         logger.warning(f"Failed to clean up ONNX file {intermediate_onnx}: {e}")
         
         # For other formats, be even more conservative - only clean up clearly temporary files
-        elif target_format in ['CoreML', 'TensorFlow']:
+        elif target_format in ['TensorFlow']:
             temp_extensions = ['.torchscript', '.pb', '.tflite']
             for ext in temp_extensions:
                 temp_file = base_path.with_suffix(ext)
@@ -1442,7 +1442,6 @@ class AIModelManager:
         conversion_map = {
             'ONNX': ('onnx', '.onnx'),
             'TensorRT': ('tensorrt', '.engine'),
-            'CoreML': ('coreml', '.mlmodel'),
             'PyTorch': ('pytorch', '.pt')
         }
         
@@ -1467,8 +1466,7 @@ class AIModelManager:
                 converted_path = self._convert_to_onnx(source_path, progress_callback, cancel_check_callback)
             elif target_format == 'TensorRT':
                 converted_path = self._convert_to_tensorrt(source_path, progress_callback, cancel_check_callback)
-            elif target_format == 'CoreML':
-                converted_path = self._convert_to_coreml(source_path, progress_callback, cancel_check_callback)
+
             else:
                 # Fallback: copy with new extension (placeholder)
                 logger.warning(f"Real conversion for {target_format} not implemented, copying file")
@@ -1719,67 +1717,7 @@ class AIModelManager:
             
             logger.error(f"TensorRT conversion failed: {str(e)}")
             raise RuntimeError(f"TensorRT conversion failed: {str(e)}")
-    
-    def _convert_to_coreml(self, source_path, progress_callback=None, cancel_check_callback=None):
-        """Convert YOLO model to CoreML format with progress tracking and cancellation"""
-        
-        def update_progress(progress, status):
-            if progress_callback:
-                progress_callback(progress, status)
-        
-        def check_cancelled():
-            if cancel_check_callback and cancel_check_callback():
-                raise Exception("CoreML conversion cancelled by user")
-        
-        try:
-            # Check if ultralytics is available
-            if not ULTRALYTICS_AVAILABLE:
-                raise ImportError("ultralytics not available")
-                
-            from ultralytics import YOLO
-            
-            update_progress(83, 'Loading model for CoreML conversion...')
-            check_cancelled()
-            
-            # Load the model
-            model = YOLO(str(source_path))
-            
-            update_progress(85, 'Converting to CoreML format...')
-            check_cancelled()
-            
-            # Export to CoreML
-            model.export(format='coreml')
-            
-            update_progress(88, 'Finalizing CoreML export...')
-            check_cancelled()
-            
-            # Check if the exported file exists
-            expected_coreml = source_path.with_suffix('.mlmodel')
-            if expected_coreml.exists():
-                logger.info(f"Successfully converted to CoreML: {expected_coreml}")
-                return expected_coreml
-            else:
-                raise RuntimeError("CoreML conversion completed but model file not found")
-                
-        except ImportError:
-            logger.warning("ultralytics not available, using fallback conversion")
-            # Fallback: copy file with .mlmodel extension
-            update_progress(85, 'Creating CoreML placeholder...')
-            check_cancelled()
-            coreml_path = source_path.with_suffix('.mlmodel')
-            shutil.copy2(source_path, coreml_path)
-            return coreml_path
-        except Exception as e:
-            if "cancelled" in str(e).lower():
-                # Clean up partial conversion on cancellation
-                coreml_path = source_path.with_suffix('.mlmodel')
-                if coreml_path.exists():
-                    try:
-                        coreml_path.unlink()
-                    except:
-                        pass
-            logger.error(f"CoreML conversion failed: {str(e)}")
-            raise
+
                 
         except ImportError:
             logger.warning("ultralytics not available for TensorRT conversion")

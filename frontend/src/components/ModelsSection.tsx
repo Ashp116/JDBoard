@@ -1045,7 +1045,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '6.2MB',
         description: 'Ultra-lightweight model for edge deployment with fastest inference',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '3.2M',
         accuracy: '37.3% mAP'
       },
@@ -1054,7 +1054,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '21.5MB',
         description: 'Small model balancing speed and accuracy for general use',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '11.2M',
         accuracy: '44.9% mAP'
       },
@@ -1063,7 +1063,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.7MB',
         description: 'Medium model with improved accuracy for production environments',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '25.9M',
         accuracy: '50.2% mAP'
       },
@@ -1072,7 +1072,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '83.7MB',
         description: 'Large model for high-accuracy applications with moderate speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '43.7M',
         accuracy: '52.9% mAP'
       },
@@ -1081,7 +1081,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '136MB',
         description: 'Extra-large model for maximum accuracy in resource-rich scenarios',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '68.2M',
         accuracy: '53.9% mAP'
       }
@@ -1096,7 +1096,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '3.9MB',
         description: 'Nano model - smallest and fastest for mobile deployment',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '1.9M',
         accuracy: '28.0% mAP'
       },
@@ -1105,7 +1105,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '14.1MB',
         description: 'Small model optimized for speed and mobile applications',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '7.2M',
         accuracy: '37.4% mAP'
       },
@@ -1114,7 +1114,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '42.2MB',
         description: 'Medium model with balanced accuracy and speed',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '21.2M',
         accuracy: '45.4% mAP'
       },
@@ -1123,7 +1123,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '93.6MB',
         description: 'Large model for high-accuracy detection tasks',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '46.5M',
         accuracy: '49.0% mAP'
       },
@@ -1132,7 +1132,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '166MB',
         description: 'Extra-large model for maximum detection accuracy',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '86.7M',
         accuracy: '50.7% mAP'
       }
@@ -1147,7 +1147,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '5.1MB',
         description: 'Nano model with improved efficiency over previous versions',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '2.6M',
         accuracy: '39.5% mAP'
       },
@@ -1156,7 +1156,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '19.4MB',
         description: 'Small model with enhanced accuracy and speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '9.4M',
         accuracy: '47.0% mAP'
       },
@@ -1165,7 +1165,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.8MB',
         description: 'Medium model with state-of-the-art performance',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '20.1M',
         accuracy: '51.5% mAP'
       },
@@ -1174,7 +1174,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '86.9MB',
         description: 'Large model for high-accuracy applications',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '25.3M',
         accuracy: '53.4% mAP'
       },
@@ -1183,7 +1183,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '56.9MB',
         description: 'Extra-large model with maximum accuracy',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT', 'CoreML'],
+        formats: ['PyTorch', 'ONNX', 'TensorRT'],
         parameters: '56.9M',
         accuracy: '54.7% mAP'
       }
