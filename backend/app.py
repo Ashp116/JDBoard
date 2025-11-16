@@ -71,6 +71,29 @@ def cleanup_download(download_id):
     download_cancel_flags.pop(download_id, None)
     download_threads.pop(download_id, None)
 
+def get_client_ip():
+    """Get the real client IP address, handling proxies and load balancers"""
+    # Check common proxy headers first
+    if request.headers.get('X-Forwarded-For'):
+        # X-Forwarded-For can contain multiple IPs, get the first (original client)
+        forwarded_ips = request.headers.get('X-Forwarded-For').split(',')
+        client_ip = forwarded_ips[0].strip()
+        if client_ip and client_ip != 'unknown':
+            logger.debug(f"IP detected from X-Forwarded-For: {client_ip}")
+            return client_ip
+    
+    # Check other common proxy headers  
+    for header in ['X-Real-IP', 'X-Client-IP', 'CF-Connecting-IP']:
+        ip = request.headers.get(header)
+        if ip and ip != 'unknown':
+            logger.debug(f"IP detected from {header}: {ip.strip()}")
+            return ip.strip()
+    
+    # Fall back to Flask's remote_addr
+    fallback_ip = request.remote_addr or 'unknown'
+    logger.debug(f"IP detected from remote_addr: {fallback_ip}")
+    return fallback_ip
+
 # Configuration constants
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
 ALLOWED_EXTENSIONS = {'onnx', 'trt', 'engine', 'pb', 'pth', 'pt'}
@@ -167,7 +190,7 @@ def allowed_file(filename):
 @app.route('/system/status')
 def get_system_status():
     """Get comprehensive system status"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -217,7 +240,7 @@ def get_system_status():
 @app.route('/system/gpu')
 def get_gpu_status():
     """Get GPU status and statistics"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -244,7 +267,7 @@ def get_gpu_status():
 @app.route('/system/logs')
 def get_system_logs():
     """Get system logs with optional filtering for broken pipe monitoring"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -330,7 +353,7 @@ def get_system_logs():
 @app.route('/models', methods=['GET'])
 def list_models():
     """List all available AI models"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -357,7 +380,7 @@ def list_models():
 @app.route('/gpu/memory', methods=['GET'])
 def get_gpu_memory():
     """Get GPU memory usage information"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -384,7 +407,7 @@ def get_gpu_memory():
 @app.route('/models/upload', methods=['POST'])
 def upload_model():
     """Upload a new AI model with real-time progress updates"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -531,7 +554,7 @@ def upload_model():
 @app.route('/models/<model_id>/load', methods=['POST'])
 def load_model(model_id):
     """Load a model for inference"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -567,7 +590,7 @@ def load_model(model_id):
 @app.route('/models/<model_id>/force-reload', methods=['POST'])
 def force_reload_model(model_id):
     """Force unload and reload a model from memory"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -611,7 +634,7 @@ def force_reload_model(model_id):
 @app.route('/models/<model_id>/unload', methods=['POST'])
 def unload_model(model_id):
     """Unload a model from memory"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -640,7 +663,7 @@ def unload_model(model_id):
 @app.route('/models/<model_id>', methods=['DELETE'])
 def delete_model(model_id):
     """Delete a model from the system"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -669,7 +692,7 @@ def delete_model(model_id):
 @app.route('/models/download-yolo', methods=['POST'])
 def download_yolo_model():
     """Download and optionally convert a YOLO model with real-time progress updates"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     data = request.get_json()
@@ -781,7 +804,7 @@ def download_yolo_model():
 @app.route('/models/cancel-download', methods=['POST'])
 def cancel_download():
     """Cancel an active download"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     data = request.get_json()
@@ -905,7 +928,7 @@ def get_active_downloads():
 @app.route('/models/list')
 def list_models_detailed():
     """List all models with detailed information"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -932,7 +955,7 @@ def list_models_detailed():
 @app.route('/models/emergency-cleanup', methods=['POST'])
 def emergency_cleanup():
     """Emergency cleanup to free all GPU memory"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -968,12 +991,31 @@ def emergency_cleanup():
             'error': str(e)
         }), 500
 
+@app.route('/debug/client-info', methods=['GET'])
+def debug_client_info():
+    """Debug endpoint to show client IP detection"""
+    client_ip = get_client_ip()
+    
+    return jsonify({
+        'detected_ip': client_ip,
+        'remote_addr': request.remote_addr,
+        'headers': {
+            'X-Forwarded-For': request.headers.get('X-Forwarded-For'),
+            'X-Real-IP': request.headers.get('X-Real-IP'), 
+            'X-Client-IP': request.headers.get('X-Client-IP'),
+            'CF-Connecting-IP': request.headers.get('CF-Connecting-IP'),
+            'User-Agent': request.headers.get('User-Agent')
+        },
+        'all_headers': dict(request.headers)
+    })
+
 @app.route('/inference', methods=['POST'])
 def run_inference():
     """Run inference on uploaded image"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
+    # Log the request with proper IP
     request_logger.log_request(
         endpoint='/inference',
         client_ip=client_ip,
@@ -1019,7 +1061,7 @@ def run_inference():
         # Extract framework info from result if available
         framework = result.get('framework', 'unknown') if isinstance(result, dict) else 'unknown'
         
-        # Log inference with enhanced metadata
+        # Log inference with enhanced metadata and proper client IP
         request_logger.log_inference(
             model_id=model_id,
             client_ip=client_ip,
@@ -1031,7 +1073,7 @@ def run_inference():
             image_size=image_size
         )
         
-        logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s by {client_ip}")
+        logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s by {client_ip} (User-Agent: {user_agent[:50]}...)")
         
         return jsonify({
             'success': True,
@@ -1072,7 +1114,7 @@ def run_inference():
 @app.route('/logs/requests')
 def get_request_logs():
     """Get request logs with pagination"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
@@ -1109,7 +1151,7 @@ def get_log_stats():
 @app.route('/logs/inference')
 def get_inference_logs():
     """Get inference logs with pagination and filtering"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -1156,7 +1198,7 @@ def get_inference_logs():
 @app.route('/logs/inference/export/<format>')
 def export_inference_logs(format):
     """Export inference logs in different formats"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -1244,7 +1286,7 @@ def export_inference_logs(format):
 @app.route('/logs/inference/clear', methods=['POST'])
 def clear_inference_logs():
     """Clear all inference logs"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(
@@ -1278,7 +1320,7 @@ def clear_inference_logs():
 @app.route('/logs/inference/stats')
 def get_inference_stats():
     """Get detailed inference statistics"""
-    client_ip = request.remote_addr
+    client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     request_logger.log_request(

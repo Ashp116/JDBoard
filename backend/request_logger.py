@@ -142,8 +142,10 @@ class RequestLogger:
     def log_inference(self, model_id, client_ip, inference_time, result=None, 
                      image_data=None, session_id=None, user_agent=None, 
                      framework=None, image_size=None):
-        """Log an inference operation with enhanced metadata"""
+        # Log an inference operation with enhanced metadata
         try:
+            # Debug logging for IP address tracking
+            logger.debug(f"Logging inference - Client IP: {client_ip}, Model: {model_id}, User-Agent: {user_agent}")
             # Generate hash of image data for tracking
             image_hash = None
             if image_data is not None:
@@ -233,6 +235,9 @@ class RequestLogger:
                         self._generate_device_id(client_ip, user_agent)
                     ))
                     conn.commit()
+                    
+            # Log successful inference record for debugging
+            logger.info(f"Inference logged successfully - Model: {model_id}, IP: {client_ip}, Time: {inference_time:.3f}s, Device: {device_info}")
         except Exception as e:
             logger.error(f"Error logging inference: {str(e)}")
     
