@@ -2206,9 +2206,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     onChange={(e) => setModelType(e.target.value)}
                   >
                     <option value="vision">Computer Vision</option>
-                    <option value="nlp">Natural Language Processing</option>
+                    {/* <option value="nlp">Natural Language Processing</option>
                     <option value="audio">Audio Processing</option>
-                  <option value="other">Other</option>
+                  <option value="other">Other</option> */}
                 </select>
               </FormGroup>
 
