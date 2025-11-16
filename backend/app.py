@@ -689,6 +689,92 @@ def delete_model(model_id):
             'error': str(e)
         }), 500
 
+@app.route('/models/<model_id>/rename', methods=['PUT'])
+def rename_model(model_id):
+    """Rename a model"""
+    client_ip = get_client_ip()
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/models/{model_id}/rename',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({
+            'success': False,
+            'error': 'No data provided'
+        }), 400
+    
+    new_name = data.get('new_name', '').strip()
+    if not new_name:
+        return jsonify({
+            'success': False,
+            'error': 'New name is required'
+        }), 400
+    
+    if len(new_name) < 2:
+        return jsonify({
+            'success': False,
+            'error': 'Model name must be at least 2 characters long'
+        }), 400
+    
+    if len(new_name) > 50:
+        return jsonify({
+            'success': False,
+            'error': 'Model name must be less than 50 characters'
+        }), 400
+    
+    # Check for invalid characters
+    import re
+    if not re.match(r'^[a-zA-Z0-9\s\-_\.()]+$', new_name):
+        return jsonify({
+            'success': False,
+            'error': 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed'
+        }), 400
+    
+    try:
+        # Check if model exists
+        models = ai_manager.get_models()
+        current_model = None
+        for model in models:
+            if model['id'] == model_id:
+                current_model = model
+                break
+        
+        if not current_model:
+            return jsonify({
+                'success': False,
+                'error': 'Model not found'
+            }), 404
+        
+        # Check for name uniqueness (case-insensitive)
+        for model in models:
+            if model['id'] != model_id and model['name'].lower() == new_name.lower():
+                return jsonify({
+                    'success': False,
+                    'error': 'A model with this name already exists'
+                }), 400
+        
+        # Perform the rename
+        result = ai_manager.rename_model(model_id, new_name)
+        logger.info(f"Model {model_id} renamed to '{new_name}' by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'data': result,
+            'message': f'Model renamed to "{new_name}" successfully'
+        })
+    except Exception as e:
+        logger.error(f"Error renaming model {model_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/models/download-yolo', methods=['POST'])
 def download_yolo_model():
     """Download and optionally convert a YOLO model with real-time progress updates"""

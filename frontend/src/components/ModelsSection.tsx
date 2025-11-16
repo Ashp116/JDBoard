@@ -906,6 +906,15 @@ const ModelCard = styled.div`
       color: ${props => props.theme.colors.text.primary};
       margin: 0;
       font-size: 16px;
+      flex: 1;
+      margin-right: 10px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
 
     .status {
@@ -913,6 +922,7 @@ const ModelCard = styled.div`
       border-radius: 4px;
       font-size: 11px;
       font-weight: 600;
+      flex-shrink: 0;
 
       &.loaded {
         background: ${props => props.theme.colors.nvidia.green};
@@ -922,6 +932,42 @@ const ModelCard = styled.div`
       &.unloaded {
         background: ${props => props.theme.colors.background.tertiary};
         color: ${props => props.theme.colors.text.secondary};
+      }
+    }
+
+    .edit-header {
+      background: transparent;
+      border: 1px solid ${props => props.theme.colors.border.secondary};
+      border-radius: 4px;
+      color: ${props => props.theme.colors.text.secondary};
+      cursor: pointer;
+      font-size: 12px;
+      padding: 6px 8px;
+      transition: all 0.2s ease;
+      min-width: 32px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.7;
+
+      &:hover {
+        background: ${props => props.theme.colors.background.hover};
+        border-color: ${props => props.theme.colors.nvidia.green};
+        color: ${props => props.theme.colors.text.primary};
+        opacity: 1;
+      }
+
+      &:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+        
+        &:hover {
+          background: transparent;
+          border-color: ${props => props.theme.colors.border.secondary};
+          color: ${props => props.theme.colors.text.secondary};
+          opacity: 0.3;
+        }
       }
     }
   }
@@ -998,6 +1044,137 @@ const ModelCard = styled.div`
           background: #c82333;
         }
       }
+
+      &.edit {
+        background: ${props => props.theme.colors.background.tertiary};
+        color: ${props => props.theme.colors.text.secondary};
+        border: 1px solid ${props => props.theme.colors.border.secondary};
+        flex: none;
+        min-width: 40px;
+        padding: 8px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        &:hover {
+          background: ${props => props.theme.colors.background.hover};
+          border-color: ${props => props.theme.colors.nvidia.green};
+          color: ${props => props.theme.colors.text.primary};
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          
+          &:hover {
+            background: ${props => props.theme.colors.background.tertiary};
+            border-color: ${props => props.theme.colors.border.secondary};
+            color: ${props => props.theme.colors.text.secondary};
+          }
+        }
+      }
+    }
+  }
+`;
+
+const EditNameContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  margin-right: 10px;
+`;
+
+const EditNameInputRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const EditNameInput = styled.input`
+  background: ${props => props.theme.colors.background.tertiary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 4px;
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 10px;
+  flex: 1;
+
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &.error {
+    border-color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.1);
+  }
+`;
+
+const EditNameError = styled.div`
+  color: #ff6b6b;
+  font-size: 11px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  i {
+    font-size: 10px;
+  }
+`;
+
+const EditActionsContainer = styled.div`
+  display: flex;
+  gap: 4px;
+
+  button {
+    background: ${props => props.theme.colors.background.tertiary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 4px;
+    color: ${props => props.theme.colors.text.secondary};
+    cursor: pointer;
+    font-size: 12px;
+    padding: 8px 10px;
+    transition: all 0.2s ease;
+    min-width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &:hover {
+      background: ${props => props.theme.colors.background.hover};
+      border-color: ${props => props.theme.colors.nvidia.green};
+      color: ${props => props.theme.colors.text.primary};
+    }
+
+    &.save {
+      border-color: ${props => props.theme.colors.nvidia.green};
+      color: ${props => props.theme.colors.nvidia.green};
+
+      &:hover {
+        background: ${props => props.theme.colors.nvidia.green};
+        color: white;
+      }
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        
+        &:hover {
+          background: ${props => props.theme.colors.background.tertiary};
+          border-color: ${props => props.theme.colors.border.secondary};
+          color: ${props => props.theme.colors.text.secondary};
+        }
+      }
+    }
+
+    &.cancel:hover {
+      background: rgba(255, 107, 107, 0.1);
+      border-color: #ff6b6b;
+      color: #ff6b6b;
     }
   }
 `;
@@ -1232,6 +1409,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     type: 'info' | 'error' | 'warning' | 'tensorrt';
     message: string;
   }>>([]);
+  
+  // Model editing states
+  const [editingModel, setEditingModel] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editNameError, setEditNameError] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1920,6 +2102,85 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
+  const handleEditModelName = (modelId: string, currentName: string) => {
+    setEditingModel(modelId);
+    setEditingName(currentName);
+    setEditNameError('');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingModel(null);
+    setEditingName('');
+    setEditNameError('');
+  };
+
+  const validateEditName = (name: string): string => {
+    if (!name.trim()) {
+      return 'Model name is required';
+    }
+    
+    if (name.length < 2) {
+      return 'Model name must be at least 2 characters long';
+    }
+    
+    if (name.length > 50) {
+      return 'Model name must be less than 50 characters';
+    }
+    
+    // Check for invalid characters
+    if (!/^[a-zA-Z0-9\s\-_\.()]+$/.test(name)) {
+      return 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed';
+    }
+    
+    // Check for uniqueness (case-insensitive) excluding current model
+    const existingNames = models
+      .filter(model => model.id !== editingModel)
+      .map(model => model.name.toLowerCase());
+    if (existingNames.includes(name.toLowerCase())) {
+      return 'A model with this name already exists. Please choose a different name.';
+    }
+    
+    return '';
+  };
+
+  const handleSaveModelName = async (modelId: string) => {
+    const trimmedName = editingName.trim();
+    const error = validateEditName(trimmedName);
+    
+    if (error) {
+      setEditNameError(error);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/rename`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ new_name: trimmedName })
+      });
+      
+      const data = await response.json();
+      if (data.success) {
+        await loadModels();
+        setEditingModel(null);
+        setEditingName('');
+        setEditNameError('');
+        addNotification({
+          type: 'success',
+          title: 'Model Renamed',
+          message: 'Model name updated successfully!'
+        });
+      } else {
+        setEditNameError(data.error || 'Failed to rename model');
+      }
+    } catch (error) {
+      console.error('Rename error:', error);
+      setEditNameError('Failed to rename model');
+    }
+  };
+
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -2060,10 +2321,68 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           {filteredModels.map((model) => (
             <ModelCard key={model.id}>
               <div className="model-header">
-                <h4>{model.name}</h4>
-                <span className={`status ${model.loaded ? 'loaded' : 'unloaded'}`}>
-                  {model.loaded ? 'Loaded' : 'Not Loaded'}
-                </span>
+                {editingModel === model.id ? (
+                  <EditNameContainer>
+                    <EditNameInputRow>
+                      <EditNameInput
+                        type="text"
+                        value={editingName}
+                        className={editNameError ? 'error' : ''}
+                        onChange={(e) => {
+                          setEditingName(e.target.value);
+                          setEditNameError('');
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSaveModelName(model.id);
+                          } else if (e.key === 'Escape') {
+                            handleCancelEdit();
+                          }
+                        }}
+                        placeholder="Enter model name"
+                        autoFocus
+                      />
+                      <EditActionsContainer>
+                        <button 
+                          className="save"
+                          onClick={() => handleSaveModelName(model.id)}
+                          disabled={!editingName.trim() || !!editNameError}
+                        >
+                          <i className="fas fa-check"></i>
+                        </button>
+                        <button 
+                          className="cancel"
+                          onClick={handleCancelEdit}
+                        >
+                          <i className="fas fa-times"></i>
+                        </button>
+                      </EditActionsContainer>
+                    </EditNameInputRow>
+                    {editNameError && (
+                      <EditNameError>
+                        <i className="fas fa-exclamation-triangle"></i>
+                        {editNameError}
+                      </EditNameError>
+                    )}
+                  </EditNameContainer>
+                ) : (
+                  <>
+                    <h4>{model.name}</h4>
+                    <div className="header-actions">
+                      <span className={`status ${model.loaded ? 'loaded' : 'unloaded'}`}>
+                        {model.loaded ? 'Loaded' : 'Not Loaded'}
+                      </span>
+                      <button 
+                        className="edit-header"
+                        onClick={() => handleEditModelName(model.id, model.name)}
+                        disabled={editingModel !== null}
+                        title="Edit model name"
+                      >
+                        <i className="fas fa-ellipsis-h"></i>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
               
               <div className="model-info">

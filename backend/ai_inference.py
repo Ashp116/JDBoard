@@ -1122,6 +1122,42 @@ class AIModelManager:
         logger.info(f"Model {model_id} deleted from registry")
         return True
     
+    def rename_model(self, model_id, new_name):
+        """Rename a model in the registry"""
+        if model_id not in self.models_registry:
+            raise ValueError(f"Model {model_id} not found")
+        
+        # Validate new name
+        new_name = new_name.strip()
+        if not new_name:
+            raise ValueError("New name cannot be empty")
+        
+        if len(new_name) < 2:
+            raise ValueError("Model name must be at least 2 characters long")
+        
+        if len(new_name) > 50:
+            raise ValueError("Model name must be less than 50 characters")
+        
+        # Check for name uniqueness (case-insensitive)
+        for existing_id, existing_model in self.models_registry.items():
+            if existing_id != model_id and existing_model['name'].lower() == new_name.lower():
+                raise ValueError("A model with this name already exists")
+        
+        # Update the name in registry
+        old_name = self.models_registry[model_id]['name']
+        self.models_registry[model_id]['name'] = new_name
+        self.models_registry[model_id]['modified_at'] = datetime.now().isoformat()
+        
+        # Save registry
+        self._save_registry()
+        
+        logger.info(f"Model {model_id} renamed from '{old_name}' to '{new_name}'")
+        return {
+            'model_id': model_id,
+            'old_name': old_name,
+            'new_name': new_name
+        }
+    
     def get_model_info(self, model_id):
         """Get detailed information about a model"""
         if model_id not in self.models_registry:
