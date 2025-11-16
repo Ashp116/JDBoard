@@ -97,6 +97,55 @@ const AppContent: React.FC = () => {
     }
   }, [location.pathname]);
 
+  // Update document title based on active section and current path
+  useEffect(() => {
+    const sectionTitles: Record<SectionKey, string> = {
+      dashboard: 'Dashboard',
+      models: 'Models',
+      inference: 'Inference', 
+      monitoring: 'Monitoring',
+      terminal: 'Terminal',
+      logs: 'Logs',
+      settings: 'Settings'
+    };
+    
+    let sectionTitle = sectionTitles[activeSection] || 'Dashboard';
+    
+    // Add more specific titles for subsections based on URL
+    const pathSegments = location.pathname.split('/').filter(Boolean);
+    if (pathSegments.length > 1) {
+      const subsection = pathSegments[1];
+      
+      // Handle inference subsections
+      if (activeSection === 'inference') {
+        const inferenceSubtitles: Record<string, string> = {
+          'live': 'Live Inference',
+          'batch': 'Batch Processing', 
+          'upload': 'Upload & Test',
+          'history': 'Inference History'
+        };
+        if (inferenceSubtitles[subsection]) {
+          sectionTitle = `${sectionTitle} - ${inferenceSubtitles[subsection]}`;
+        }
+      }
+      
+      // Handle monitoring subsections  
+      if (activeSection === 'monitoring') {
+        const monitoringSubtitles: Record<string, string> = {
+          'system': 'System Metrics',
+          'gpu': 'GPU Monitoring',
+          'memory': 'Memory Usage',
+          'processes': 'Process Monitor'
+        };
+        if (monitoringSubtitles[subsection]) {
+          sectionTitle = `${sectionTitle} - ${monitoringSubtitles[subsection]}`;
+        }
+      }
+    }
+    
+    document.title = `JBoard | ${sectionTitle}`;
+  }, [activeSection, location.pathname]);
+
   const sections: Record<SectionKey, any> = {
     dashboard: Dashboard,
     models: ModelsSection,
