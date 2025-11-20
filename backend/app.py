@@ -606,7 +606,7 @@ def force_reload_model(model_id):
         logger.info(f"Model {model_id} force reloaded by {client_ip}")
         
         # Get updated model status
-        models = ai_manager.get_models()
+        models = ai_manager.list_models()
         target_model = None
         for model in models:
             if model['id'] == model_id:
@@ -738,7 +738,7 @@ def rename_model(model_id):
     
     try:
         # Check if model exists
-        models = ai_manager.get_models()
+        models = ai_manager.list_models()
         current_model = None
         for model in models:
             if model['id'] == model_id:
