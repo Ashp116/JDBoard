@@ -48,13 +48,17 @@ const Container = styled.div`
   padding: 20px;
 
   /* Mobile styles */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
   }
 
   /* Tablet styles */
-  @media (min-width: 768px) and (max-width: 991px) {
-    padding: 25px;
+  ${props => props.theme.media.tablet} {
+    padding: 18px;
   }
 
   /* Desktop styles */
@@ -68,6 +72,11 @@ const SectionHeader = styled.div`
   padding-bottom: 15px;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
 
+  ${props => props.theme.media.mobile} {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+  }
+
   h2 {
     display: flex;
     align-items: center;
@@ -76,6 +85,16 @@ const SectionHeader = styled.div`
     font-size: 24px;
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
+
+    ${props => props.theme.media.mobile} {
+      font-size: 20px;
+      gap: 8px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      gap: 6px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -91,6 +110,17 @@ const StatusIndicator = styled.div<StyledConnectionProps>`
   background: ${props => props.theme.colors.background.tertiary};
   border-radius: 6px;
   margin-bottom: 20px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 8px 12px;
+    gap: 6px;
+    margin-bottom: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 6px 10px;
+    margin-bottom: 12px;
+  }
   
   .status-dot {
     width: 8px;

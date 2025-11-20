@@ -6,15 +6,41 @@ import packageJson from "../../package.json"
 
 const Container = styled.div`
   padding: 30px;
-  height: 100vh;
+  height: calc(100vh - 60px); /* Account for mobile header on all screens */
   display: flex;
   flex-direction: column;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+    height: calc(100vh - 180px); /* Account for mobile header + extra spacing */
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+    height: calc(100vh - 200px); /* Account for smaller mobile header + more spacing */
+  }
+  
+  ${props => props.theme.media.tablet} {
+    padding: 20px;
+    height: calc(100vh - 160px);
+  }
+  
+  /* Desktop */
+  @media (min-width: 992px) {
+    height: calc(100vh - 60px);
+    padding: 30px;
+  }
 `;
 
 const SectionHeader = styled.div`
   margin-bottom: 30px;
   padding-bottom: 15px;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+  }
 
   h2 {
     display: flex;
@@ -24,6 +50,16 @@ const SectionHeader = styled.div`
     font-size: 24px;
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 20px;
+      gap: 8px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      gap: 6px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -47,11 +83,27 @@ const TerminalHeader = styled.div`
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
   display: flex;
   align-items: center;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 8px 12px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 6px 10px;
+  }
 
   .terminal-title {
     color: ${props => props.theme.colors.text.secondary};
     font-size: 14px;
     font-weight: 500;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 13px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 12px;
+    }
   }
 `;
 
@@ -66,6 +118,23 @@ const TerminalOutput = styled.div`
   overflow-y: auto;
   white-space: pre-wrap;
   word-wrap: break-word;
+  min-height: 200px;
+  max-height: 400px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.3;
+    min-height: 150px;
+    max-height: 300px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 8px;
+    font-size: 11px;
+    min-height: 120px;
+    max-height: 250px;
+  }
 
   .prompt {
     color: #4ECDC4;
@@ -90,12 +159,30 @@ const TerminalInputContainer = styled.div`
   padding: 10px 15px;
   background: #0c0c0c;
   border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    padding: 8px 10px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 6px 8px;
+  }
 
   .prompt {
     color: #4ECDC4;
     font-family: 'Courier New', monospace;
     font-size: 14px;
     margin-right: 8px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 12px;
+      margin-right: 6px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 11px;
+      margin-right: 4px;
+    }
   }
 `;
 
@@ -108,9 +195,22 @@ const TerminalInput = styled.input`
   font-size: 14px;
   outline: none;
   caret-color: #00ff00;
+  
+  ${props => props.theme.media.mobile} {
+    font-size: 12px;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 11px;
+  }
 
   &::placeholder {
     color: #666666;
+  }
+  
+  &:focus {
+    outline: none;
+    box-shadow: none;
   }
 `;
 
@@ -153,6 +253,20 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
   const formatPath = (path: string) => {
     // Replace actual home directory with ~
     return path.replace(userInfo.home_dir, '~');
+  };
+
+  // Auto-focus terminal input when component mounts
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, []);
+
+  // Refocus input when clicking anywhere in terminal
+  const handleTerminalClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
   };
 
   // Auto-scroll to bottom when new content is added
@@ -394,7 +508,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
         </h2>
       </SectionHeader>
 
-      <TerminalContainer>
+      <TerminalContainer onClick={() => inputRef.current?.focus()}>
         <TerminalHeader>
           <div className="terminal-title">JBoard Terminal</div>
         </TerminalHeader>
@@ -420,6 +534,7 @@ const TerminalSection: React.FC<TerminalSectionProps> = ({ socket, isConnected }
               onKeyDown={handleKeyDown}
               placeholder="Enter command..."
               disabled={!isConnected}
+              autoFocus
             />
           </TerminalInputContainer>
         </form>

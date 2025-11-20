@@ -63,6 +63,19 @@ declare module 'styled-components' {
       tablet: string;
       desktop: string;
     };
+    media: {
+      mobile: string;
+      tablet: string;
+      desktop: string;
+    };
+    spacing: {
+      xs: string;
+      sm: string;
+      md: string;
+      lg: string;
+      xl: string;
+      xxl: string;
+    };
     transitions: {
       fast: string;
       medium: string;

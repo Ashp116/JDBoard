@@ -35,6 +35,14 @@ interface YOLOVersion {
 
 const Container = styled.div`
   padding: 30px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+  }
 `;
 
 const SectionHeader = styled.div`
@@ -46,6 +54,13 @@ const SectionHeader = styled.div`
   align-items: center;
   gap: 20px;
 
+  ${props => props.theme.media.mobile} {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+    margin-bottom: 20px;
+  }
+
   h2 {
     display: flex;
     align-items: center;
@@ -55,6 +70,11 @@ const SectionHeader = styled.div`
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
     flex-shrink: 0;
+
+    ${props => props.theme.media.mobile} {
+      font-size: 20px;
+      gap: 8px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -66,11 +86,26 @@ const SearchAndActions = styled.div`
   display: flex;
   align-items: center;
   gap: 15px;
+  
+  ${props => props.theme.media.mobile} {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: 100%;
+  }
 `;
 
 const SearchContainer = styled.div`
   position: relative;
   width: 300px;
+  
+  ${props => props.theme.media.tablet} {
+    width: 250px;
+  }
+  
+  ${props => props.theme.media.mobile} {
+    width: 100%;
+  }
 `;
 
 const SearchInput = styled.input`
@@ -143,6 +178,11 @@ const DownloadCard = styled.div`
   display: flex;
   flex-direction: column;
   gap: 8px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px;
+    gap: 6px;
+  }
 `;
 
 const CancelButton = styled.button`
@@ -155,10 +195,20 @@ const CancelButton = styled.button`
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 55px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px 16px;
+    font-size: 12px;
+    min-width: 70px;
+  }
 
   &:hover {
     background: #d32f2f;
     transform: translateY(-1px);
+    
+    ${props => props.theme.media.mobile} {
+      transform: none;
+    }
   }
 
   &:active {
@@ -182,12 +232,26 @@ const DownloadContent = styled.div`
   gap: 10px;
   flex-wrap: wrap;
   min-height: 40px;
+  
+  ${props => props.theme.media.mobile} {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    min-height: auto;
+  }
 `;
 
 const DownloadActions = styled.div`
   display: flex;
   gap: 8px;
   margin-left: auto;
+  
+  ${props => props.theme.media.mobile} {
+    margin-left: 0;
+    margin-top: 8px;
+    justify-content: center;
+    gap: 12px;
+  }
 `;
 
 const LogsSection = styled.div<{ $expanded: boolean }>`
@@ -286,6 +350,11 @@ const ProgressBar = styled.div`
   background: ${props => props.theme.colors.background.secondary};
   border-radius: 2px;
   overflow: hidden;
+  
+  ${props => props.theme.media.mobile} {
+    width: 100%;
+    height: 6px;
+  }
 `;
 
 const ProgressFill = styled.div<{ progress: number }>`
@@ -316,10 +385,21 @@ const AddButton = styled.button`
   align-items: center;
   gap: 8px;
   transition: all 0.3s ease;
+  white-space: nowrap;
+  
+  ${props => props.theme.media.mobile} {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 20px;
+  }
 
   &:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(118, 185, 0, 0.3);
+    
+    ${props => props.theme.media.mobile} {
+      transform: none;
+    }
   }
 
   i {
@@ -340,6 +420,11 @@ const LogsButton = styled.button`
   gap: 6px;
   transition: all 0.3s ease;
   position: relative;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px 16px;
+    font-size: 14px;
+  }
 
   &:hover {
     background: ${props => props.theme.colors.background.hover};
@@ -478,6 +563,12 @@ const Modal = styled.div<{ $show: boolean }>`
   align-items: center;
   justify-content: center;
   padding: 20px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px;
+    align-items: flex-start;
+    padding-top: 20px;
+  }
 `;
 
 const ModalContent = styled.div`
@@ -492,6 +583,13 @@ const ModalContent = styled.div`
   backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
+  
+  ${props => props.theme.media.mobile} {
+    max-width: 100%;
+    max-height: 95vh;
+    border-radius: 12px;
+    margin: 0;
+  }
 `;
 
 const ModalHeader = styled.div`
@@ -503,6 +601,11 @@ const ModalHeader = styled.div`
   background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
   flex-shrink: 0;
   border-radius: 16px 16px 0 0;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+    border-radius: 12px 12px 0 0;
+  }
 
   h3 {
     color: ${props => props.theme.colors.text.primary};
@@ -512,10 +615,19 @@ const ModalHeader = styled.div`
     display: flex;
     align-items: center;
     gap: 12px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 18px;
+      gap: 8px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
       font-size: 18px;
+      
+      ${props => props.theme.media.mobile} {
+        font-size: 16px;
+      }
     }
   }
 `;
@@ -543,6 +655,11 @@ const ModalBody = styled.div`
   flex: 1;
   min-height: 0;
   border-radius: 0 0 16px 16px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+    border-radius: 0 0 12px 12px;
+  }
 
   /* Custom scrollbar styling for webkit browsers */
   &::-webkit-scrollbar {
@@ -580,6 +697,12 @@ const Tab = styled.button<{ $active: boolean }>`
   font-weight: 500;
   border-bottom: 2px solid ${props => props.$active ? props.theme.colors.nvidia.green : 'transparent'};
   transition: all 0.3s ease;
+  flex: 1;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 10px 15px;
+    font-size: 13px;
+  }
 
   &:hover {
     color: ${props => props.theme.colors.text.primary};
@@ -595,6 +718,10 @@ const UploadArea = styled.div<{ $dragOver: boolean }>`
   transition: all 0.3s ease;
   cursor: pointer;
   margin-bottom: 20px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 25px 15px;
+  }
 
   &:hover {
     border-color: ${props => props.theme.colors.nvidia.green};
@@ -628,6 +755,15 @@ const YOLOGrid = styled.div`
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 15px;
   margin-bottom: 20px;
+  
+  ${props => props.theme.media.tablet} {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 `;
 
 const YOLOCard = styled.div`
@@ -742,6 +878,11 @@ const FormatSelector = styled.div`
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
     gap: 8px;
+    
+    ${props => props.theme.media.mobile} {
+      grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+      gap: 6px;
+    }
   }
 
   .format-option {
@@ -797,6 +938,15 @@ const ModelSizeGrid = styled.div`
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-top: 15px;
+  
+  ${props => props.theme.media.tablet} {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+  }
 `;
 
 const ModelSizeCard = styled.div<{ selected?: boolean }>`
@@ -843,6 +993,11 @@ const ActionButtons = styled.div`
   margin-top: 25px;
   padding-top: 20px;
   border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
 `;
 
 const Button = styled.button<{ variant?: 'primary' | 'secondary' }>`
@@ -852,6 +1007,12 @@ const Button = styled.button<{ variant?: 'primary' | 'secondary' }>`
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 12px 20px;
+    width: 100%;
+    justify-content: center;
+  }
 
   ${props => props.variant === 'primary' ? `
     background: ${props.theme.colors.nvidia.green};
@@ -882,6 +1043,16 @@ const ModelsList = styled.div`
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 20px;
+  
+  ${props => props.theme.media.tablet} {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 15px;
+  }
+  
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
 `;
 
 const ModelCard = styled.div`
@@ -891,9 +1062,21 @@ const ModelCard = styled.div`
   padding: 20px;
   transition: all 0.3s ease;
 
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 12px;
+  }
+
   &:hover {
     border-color: ${props => props.theme.colors.nvidia.green};
     transform: translateY(-2px);
+    
+    ${props => props.theme.media.mobile} {
+      transform: none;
+    }
   }
 
   .model-header {
@@ -901,6 +1084,11 @@ const ModelCard = styled.div`
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 15px;
+    
+    ${props => props.theme.media.mobile} {
+      flex-direction: column;
+      gap: 8px;
+    }
 
     h4 {
       color: ${props => props.theme.colors.text.primary};
@@ -908,6 +1096,11 @@ const ModelCard = styled.div`
       font-size: 16px;
       flex: 1;
       margin-right: 10px;
+      
+      ${props => props.theme.media.mobile} {
+        margin-right: 0;
+        font-size: 15px;
+      }
     }
 
     .header-actions {
@@ -915,6 +1108,11 @@ const ModelCard = styled.div`
       align-items: center;
       gap: 8px;
       flex-shrink: 0;
+      
+      ${props => props.theme.media.mobile} {
+        align-self: flex-end;
+        gap: 6px;
+      }
     }
 
     .status {
@@ -995,6 +1193,15 @@ const ModelCard = styled.div`
   .model-actions {
     display: flex;
     gap: 8px;
+    
+    ${props => props.theme.media.mobile} {
+      flex-direction: column;
+      gap: 6px;
+    }
+    
+    @media (max-width: 480px) {
+      gap: 4px;
+    }
 
     button {
       flex: 1;
@@ -1003,6 +1210,12 @@ const ModelCard = styled.div`
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.3s ease;
+      
+      ${props => props.theme.media.mobile} {
+        padding: 10px 12px;
+        font-size: 13px;
+        min-height: 40px;
+      }
 
       &.load {
         background: ${props => props.theme.colors.nvidia.green};
@@ -1100,6 +1313,11 @@ const EditNameInput = styled.input`
   font-weight: 600;
   padding: 8px 10px;
   flex: 1;
+  
+  ${props => props.theme.media.mobile} {
+    font-size: 13px;
+    padding: 10px;
+  }
 
   &:focus {
     outline: none;
@@ -1143,6 +1361,12 @@ const EditActionsContainer = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
+    
+    ${props => props.theme.media.mobile} {
+      min-width: 40px;
+      height: 40px;
+      padding: 10px;
+    }
 
     &:hover {
       background: ${props => props.theme.colors.background.hover};
@@ -1183,17 +1407,31 @@ const EmptyState = styled.div`
   text-align: center;
   padding: 60px 20px;
   color: ${props => props.theme.colors.text.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    padding: 40px 15px;
+  }
 
   i {
     font-size: 48px;
     color: ${props => props.theme.colors.nvidia.green};
     margin-bottom: 16px;
     opacity: 0.6;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
   }
 
   h3 {
     color: ${props => props.theme.colors.text.primary};
     margin: 16px 0 8px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 18px;
+      margin: 12px 0 6px;
+    }
   }
 `;
 

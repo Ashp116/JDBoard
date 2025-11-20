@@ -42,12 +42,16 @@ const Card = styled.div<StatusStyleProps>`
   }
 
   /* Mobile responsive */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     padding: 16px;
     
     &:hover {
       transform: none; /* Disable hover transform on touch devices */
     }
+  }
+  
+  @media (max-width: 480px) {
+    padding: 14px;
   }
 
   /* Touch device improvements */
@@ -70,9 +74,14 @@ const MetricHeader = styled.div`
     min-width: 24px;
     
     /* Mobile responsive */
-    @media (max-width: 767px) {
+    ${props => props.theme.media.mobile} {
       font-size: 20px;
       min-width: 20px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      min-width: 18px;
     }
   }
 
@@ -83,13 +92,17 @@ const MetricHeader = styled.div`
     font-weight: 600;
     
     /* Mobile responsive */
-    @media (max-width: 767px) {
+    ${props => props.theme.media.mobile} {
       font-size: 16px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 15px;
     }
   }
   
   /* Mobile adjustments */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     gap: 8px;
     margin-bottom: 12px;
   }
@@ -114,11 +127,15 @@ const PrimaryValue = styled.span<StatusStyleProps>`
   font-family: ${props => props.theme.fonts.display};
   
   /* Mobile responsive */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     font-size: 28px;
   }
+  
+  @media (max-width: 480px) {
+    font-size: 24px;
+  }
 
-  @media (min-width: 768px) and (max-width: 991px) {
+  ${props => props.theme.media.tablet} {
     font-size: 30px;
   }
 `;

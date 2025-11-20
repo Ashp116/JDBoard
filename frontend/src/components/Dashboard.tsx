@@ -11,13 +11,17 @@ const DashboardContainer = styled.div`
   overflow-y: auto;
 
   /* Mobile styles */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
   }
 
   /* Tablet styles */
-  @media (min-width: 768px) and (max-width: 991px) {
-    padding: 25px;
+  ${props => props.theme.media.tablet} {
+    padding: 18px;
   }
 
   /* Desktop styles */
@@ -38,16 +42,21 @@ const ContentHeader = styled.div`
   border-radius: 8px;
 
   /* Mobile styles */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     flex-direction: column;
     text-align: center;
     gap: 15px;
     padding: 15px;
     margin-bottom: 20px;
   }
+  
+  @media (max-width: 480px) {
+    padding: 12px;
+    gap: 12px;
+  }
 
   /* Tablet styles */
-  @media (min-width: 768px) and (max-width: 991px) {
+  ${props => props.theme.media.tablet} {
     padding: 18px;
     margin-bottom: 25px;
   }
@@ -62,11 +71,15 @@ const HeaderInfo = styled.div`
     font-family: ${props => props.theme.fonts.display};
 
     /* Responsive font sizes */
-    @media (max-width: 767px) {
+    ${props => props.theme.media.mobile} {
       font-size: 24px;
     }
+    
+    @media (max-width: 480px) {
+      font-size: 20px;
+    }
 
-    @media (min-width: 768px) and (max-width: 991px) {
+    ${props => props.theme.media.tablet} {
       font-size: 26px;
     }
   }
@@ -94,7 +107,7 @@ const HeaderMeta = styled.div`
     }
   }
 
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     font-size: 13px;
     gap: 8px;
   }

@@ -5,12 +5,29 @@ import { getBackendUrl } from '../utils/api';
 
 const Container = styled.div`
   padding: 30px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+  }
+  
+  ${props => props.theme.media.tablet} {
+    padding: 20px;
+  }
 `;
 
 const SectionHeader = styled.div`
   margin-bottom: 30px;
   padding-bottom: 15px;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+  }
 
   h2 {
     display: flex;
@@ -20,6 +37,16 @@ const SectionHeader = styled.div`
     font-size: 24px;
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 20px;
+      gap: 8px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      gap: 6px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -43,9 +70,30 @@ const LogsHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   
+  ${props => props.theme.media.mobile} {
+    padding: 12px 15px;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  
   .log-info {
     color: ${props => props.theme.colors.text.secondary};
     font-size: 14px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 13px;
+      text-align: center;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 12px;
+    }
   }
   
   .refresh-btn {
@@ -56,6 +104,12 @@ const LogsHeader = styled.div`
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
+    
+    ${props => props.theme.media.mobile} {
+      padding: 8px 16px;
+      font-size: 14px;
+      width: 100%;
+    }
     
     &:hover {
       background: ${props => props.theme.colors.nvidia.greenHover};
@@ -72,6 +126,16 @@ const LogEntry = styled.div`
   white-space: pre-wrap;
   word-wrap: break-word;
   
+  ${props => props.theme.media.mobile} {
+    padding: 6px 15px;
+    font-size: 11px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 5px 12px;
+    font-size: 10px;
+  }
+  
   &:last-child {
     border-bottom: none;
   }
@@ -85,17 +149,45 @@ const EmptyState = styled.div`
   text-align: center;
   padding: 60px 20px;
   color: ${props => props.theme.colors.text.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    padding: 40px 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 30px 10px;
+  }
 
   i {
     font-size: 48px;
     color: ${props => props.theme.colors.nvidia.green};
     margin-bottom: 16px;
     opacity: 0.6;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
   }
 
   h3 {
     color: ${props => props.theme.colors.text.primary};
     margin: 16px 0 8px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 18px;
+      margin: 12px 0 6px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 16px;
+      margin: 10px 0 5px;
+    }
   }
 `;
 

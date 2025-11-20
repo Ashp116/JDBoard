@@ -228,13 +228,17 @@ const Container = styled.div`
   padding: 20px;
   
   /* Mobile styles */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
   }
 
   /* Tablet styles */
-  @media (min-width: 768px) and (max-width: 991px) {
-    padding: 25px;
+  ${props => props.theme.media.tablet} {
+    padding: 18px;
   }
 
   /* Desktop styles */
@@ -262,14 +266,19 @@ const SectionHeader = styled.div`
     }
 
     /* Mobile responsive */
-    @media (max-width: 767px) {
+    ${props => props.theme.media.mobile} {
       font-size: 20px;
       gap: 8px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      gap: 6px;
     }
   }
 
   /* Mobile adjustments */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     margin-bottom: 20px;
     padding-bottom: 10px;
   }
@@ -288,8 +297,12 @@ const InferenceGrid = styled.div`
   }
   
   /* Mobile adjustments */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     gap: 20px;
+  }
+  
+  @media (max-width: 480px) {
+    gap: 15px;
   }
 `;
 
@@ -300,14 +313,20 @@ const InferencePanel = styled.div`
   padding: 25px;
   
   /* Mobile styles */
-  @media (max-width: 767px) {
+  ${props => props.theme.media.mobile} {
     padding: 16px;
     border-radius: 8px;
   }
   
+  @media (max-width: 480px) {
+    padding: 14px;
+    border-radius: 6px;
+  }
+  
   /* Tablet styles */
-  @media (min-width: 768px) and (max-width: 991px) {
+  ${props => props.theme.media.tablet} {
     padding: 20px;
+    border-radius: 10px;
   }
 `;
 

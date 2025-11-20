@@ -31,12 +31,29 @@ interface SudoSessionState {
 
 const Container = styled.div`
   padding: 30px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+  }
+  
+  ${props => props.theme.media.tablet} {
+    padding: 20px;
+  }
 `;
 
 const SectionHeader = styled.div`
   margin-bottom: 30px;
   padding-bottom: 15px;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+  }
 
   h2 {
     display: flex;
@@ -46,6 +63,16 @@ const SectionHeader = styled.div`
     font-size: 24px;
     margin: 0;
     font-family: ${props => props.theme.fonts.display};
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 20px;
+      gap: 8px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 18px;
+      gap: 6px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -58,6 +85,17 @@ const SettingsGrid = styled.div`
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
   gap: 24px;
   margin-bottom: 30px;
+  
+  ${props => props.theme.media.tablet} {
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 20px;
+  }
+  
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    margin-bottom: 20px;
+  }
 `;
 
 const SettingsCard = styled.div`
@@ -66,10 +104,24 @@ const SettingsCard = styled.div`
   border-radius: 12px;
   padding: 24px;
   transition: all ${props => props.theme.transitions.standard};
+  
+  ${props => props.theme.media.mobile} {
+    padding: 18px;
+    border-radius: 8px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 15px;
+    border-radius: 6px;
+  }
 
   &:hover {
     border-color: ${props => props.theme.colors.nvidia.green};
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    
+    ${props => props.theme.media.mobile} {
+      box-shadow: none; /* Disable hover effects on mobile */
+    }
   }
 
   h3 {
@@ -79,6 +131,17 @@ const SettingsCard = styled.div`
     color: ${props => props.theme.colors.text.primary};
     margin: 0 0 16px 0;
     font-size: 18px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 16px;
+      gap: 8px;
+      margin: 0 0 12px 0;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 15px;
+      gap: 6px;
+    }
 
     i {
       color: ${props => props.theme.colors.nvidia.green};
@@ -92,6 +155,13 @@ const SettingItem = styled.div`
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  ${props => props.theme.media.mobile} {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 0;
+  }
 
   &:last-child {
     border-bottom: none;
@@ -99,6 +169,16 @@ const SettingItem = styled.div`
 
   .label {
     color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 13px;
+      text-align: center;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 12px;
+    }
     font-weight: 500;
   }
 

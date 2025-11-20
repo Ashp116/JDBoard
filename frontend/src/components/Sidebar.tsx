@@ -19,14 +19,28 @@ const SidebarContainer = styled.nav<{ $isOpen?: boolean }>`
   box-shadow: ${props => props.theme.shadows.sidebar};
   z-index: ${props => props.theme.zIndex.sidebar};
 
-  /* Mobile styles */
-  @media (max-width: 991px) {
+  /* Mobile and tablet styles */
+  ${props => props.theme.media.tablet} {
     position: fixed;
-    top: 0;
+    top: 60px;
     left: ${props => props.$isOpen ? '0' : '-250px'};
     width: 250px;
-    height: 100vh;
+    height: calc(100vh - 60px);
     box-shadow: ${props => props.$isOpen ? '2px 0 20px rgba(0, 0, 0, 0.3)' : 'none'};
+  }
+  
+  ${props => props.theme.media.mobile} {
+    position: fixed;
+    top: 60px;
+    left: ${props => props.$isOpen ? '0' : '-250px'};
+    width: 250px;
+    height: calc(100vh - 60px);
+    box-shadow: ${props => props.$isOpen ? '2px 0 20px rgba(0, 0, 0, 0.3)' : 'none'};
+  }
+  
+  @media (max-width: 480px) {
+    top: 55px;
+    height: calc(100vh - 55px);
   }
 
   /* Desktop styles */
@@ -46,7 +60,7 @@ const SidebarContainer = styled.nav<{ $isOpen?: boolean }>`
 const MobileHeader = styled.div`
   display: none;
   
-  @media (max-width: 991px) {
+  ${props => props.theme.media.tablet} {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -58,7 +72,31 @@ const MobileHeader = styled.div`
     background: ${props => props.theme.colors.background.secondary};
     border-bottom: 2px solid ${props => props.theme.colors.nvidia.green};
     padding: 0 20px;
-    z-index: ${props => props.theme.zIndex.sidebar + 1};
+    z-index: ${props => props.theme.zIndex.modal};
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  ${props => props.theme.media.mobile} {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: ${props => props.theme.colors.background.secondary};
+    border-bottom: 2px solid ${props => props.theme.colors.nvidia.green};
+    padding: 0 15px;
+    z-index: ${props => props.theme.zIndex.modal};
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  @media (max-width: 480px) {
+    padding: 0 12px;
+    height: 55px;
   }
 `;
 
@@ -71,9 +109,39 @@ const MobileMenuButton = styled.button`
   padding: 8px;
   border-radius: 4px;
   transition: all ${props => props.theme.transitions.fast};
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  
+  ${props => props.theme.media.mobile} {
+    font-size: 1.3rem;
+    padding: 6px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.2rem;
+    padding: 5px;
+    min-width: 36px;
+    min-height: 36px;
+  }
 
   &:hover {
     background: rgba(118, 185, 0, 0.1);
+  }
+  
+  &:active {
+    background: rgba(118, 185, 0, 0.2);
+    transform: scale(0.95);
+  }
+  
+  &:focus {
+    outline: 2px solid ${props => props.theme.colors.nvidia.green};
+    outline-offset: 2px;
   }
 `;
 
@@ -85,22 +153,55 @@ const MobileTitle = styled.div`
   font-family: ${props => props.theme.fonts.display};
   font-weight: 700;
   font-size: 1.2rem;
+  
+  ${props => props.theme.media.mobile} {
+    font-size: 1.1rem;
+    gap: 10px;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1rem;
+    gap: 8px;
+  }
 
   img {
     height: 32px;
     width: auto;
+    
+    ${props => props.theme.media.mobile} {
+      height: 28px;
+    }
+    
+    @media (max-width: 480px) {
+      height: 24px;
+    }
+  }
+  
+  span {
+    ${props => props.theme.media.mobile} {
+      display: inline;
+    }
+    
+    @media (max-width: 480px) {
+      display: none;
+    }
   }
 `;
 
 const MobileOverlay = styled.div<{ $isOpen?: boolean }>`
   display: ${props => props.$isOpen ? 'block' : 'none'};
   position: fixed;
-  top: 0;
+  top: 60px;
   left: 0;
   width: 100vw;
-  height: 100vh;
+  height: calc(100vh - 60px);
   background: rgba(0, 0, 0, 0.5);
   z-index: ${props => props.theme.zIndex.sidebar - 1};
+  
+  @media (max-width: 480px) {
+    top: 55px;
+    height: calc(100vh - 55px);
+  }
   
   @media (min-width: 992px) {
     display: none;
@@ -202,10 +303,16 @@ const NavItem = styled.div<StyledActiveProps>`
   position: relative;
   background: ${props => props.$active ? 'rgba(118, 185, 0, 0.2)' : 'transparent'};
   border-left-color: ${props => props.$active ? props.theme.colors.nvidia.green : 'transparent'};
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 
   &:hover {
     background: rgba(118, 185, 0, 0.1);
     border-left-color: ${props => props.theme.colors.nvidia.green};
+  }
+  
+  &:active {
+    background: rgba(118, 185, 0, 0.3);
   }
 
   i {
@@ -213,24 +320,46 @@ const NavItem = styled.div<StyledActiveProps>`
     color: ${props => props.theme.colors.nvidia.green};
     min-width: 40px;
     text-align: center;
+    transition: color ${props => props.theme.transitions.fast};
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 1.3rem;
+      min-width: 35px;
+    }
   }
 
   span {
     margin-left: 15px;
+    color: ${props => props.$active ? props.theme.colors.text.primary : props.theme.colors.text.primary};
     font-family: ${props => props.theme.fonts.primary};
-    font-weight: 600;
+    font-weight: ${props => props.$active ? '700' : '600'};
     white-space: nowrap;
     opacity: 0;
-    transition: opacity ${props => props.theme.transitions.medium};
+    transition: all ${props => props.theme.transitions.medium};
     
-    /* Show text on mobile when sidebar is open */
-    @media (max-width: 991px) {
+    ${props => props.theme.media.mobile} {
       opacity: 1;
+      margin-left: 12px;
+    }
+    
+    @media (max-width: 480px) {
+      margin-left: 10px;
+      font-size: 14px;
     }
   }
 
   ${SidebarContainer}:hover & span {
     opacity: 1;
+  }
+  
+  &:hover {
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+    
+    span {
+      color: ${props => props.theme.colors.text.primary};
+    }
   }
 `;
 
@@ -334,11 +463,33 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     { id: 'settings', icon: 'fas fa-cog', label: 'Settings', shortcut: 'Ctrl+7' }
   ];
 
+  const handleNavClick = (itemId: string) => {
+    if (onSectionChange && typeof onSectionChange === 'function') {
+      onSectionChange(itemId);
+    }
+  };
+
+  const handleMobileToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onToggleMobileMenu && typeof onToggleMobileMenu === 'function') {
+      onToggleMobileMenu();
+    }
+  };
+
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (onToggleMobileMenu && typeof onToggleMobileMenu === 'function') {
+      onToggleMobileMenu();
+    }
+  };
+
   return (
     <>
       {/* Mobile Header */}
       <MobileHeader>
-        <MobileMenuButton onClick={onToggleMobileMenu}>
+        <MobileMenuButton onClick={handleMobileToggle}>
           <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'}`}></i>
         </MobileMenuButton>
         <MobileTitle>
@@ -349,7 +500,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
       </MobileHeader>
 
       {/* Mobile Overlay */}
-      <MobileOverlay $isOpen={isMobileMenuOpen} onClick={onToggleMobileMenu} />
+      <MobileOverlay $isOpen={isMobileMenuOpen} onClick={handleOverlayClick} />
 
       {/* Sidebar */}
       <SidebarContainer $isOpen={isMobileMenuOpen}>
@@ -367,8 +518,16 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
             <NavItem
               key={item.id}
               $active={activeSection === item.id}
-              onClick={() => onSectionChange(item.id)}
+              onClick={() => handleNavClick(item.id)}
               title={`${item.label} (${item.shortcut})`}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handleNavClick(item.id);
+                }
+              }}
             >
               <i className={item.icon}></i>
               <span>{item.label}</span>

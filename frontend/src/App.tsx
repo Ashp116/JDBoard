@@ -23,7 +23,11 @@ const AppContainer = styled.div`
   position: relative;
 
   /* Mobile first - no sidebar margin on mobile */
-  @media (max-width: 991px) {
+  ${(props: any) => props.theme.media.tablet} {
+    flex-direction: column;
+  }
+  
+  ${(props: any) => props.theme.media.mobile} {
     flex-direction: column;
   }
 `;
@@ -35,10 +39,23 @@ const MainContent = styled.main<{ $isMobileMenuOpen?: boolean }>`
   background: ${(props: any) => props.theme.colors.background.primary};
   
   /* Mobile styles */
-  @media (max-width: 991px) {
+  ${(props: any) => props.theme.media.tablet} {
     margin-left: 0;
     padding-top: 60px; /* Account for mobile header */
     transform: ${props => props.$isMobileMenuOpen ? 'translateX(250px)' : 'translateX(0)'};
+    min-height: calc(100vh - 60px);
+  }
+  
+  ${(props: any) => props.theme.media.mobile} {
+    margin-left: 0;
+    padding-top: 60px;
+    transform: ${props => props.$isMobileMenuOpen ? 'translateX(250px)' : 'translateX(0)'};
+    min-height: calc(100vh - 60px);
+  }
+  
+  @media (max-width: 480px) {
+    padding-top: 55px;
+    min-height: calc(100vh - 55px);
   }
 
   /* Desktop styles */
@@ -46,6 +63,7 @@ const MainContent = styled.main<{ $isMobileMenuOpen?: boolean }>`
     margin-left: 80px;
     padding-top: 0;
     transform: none;
+    min-height: 100vh;
   }
 `;
 
@@ -53,6 +71,14 @@ const ContentSection = styled.section<{ $active: boolean }>`
   display: ${props => props.$active ? 'block' : 'none'};
   padding: 20px;
   animation: fadeIn ${(props: any) => props.theme.transitions.medium};
+  
+  ${(props: any) => props.theme.media.mobile} {
+    padding: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px;
+  }
 `;
 
 type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'terminal' | 'logs' | 'settings';

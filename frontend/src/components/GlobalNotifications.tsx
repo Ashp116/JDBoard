@@ -36,11 +36,27 @@ const NotificationContainer = styled.div`
   max-width: 420px;
   width: 100%;
 
-  @media (max-width: 768px) {
+  ${props => props.theme.media.tablet} {
+    top: 15px;
+    right: 15px;
+    left: 15px;
+    max-width: none;
+    gap: 10px;
+  }
+
+  ${props => props.theme.media.mobile} {
     top: 10px;
     right: 10px;
     left: 10px;
     max-width: none;
+    gap: 8px;
+  }
+  
+  @media (max-width: 480px) {
+    top: 5px;
+    right: 5px;
+    left: 5px;
+    gap: 6px;
   }
 `;
 
@@ -56,6 +72,14 @@ const SystemErrorBanner = styled.div`
   box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
   border-bottom: 3px solid #bd2130;
   animation: ${slideIn} 0.3s ease-out;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 12px 15px;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 10px 12px;
+  }
 
   .error-content {
     max-width: 1200px;
@@ -64,12 +88,30 @@ const SystemErrorBanner = styled.div`
     align-items: center;
     gap: 15px;
     flex-wrap: wrap;
+    
+    ${props => props.theme.media.mobile} {
+      gap: 10px;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    @media (max-width: 480px) {
+      gap: 8px;
+    }
   }
 
   .error-icon {
     font-size: 20px;
     color: #fff;
     animation: pulse 2s infinite;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 18px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 16px;
+    }
   }
 
   @keyframes pulse {
@@ -80,6 +122,10 @@ const SystemErrorBanner = styled.div`
   .error-details {
     flex: 1;
     min-width: 300px;
+    
+    ${props => props.theme.media.mobile} {
+      min-width: 100%;
+    }
   }
 
   .error-title {
@@ -89,12 +135,33 @@ const SystemErrorBanner = styled.div`
     display: flex;
     align-items: center;
     gap: 8px;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 15px;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 14px;
+      gap: 4px;
+    }
   }
 
   .error-message {
     font-size: 14px;
     margin-bottom: 8px;
     line-height: 1.4;
+    
+    ${props => props.theme.media.mobile} {
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
   }
 
   .error-command {
