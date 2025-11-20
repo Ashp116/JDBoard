@@ -440,6 +440,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   const [clearingCache, setClearingCache] = useState(false);
   const [showSudoModal, setShowSudoModal] = useState(false);
   const [sudoPassword, setSudoPassword] = useState('');
+  //@ts-ignore
   const { showNotification } = useNotifications();
   const [historicalData, setHistoricalData] = useState<{
     cpu: { labels: string[]; datasets: any[] };
@@ -658,16 +659,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           tension: 0.4,
           stack: 'memory'
         },
-        {
-          label: 'Free (GB)',
-          data: bufferedData.memory.map(d => d.free_gb).slice(-maxDataPoints),
-          borderColor: '#76B900',
-          backgroundColor: 'rgba(118, 185, 0, 0.4)',
-          fill: true,
-          tension: 0.4,
-          stack: 'memory'
-        }
-      ]
+      ],
     };
 
     // Network Chart (showing deltas for better visualization)
@@ -883,7 +875,8 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           text: yAxisLabel,
           color: '#CCCCCC'
         },
-        min: 0
+        min: 0,
+        max: 8
       }
     },
     elements: {
