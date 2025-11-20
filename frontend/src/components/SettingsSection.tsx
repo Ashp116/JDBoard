@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
@@ -262,7 +263,8 @@ const Modal = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: ${props => props.theme.zIndex.modal};
+  backdrop-filter: blur(5px);
 `;
 
 const ModalContent = styled.div`
@@ -375,19 +377,20 @@ const DropdownButton = styled(Button)`
 `;
 
 const DropdownMenu = styled.div<{ $isOpen: boolean }>`
-  position: absolute;
-  top: 100%;
-  right: 0;
+  position: fixed;
+  top: auto;
+  right: auto;
   background: ${props => props.theme.colors.background.secondary};
   border: 1px solid ${props => props.theme.colors.border.secondary};
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   min-width: 120px;
-  z-index: 1000;
+  z-index: ${props => props.theme.zIndex.modal};
   opacity: ${props => props.$isOpen ? 1 : 0};
   visibility: ${props => props.$isOpen ? 'visible' : 'hidden'};
   transform: ${props => props.$isOpen ? 'translateY(0)' : 'translateY(-10px)'};
   transition: all 0.2s ease;
+  pointer-events: ${props => props.$isOpen ? 'auto' : 'none'};
 `;
 
 const DropdownItem = styled.button`
@@ -1166,7 +1169,22 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
               <DropdownButton 
                 $variant="primary"
                 className={exportDropdownOpen ? 'open' : ''}
-                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+                onClick={() => {
+                  if (!exportDropdownOpen) {
+                    // Position the dropdown relative to the button
+                    setTimeout(() => {
+                      const button = document.querySelector('.dropdown-container button');
+                      const dropdown = document.querySelector('.settings-export-dropdown');
+                      if (button && dropdown) {
+                        const rect = button.getBoundingClientRect();
+                        const dropdownElement = dropdown as HTMLElement;
+                        dropdownElement.style.top = `${rect.bottom + 4}px`;
+                        dropdownElement.style.right = `${window.innerWidth - rect.right}px`;
+                      }
+                    }, 0);
+                  }
+                  setExportDropdownOpen(!exportDropdownOpen);
+                }}
                 disabled={loading.exportInferenceLogs}
                 style={{ opacity: loading.exportInferenceLogs ? 0.6 : 1 }}
               >
@@ -1174,7 +1192,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
                 {" Export"}
                 <i className="fas fa-chevron-down chevron"></i>
               </DropdownButton>
-              <DropdownMenu $isOpen={exportDropdownOpen}>
+              <DropdownMenu className="settings-export-dropdown" $isOpen={exportDropdownOpen}>
                 <DropdownItem onClick={() => {
                   handleExportInferenceLogs('json');
                   setExportDropdownOpen(false);
@@ -1219,7 +1237,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       </SettingsGrid>
 
       {/* Sudo Password Modal */}
-      {sudoModal.show && (
+      {sudoModal.show && createPortal(
         <Modal>
           <ModalContent>
             <h3>
@@ -1266,7 +1284,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
               </Button>
             </ModalButtons>
           </ModalContent>
-        </Modal>
+        </Modal>,
+        document.body
       )}
     </Container>
   );

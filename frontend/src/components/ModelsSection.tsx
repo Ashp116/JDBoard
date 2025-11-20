@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import styled from 'styled-components';
 import { ModelsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
@@ -437,10 +438,10 @@ const LogsButton = styled.button`
 `;
 
 const LogsDropdown = styled.div<{ $show: boolean }>`
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 1000;
+  position: fixed;
+  top: auto;
+  left: auto;
+  z-index: ${props => props.theme.zIndex.modal};
   background: #1e1e1e;
   border: 1px solid #404040;
   border-radius: 4px;
@@ -450,6 +451,14 @@ const LogsDropdown = styled.div<{ $show: boolean }>`
   display: ${props => props.$show ? 'block' : 'none'};
   margin-top: 4px;
   font-family: 'Courier New', monospace;
+  backdrop-filter: blur(5px);
+  
+  ${props => props.theme.media.mobile} {
+    width: 90vw;
+    height: 300px;
+    left: 5vw !important;
+    top: 20vh !important;
+  }
 `;
 
 const LogsHeader = styled.div`
@@ -558,11 +567,12 @@ const Modal = styled.div<{ $show: boolean }>`
   right: 0;
   bottom: 0;
   background: rgba(0, 0, 0, 0.8);
-  z-index: 10000;
+  z-index: ${props => props.theme.zIndex.modal};
   display: ${props => props.$show ? 'flex' : 'none'};
   align-items: center;
   justify-content: center;
   padding: 20px;
+  backdrop-filter: blur(5px);
   
   ${props => props.theme.media.mobile} {
     padding: 10px;
@@ -1742,6 +1752,19 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   };
 
   const toggleLogs = (downloadId: string) => {
+    if (!showLogs.get(downloadId)) {
+      // Position the dropdown relative to the button
+      setTimeout(() => {
+        const button = document.querySelector(`[data-logs-button="${downloadId}"]`);
+        const dropdown = document.querySelector(`[data-logs-dropdown="${downloadId}"]`);
+        if (button && dropdown) {
+          const rect = button.getBoundingClientRect();
+          const dropdownElement = dropdown as HTMLElement;
+          dropdownElement.style.top = `${rect.bottom + 4}px`;
+          dropdownElement.style.left = `${rect.left}px`;
+        }
+      }, 0);
+    }
     setShowLogs(prev => {
       const updated = new Map(prev);
       updated.set(downloadId, !updated.get(downloadId));
@@ -2481,7 +2504,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </ProgressBar>
                 <ProgressText>{download.progress}%</ProgressText>
                 <DownloadActions>
-                  <LogsButton onClick={() => toggleLogs(downloadId)}>
+                  <LogsButton 
+                    data-logs-button={downloadId}
+                    onClick={() => toggleLogs(downloadId)}
+                  >
                     <i className="fas fa-terminal"></i>
                     Logs
                   </LogsButton>
@@ -2681,17 +2707,18 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </ModelsList>
       )}
 
-      <Modal $show={showModal}>
-        <ModalContent>
-          <ModalHeader>
-            <h3>
-              <i className="fas fa-plus"></i>
-              Add New Model
-            </h3>
-            <CloseButton onClick={() => resetModal()}>
-              <i className="fas fa-times"></i>
-            </CloseButton>
-          </ModalHeader>
+      {showModal && createPortal(
+        <Modal $show={showModal}>
+          <ModalContent>
+            <ModalHeader>
+              <h3>
+                <i className="fas fa-plus"></i>
+                Add New Model
+              </h3>
+              <CloseButton onClick={() => resetModal()}>
+                <i className="fas fa-times"></i>
+              </CloseButton>
+            </ModalHeader>
 
           <ModalBody>
             <OptionTabs>
@@ -2889,7 +2916,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           )}
           </ModalBody>
         </ModalContent>
-      </Modal>
+      </Modal>,
+      document.body
+    )}
     </Container>
   );
 };

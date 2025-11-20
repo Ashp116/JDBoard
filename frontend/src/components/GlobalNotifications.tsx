@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import styled, { keyframes } from 'styled-components';
 import { useNotifications, Notification } from '../contexts/NotificationContext';
 import { getBackendUrl } from '../utils/api';
@@ -354,7 +355,8 @@ const SudoModal = styled.div`
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10001;
+  z-index: ${props => props.theme.zIndex.notification};
+  backdrop-filter: blur(5px);
 `;
 
 const SudoModalContent = styled.div`
@@ -903,7 +905,7 @@ const GlobalNotifications: React.FC = () => {
       )}
 
       {/* Sudo Password Modal */}
-      {showSudoModal && pendingAction && (
+      {showSudoModal && pendingAction && createPortal(
         <SudoModal>
           <SudoModalContent>
             <h3>
@@ -961,7 +963,8 @@ const GlobalNotifications: React.FC = () => {
               </button>
             </SudoModalButtons>
           </SudoModalContent>
-        </SudoModal>
+        </SudoModal>,
+        document.body
       )}
     </>
   );
