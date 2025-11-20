@@ -772,6 +772,8 @@ After installation, you may need to reboot your system.
         else:
             logger.info("Monitoring was not running, just cleared error state")
             return True
+    def get_system_data(self):
+        return self.system_data
     
     def get_system_logs(self):
         """Get current system logs data"""
