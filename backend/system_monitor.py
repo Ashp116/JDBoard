@@ -112,10 +112,10 @@ After installation, you may need to reboot your system.
         while self.monitoring:
             try:
                 self._update_system_data()
-                time.sleep(1.0)  # Update every 1 second
+                time.sleep(0.5)  # Update every 0.5 seconds for more responsive monitoring
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {str(e)}")
-                time.sleep(1.0)
+                time.sleep(0.5)
     
     def _update_system_data(self):
         """Update all system metrics using jetson-stats only"""
@@ -263,17 +263,41 @@ After installation, you may need to reboot your system.
                 # Try to get total memory from system (fallback approach)
                 try:
                     import psutil
+                    # Force fresh memory reading
                     memory_info = psutil.virtual_memory()
                     total_bytes = memory_info.total
                     used_bytes = int(total_bytes * ram_percentage)
                     available_bytes = total_bytes - used_bytes
                     
+                    # Get detailed memory breakdown with fresh readings
                     self.system_data['memory'] = {
                         'total': int(total_bytes),
                         'used': int(used_bytes),
                         'available': int(available_bytes),
-                        'percent': ram_percentage * 100
+                        'percent': round(ram_percentage * 100, 2),  # More precision
+                        'detailed': {
+                            'total_gb': round(total_bytes / (1024**3), 3),  # More precision
+                            'used_gb': round(used_bytes / (1024**3), 3),
+                            'available_gb': round(available_bytes / (1024**3), 3),
+                            'cached': int(memory_info.cached) if hasattr(memory_info, 'cached') else 0,
+                            'cached_gb': round(getattr(memory_info, 'cached', 0) / (1024**3), 3),
+                            'buffers': int(memory_info.buffers) if hasattr(memory_info, 'buffers') else 0,
+                            'buffers_gb': round(getattr(memory_info, 'buffers', 0) / (1024**3), 3),
+                            'shared': int(memory_info.shared) if hasattr(memory_info, 'shared') else 0,
+                            'shared_gb': round(getattr(memory_info, 'shared', 0) / (1024**3), 3),
+                            'free': int(memory_info.free) if hasattr(memory_info, 'free') else available_bytes,
+                            'free_gb': round(getattr(memory_info, 'free', available_bytes) / (1024**3), 3),
+                            'timestamp': time.time()  # Add timestamp for debugging
+                        }
                     }
+                    
+                    # Debug logging for memory values (only log occasionally to avoid spam)
+                    if hasattr(self, '_last_memory_debug') and time.time() - self._last_memory_debug > 10:
+                        logger.debug(f"Memory update: RAM%={ram_percentage:.1%}, Used={used_bytes/1024**3:.2f}GB, Free={memory_info.free/1024**3:.2f}GB")
+                        self._last_memory_debug = time.time()
+                    elif not hasattr(self, '_last_memory_debug'):
+                        self._last_memory_debug = time.time()
+                        
                 except ImportError:
                     # If psutil is not available, make reasonable estimates
                     # Assume 8GB for most Jetson devices

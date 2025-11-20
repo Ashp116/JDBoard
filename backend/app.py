@@ -2062,6 +2062,75 @@ def shutdown_system():
             'error': str(e)
         }), 500
 
+@app.route('/system/clear-cache', methods=['POST'])
+def clear_system_cache():
+    """Clear system cache and free memory"""
+    try:
+        data = request.json if request.json else {}
+        sudo_password = data.get('sudo_password', '')
+        
+        if not sudo_password:
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        
+        logger.info("Clearing system cache")
+        
+        # Commands to clear different types of cache
+        commands = [
+            # Clear page cache
+            'echo 1 > /proc/sys/vm/drop_caches',
+            # Clear dentries and inodes
+            'echo 2 > /proc/sys/vm/drop_caches', 
+            # Clear page cache, dentries and inodes
+            'echo 3 > /proc/sys/vm/drop_caches',
+            # Sync filesystem
+            'sync'
+        ]
+        
+        results = []
+        for cmd in commands:
+            try:
+                if cmd == 'sync':
+                    # Sync doesn't need sudo
+                    result = subprocess.run(['sync'], capture_output=True, text=True, timeout=10)
+                else:
+                    # Use sudo for cache clearing
+                    result = subprocess.run(
+                        ['sudo', '-S'] + ['sh', '-c', cmd],
+                        input=sudo_password + '\n',
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                
+                if result.returncode == 0:
+                    results.append({'command': cmd, 'status': 'success'})
+                else:
+                    results.append({
+                        'command': cmd, 
+                        'status': 'error',
+                        'error': result.stderr
+                    })
+            except subprocess.TimeoutExpired:
+                results.append({'command': cmd, 'status': 'timeout'})
+            except Exception as e:
+                results.append({'command': cmd, 'status': 'error', 'error': str(e)})
+        
+        # Check if most commands succeeded
+        success_count = sum(1 for r in results if r['status'] == 'success')
+        
+        return jsonify({
+            'success': success_count >= len(commands) / 2,
+            'message': f'Cache clearing completed. {success_count}/{len(commands)} commands successful.',
+            'details': results
+        })
+        
+    except Exception as e:
+        logger.error(f"Error clearing cache: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 @app.route('/system/jtop-install-service', methods=['POST'])
 def install_jtop_service():
     """Install and start the jtop service"""
@@ -2950,7 +3019,7 @@ def background_system_updates():
             except Exception:
                 pass  # If we can't even emit this, just continue
         
-        socketio.sleep(1.0)  # Update every 1 second
+        socketio.sleep(0.5)  # Update every 0.5 seconds for more responsive data
 
 if __name__ == '__main__':
     # Ensure directories exist

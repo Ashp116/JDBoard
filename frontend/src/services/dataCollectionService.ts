@@ -105,7 +105,12 @@ class DataCollectionService {
       used: systemData?.memory?.used || 0,
       total: systemData?.memory?.total || 0,
       percent: systemData?.memory?.percent || 0,
-      available: systemData?.memory?.available || 0
+      available: systemData?.memory?.available || 0,
+      // Add detailed breakdown in GB for chart display
+      used_gb: systemData?.memory?.detailed?.used_gb || 0,
+      cached_gb: systemData?.memory?.detailed?.cached_gb || 0,
+      buffers_gb: systemData?.memory?.detailed?.buffers_gb || 0,
+      free_gb: systemData?.memory?.detailed?.free_gb || 0
     };
 
     // Add Network data (with deltas)

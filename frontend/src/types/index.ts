@@ -21,6 +21,19 @@ export interface MemoryData {
   available: number;
   percent: number;
   free?: number;
+  detailed?: {
+    total_gb: number;
+    used_gb: number;
+    available_gb: number;
+    cached: number;
+    cached_gb: number;
+    buffers: number;
+    buffers_gb: number;
+    shared: number;
+    shared_gb: number;
+    free: number;
+    free_gb: number;
+  };
 }
 
 export interface NetworkData {
@@ -108,6 +121,11 @@ export interface BufferedMemoryData {
   total: number;
   percent: number;
   available: number;
+  // Detailed breakdown in GB for chart display
+  used_gb: number;
+  cached_gb: number;
+  buffers_gb: number;
+  free_gb: number;
 }
 
 export interface BufferedNetworkData {

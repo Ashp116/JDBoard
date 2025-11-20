@@ -258,6 +258,167 @@ const PauseButton = styled.button<StyledPausedProps>`
   }
 `;
 
+const ClearCacheButton = styled.button`
+  background: ${props => props.theme.colors.status.warning};
+  color: ${props => props.theme.colors.text.primary};
+  border: 1px solid ${props => props.theme.colors.status.warning};
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all ${props => props.theme.transitions.fast};
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  
+  &:hover:not(:disabled) {
+    background: ${props => props.theme.colors.status.error};
+    border-color: ${props => props.theme.colors.status.error};
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  i {
+    font-size: 12px;
+  }
+`;
+
+const MemorySection = styled.div`
+  margin-bottom: 20px;
+  padding: 15px;
+  background: ${props => props.theme.colors.background.tertiary};
+  border-radius: 8px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  
+  h4 {
+    margin: 0 0 15px 0;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
+const SudoModal = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: ${props => props.theme.zIndex?.modal || 1000};
+  backdrop-filter: blur(5px);
+`;
+
+const SudoModalContent = styled.div`
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 16px;
+  padding: 24px;
+  min-width: 400px;
+  max-width: 500px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  
+  ${props => props.theme.media?.mobile} {
+    min-width: 90vw;
+    margin: 20px;
+    padding: 20px;
+  }
+  
+  h3 {
+    margin: 0 0 16px 0;
+    color: ${props => props.theme.colors.text.primary};
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+  
+  p {
+    color: ${props => props.theme.colors.text.secondary};
+    margin: 0 0 20px 0;
+    line-height: 1.5;
+  }
+`;
+
+const SudoPasswordInput = styled.input`
+  width: 100%;
+  background: ${props => props.theme.colors.background.tertiary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  color: ${props => props.theme.colors.text.primary};
+  padding: 12px;
+  font-size: 14px;
+  margin-bottom: 16px;
+
+  &:focus {
+    outline: none;
+    border-color: ${props => props.theme.colors.nvidia.green};
+    box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.2);
+  }
+
+  &::placeholder {
+    color: ${props => props.theme.colors.text.secondary};
+  }
+`;
+
+const SudoModalButtons = styled.div`
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+
+  button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all ${props => props.theme.transitions.fast};
+    border: 1px solid transparent;
+    
+    &.cancel {
+      background: ${props => props.theme.colors.background.tertiary};
+      color: ${props => props.theme.colors.text.primary};
+      border-color: ${props => props.theme.colors.border.secondary};
+      
+      &:hover {
+        background: ${props => props.theme.colors.background.hover};
+      }
+    }
+    
+    &.confirm {
+      background: ${props => props.theme.colors.status.warning};
+      color: ${props => props.theme.colors.text.primary};
+      border-color: ${props => props.theme.colors.status.warning};
+      
+      &:hover:not(:disabled) {
+        background: ${props => props.theme.colors.status.error};
+        border-color: ${props => props.theme.colors.status.error};
+      }
+      
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+  }
+`;
+
 const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socket, isConnected, getBufferedData, getBufferStats, clearDataBuffer }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -276,6 +437,10 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   const [activeTab, setActiveTab] = useState(getValidTab(tab));
   const [lastDataUpdate, setLastDataUpdate] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [showSudoModal, setShowSudoModal] = useState(false);
+  const [sudoPassword, setSudoPassword] = useState('');
+  const { showNotification } = useNotifications();
   const [historicalData, setHistoricalData] = useState<{
     cpu: { labels: string[]; datasets: any[] };
     gpu: { labels: string[]; datasets: any[] };
@@ -307,6 +472,67 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   };
   
   const { addNotification } = useNotifications();
+
+  // Cache clearing handler
+  const handleClearCache = async () => {
+    setShowSudoModal(true);
+  };
+
+  const executeCacheClear = async () => {
+    if (!sudoPassword.trim()) {
+      addNotification({
+        type: 'error',
+        title: 'Password Required',
+        message: 'Please enter your sudo password'
+      });
+      return;
+    }
+
+    setClearingCache(true);
+    setShowSudoModal(false);
+    
+    try {
+      const response = await fetch(`${getBackendUrl()}/system/clear-cache`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sudo_password: sudoPassword
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        addNotification({
+          type: 'success',
+          title: 'Cache Cleared',
+          message: 'System cache cleared successfully! Memory freed up.'
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Cache Clear Failed',
+          message: `Failed to clear cache: ${result.error}`
+        });
+      }
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Cache Clear Error',
+        message: `Error clearing cache: ${error}`
+      });
+    } finally {
+      setClearingCache(false);
+      setSudoPassword(''); // Clear password for security
+    }
+  };
+
+  const cancelSudoModal = () => {
+    setShowSudoModal(false);
+    setSudoPassword('');
+  };
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -401,17 +627,45 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
       ]
     };
 
-    // Memory Chart
+    // Memory Chart - Stacked Area Chart showing memory breakdown
     const memoryChart = {
       labels: bufferedData.memory.map(d => d.time).slice(-maxDataPoints),
       datasets: [
         {
-          label: 'Memory Usage (%)',
-          data: bufferedData.memory.map(d => d.percent).slice(-maxDataPoints),
-          borderColor: '#9DD922',
-          backgroundColor: 'rgba(157, 217, 34, 0.1)',
+          label: 'Used Memory (GB)',
+          data: bufferedData.memory.map(d => d.used_gb).slice(-maxDataPoints),
+          borderColor: '#FF4444',
+          backgroundColor: 'rgba(255, 68, 68, 0.4)',
           fill: true,
-          tension: 0.4
+          tension: 0.4,
+          stack: 'memory'
+        },
+        {
+          label: 'Cached (GB)',
+          data: bufferedData.memory.map(d => d.cached_gb).slice(-maxDataPoints),
+          borderColor: '#4ECDC4',
+          backgroundColor: 'rgba(78, 205, 196, 0.4)',
+          fill: true,
+          tension: 0.4,
+          stack: 'memory'
+        },
+        {
+          label: 'Buffers (GB)',
+          data: bufferedData.memory.map(d => d.buffers_gb).slice(-maxDataPoints),
+          borderColor: '#9B59B6',
+          backgroundColor: 'rgba(155, 89, 182, 0.4)',
+          fill: true,
+          tension: 0.4,
+          stack: 'memory'
+        },
+        {
+          label: 'Free (GB)',
+          data: bufferedData.memory.map(d => d.free_gb).slice(-maxDataPoints),
+          borderColor: '#76B900',
+          backgroundColor: 'rgba(118, 185, 0, 0.4)',
+          fill: true,
+          tension: 0.4,
+          stack: 'memory'
         }
       ]
     };
@@ -564,6 +818,85 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
     }
   });
 
+  // Stacked chart options for memory breakdown
+  const getStackedChartOptions = (title: string, yAxisLabel: string = ''): any => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {
+      mode: 'index' as const,
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        position: 'top' as const,
+        labels: {
+          color: '#FFFFFF',
+          font: {
+            size: 12
+          }
+        }
+      },
+      title: {
+        display: true,
+        text: title,
+        color: '#76B900',
+        font: {
+          size: 16,
+          weight: 'bold' as const
+        }
+      },
+      tooltip: {
+        mode: 'index' as const,
+        intersect: false,
+        callbacks: {
+          footer: function(context: any) {
+            let sum = 0;
+            context.forEach(function(tooltipItem: any) {
+              sum += tooltipItem.parsed.y;
+            });
+            return 'Total: ' + sum.toFixed(2) + ' GB';
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: '#CCCCCC',
+          maxTicksLimit: 6
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        }
+      },
+      y: {
+        stacked: true,
+        ticks: {
+          color: '#CCCCCC',
+          beginAtZero: true
+        },
+        grid: {
+          color: 'rgba(255, 255, 255, 0.1)'
+        },
+        title: {
+          display: !!yAxisLabel,
+          text: yAxisLabel,
+          color: '#CCCCCC'
+        },
+        min: 0
+      }
+    },
+    elements: {
+      point: {
+        radius: 2,
+        hoverRadius: 4
+      }
+    },
+    animation: {
+      duration: 300
+    }
+  });
+
   const renderCPUChart = () => (
     <>
       <ChartSection>
@@ -654,32 +987,90 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.memory} 
-            options={getChartOptions('Memory Usage Over Time', false, true, 100)} 
+            options={getStackedChartOptions('Memory Usage Breakdown Over Time', 'Memory (GB)')} 
           />
         </ChartContainer>
       </ChartSection>
       
       <DetailCard>
-        <h3>
-          <i className="fas fa-memory"></i>
-          Memory Details
-        </h3>
-        <MetricRow>
-          <span className="label">Usage</span>
-          <span className="value">{(systemData?.memory?.percent || 0).toFixed(1)}%</span>
-        </MetricRow>
-        <MetricRow>
-          <span className="label">Used</span>
-          <span className="value">{formatBytes(systemData?.memory?.used)}</span>
-        </MetricRow>
-        <MetricRow>
-          <span className="label">Available</span>
-          <span className="value">{formatBytes(systemData?.memory?.available)}</span>
-        </MetricRow>
-        <MetricRow>
-          <span className="label">Total</span>
-          <span className="value">{formatBytes(systemData?.memory?.total)}</span>
-        </MetricRow>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+          <h3>
+            <i className="fas fa-memory"></i>
+            Memory Details
+          </h3>
+          <ClearCacheButton onClick={handleClearCache} disabled={clearingCache}>
+            {clearingCache ? (
+              <>
+                <i className="fas fa-spinner fa-spin"></i>
+                Clearing...
+              </>
+            ) : (
+              <>
+                <i className="fas fa-broom"></i>
+                Clear Cache
+              </>
+            )}
+          </ClearCacheButton>
+        </div>
+        
+        {/* Overview */}
+        <MemorySection>
+          <h4><i className="fas fa-chart-pie"></i> Overview</h4>
+          <MetricRow>
+            <span className="label">Usage</span>
+            <span className="value">
+              {(systemData?.memory?.percent || 0).toFixed(1)}% 
+              ({systemData?.memory?.detailed?.used_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+          <MetricRow>
+            <span className="label">Total RAM</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.total)} 
+              ({systemData?.memory?.detailed?.total_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+          <MetricRow>
+            <span className="label">Available</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.available)} 
+              ({systemData?.memory?.detailed?.available_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+        </MemorySection>
+
+        {/* Detailed Breakdown */}
+        <MemorySection>
+          <h4><i className="fas fa-layer-group"></i> Memory Breakdown</h4>
+          <MetricRow>
+            <span className="label">Free</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.detailed?.free)} 
+              ({systemData?.memory?.detailed?.free_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+          <MetricRow>
+            <span className="label">Cached</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.detailed?.cached)} 
+              ({systemData?.memory?.detailed?.cached_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+          <MetricRow>
+            <span className="label">Buffers</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.detailed?.buffers)} 
+              ({systemData?.memory?.detailed?.buffers_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+          <MetricRow>
+            <span className="label">Shared</span>
+            <span className="value">
+              {formatBytes(systemData?.memory?.detailed?.shared)} 
+              ({systemData?.memory?.detailed?.shared_gb?.toFixed(2) || '0.00'} GB)
+            </span>
+          </MetricRow>
+        </MemorySection>
       </DetailCard>
     </>
   );
@@ -794,13 +1185,14 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   };
 
   return (
-    <Container>
-      <SectionHeader>
-        <h2>
-          <i className="fas fa-chart-line"></i>
-          System Monitoring
-        </h2>
-      </SectionHeader>
+    <>
+      <Container>
+        <SectionHeader>
+          <h2>
+            <i className="fas fa-chart-line"></i>
+            System Monitoring
+          </h2>
+        </SectionHeader>
 
       <StatusIndicator $connected={isConnected}>
         <div className="status-dot"></div>
@@ -892,6 +1284,53 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         {renderActiveChart()}
       </TabContainer>
     </Container>
+    
+    {/* Sudo Password Modal for Cache Clearing */}
+    {showSudoModal && (
+      <SudoModal>
+        <SudoModalContent>
+          <h3>
+            <i className="fas fa-broom"></i>
+            Clear System Cache
+          </h3>
+          <p>
+            Enter your sudo password to clear system cache and free up memory:
+          </p>
+          <SudoPasswordInput
+            type="password"
+            placeholder="Enter sudo password"
+            value={sudoPassword}
+            onChange={(e) => setSudoPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                executeCacheClear();
+              } else if (e.key === 'Escape') {
+                cancelSudoModal();
+              }
+            }}
+            autoFocus
+          />
+          <SudoModalButtons>
+            <button
+              type="button"
+              className="cancel"
+              onClick={cancelSudoModal}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="confirm"
+              onClick={executeCacheClear}
+              disabled={!sudoPassword.trim()}
+            >
+              Clear Cache
+            </button>
+          </SudoModalButtons>
+        </SudoModalContent>
+      </SudoModal>
+    )}
+    </>
   );
 };
 
