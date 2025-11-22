@@ -664,11 +664,9 @@ const ModalBody = styled.div`
   overflow-y: auto;
   flex: 1;
   min-height: 0;
-  border-radius: 0 0 16px 16px;
   
   ${props => props.theme.media.mobile} {
     padding: 15px;
-    border-radius: 0 0 12px 12px;
   }
 
   /* Custom scrollbar styling for webkit browsers */
@@ -678,7 +676,6 @@ const ModalBody = styled.div`
 
   &::-webkit-scrollbar-track {
     background: transparent;
-    border-radius: 0 0 16px 0;
   }
 
   &::-webkit-scrollbar-thumb {
@@ -688,6 +685,19 @@ const ModalBody = styled.div`
     &:hover {
       background: ${props => props.theme.colors.text.secondary};
     }
+  }
+`;
+
+const ModalFooter = styled.div`
+  padding: 20px 24px;
+  background: ${props => props.theme.colors.background.primary};
+  border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 0 0 16px 16px;
+  flex-shrink: 0;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 15px;
+    border-radius: 0 0 12px 12px;
   }
 `;
 
@@ -1000,9 +1010,6 @@ const ActionButtons = styled.div`
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  margin-top: 25px;
-  padding-top: 20px;
-  border-top: 1px solid ${props => props.theme.colors.border.secondary};
   
   ${props => props.theme.media.mobile} {
     flex-direction: column-reverse;
@@ -1664,6 +1671,31 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [editNameError, setEditNameError] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const logsTerminalRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const modalBodyRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll logs terminal to bottom when new logs are added
+  useEffect(() => {
+    // Scroll all visible log terminals to the bottom
+    activeDownloads.forEach((_, downloadId) => {
+      const terminalElement = logsTerminalRefs.current.get(downloadId);
+      if (terminalElement && showLogs.get(downloadId)) {
+        terminalElement.scrollTop = terminalElement.scrollHeight;
+      }
+    });
+  }, [logs, activeDownloads, showLogs]);
+
+  // Auto-scroll modal body when YOLO model is selected to show expanded content
+  useEffect(() => {
+    if (selectedYOLO && modalBodyRef.current) {
+      setTimeout(() => {
+        modalBodyRef.current?.scrollTo({
+          top: modalBodyRef.current.scrollHeight,
+          behavior: 'smooth'
+        });
+      }, 100);
+    }
+  }, [selectedYOLO]);
 
   // Function to restore active downloads on page load/reload
   const restoreActiveDownloads = async () => {
@@ -2528,7 +2560,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     Clear
                   </ClearLogsButton>
                 </LogsHeaderInline>
-                <LogsTerminal>
+                <LogsTerminal ref={(el) => {
+                  if (el) logsTerminalRefs.current.set(downloadId, el);
+                  else logsTerminalRefs.current.delete(downloadId);
+                }}>
                   {logs.length === 0 ? (
                     <div style={{ 
                       padding: '20px', 
@@ -2720,7 +2755,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               </CloseButton>
             </ModalHeader>
 
-          <ModalBody>
+          <ModalBody ref={modalBodyRef}>
             <OptionTabs>
               <Tab 
                 $active={activeTab === 'upload'} 
@@ -2795,19 +2830,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <option value="other">Other</option> */}
                 </select>
               </FormGroup>
-
-              <ActionButtons>
-                <Button variant="secondary" onClick={() => resetModal()}>
-                  Cancel
-                </Button>
-                <Button 
-                  variant="primary" 
-                  onClick={handleFileUpload}
-                  disabled={loading || !selectedFile || !modelName.trim() || !!nameError}
-                >
-                  {loading ? <LoadingSpinner /> : 'Upload Model'}
-                </Button>
-              </ActionButtons>
             </div>
           )}
 
@@ -2899,22 +2921,41 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   </FormatSelector>
                 </>
               )}
-
-              <ActionButtons>
-                <Button variant="secondary" onClick={() => resetModal()}>
-                  Cancel
-                </Button>
-                <Button 
-                  variant="primary" 
-                  onClick={handleYOLODownload}
-                  disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError}
-                >
-                  {loading ? <LoadingSpinner /> : 'Download & Convert'}
-                </Button>
-              </ActionButtons>
             </div>
           )}
           </ModalBody>
+
+          <ModalFooter>
+            <ActionButtons>
+              {activeTab === 'upload' ? (
+                <>
+                  <Button variant="secondary" onClick={() => resetModal()}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    onClick={handleFileUpload}
+                    disabled={loading || !selectedFile || !modelName.trim() || !!nameError}
+                  >
+                    {loading ? <LoadingSpinner /> : 'Upload Model'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="secondary" onClick={() => resetModal()}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="primary" 
+                    onClick={handleYOLODownload}
+                    disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError}
+                  >
+                    {loading ? <LoadingSpinner /> : 'Download & Convert'}
+                  </Button>
+                </>
+              )}
+            </ActionButtons>
+          </ModalFooter>
         </ModalContent>
       </Modal>,
       document.body
