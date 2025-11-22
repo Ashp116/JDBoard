@@ -811,7 +811,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   });
 
   // Stacked chart options for memory breakdown
-  const getStackedChartOptions = (title: string, yAxisLabel: string = ''): any => ({
+  const getStackedChartOptions = (title: string, yAxisLabel: string = '', dynamicMax?: number): any => ({
     responsive: true,
     maintainAspectRatio: false,
     interaction: {
@@ -876,7 +876,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           color: '#CCCCCC'
         },
         min: 0,
-        max: 8
+        max: dynamicMax || 8
       }
     },
     elements: {
@@ -980,7 +980,11 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.memory} 
-            options={getStackedChartOptions('Memory Usage Breakdown Over Time', 'Memory (GB)')} 
+            options={getStackedChartOptions(
+              'Memory Usage Breakdown Over Time', 
+              'Memory (GB)', 
+              systemData?.memory?.detailed?.total_gb
+            )} 
           />
         </ChartContainer>
       </ChartSection>

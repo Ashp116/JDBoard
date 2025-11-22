@@ -12,6 +12,9 @@ import math
 from datetime import datetime
 import logging
 
+# Import the JtopManager singleton
+from jtop_manager import JtopManager, get_jtop
+
 # Ignore SIGPIPE signal to handle broken pipe errors gracefully
 signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
@@ -69,6 +72,7 @@ After installation, you may need to reboot your system.
         
         self.monitoring = False
         self.monitor_thread = None
+        self.jtop_manager = JtopManager.get_instance()  # Use the singleton manager
         self.system_data = {
             'cpu': {'usage': 0, 'frequency': 0, 'temperature': 0, 'cores': 0},
             'memory': {'total': 0, 'used': 0, 'available': 0, 'percent': 0},
@@ -91,7 +95,7 @@ After installation, you may need to reboot your system.
         
         # Initialize with real data immediately
         self._update_system_data()
-        
+    
     def start_monitoring(self):
         """Start the background monitoring thread"""
         if not self.monitoring:
@@ -118,43 +122,43 @@ After installation, you may need to reboot your system.
                 time.sleep(0.5)
     
     def _update_system_data(self):
-        """Update all system metrics using jetson-stats only"""
+        """Update all system metrics using jetson-stats singleton"""
         try:
-            with jtop() as jt:
-                stats = jt.stats
-                
-                # CPU metrics
-                self._update_cpu_data(stats)
-                
-                # Memory metrics
-                self._update_memory_data(stats)
-                
-                # GPU metrics
-                self._update_gpu_data(stats)
-                
-                # Disk metrics
-                self._update_disk_data(stats)
-                
-                # Network metrics
-                self._update_network_data(stats)
-                
-                # Fan metrics
-                self._update_fan_data(stats)
-                
-                # Process count
-                self._update_process_data()
-                
-                # System logs
-                self._update_system_logs()
-                
-                # System info with jtop object for board access
-                self._update_system_info(stats, jt)
-                
-                # Update timestamp
-                self.system_data['last_updated'] = datetime.now().isoformat()
-                
-                # Clear any previous errors on successful update
-                self.system_data['error'] = None
+            jt = self.jtop_manager.get_jtop()
+            stats = jt.stats
+            
+            # CPU metrics
+            self._update_cpu_data(stats)
+            
+            # Memory metrics
+            self._update_memory_data(stats)
+            
+            # GPU metrics
+            self._update_gpu_data(stats)
+            
+            # Disk metrics
+            self._update_disk_data(stats)
+            
+            # Network metrics
+            self._update_network_data(stats)
+            
+            # Fan metrics
+            self._update_fan_data(stats)
+            
+            # Process count
+            self._update_process_data()
+            
+            # System logs
+            self._update_system_logs()
+            
+            # System info with jtop object for board access
+            self._update_system_info(stats, jt)
+            
+            # Update timestamp
+            self.system_data['last_updated'] = datetime.now().isoformat()
+            
+            # Clear any previous errors on successful update
+            self.system_data['error'] = None
                 
         except BrokenPipeError:
             # Handle broken pipe specifically - this is usually a temporary connection issue
@@ -609,21 +613,21 @@ After installation, you may need to reboot your system.
         return self.system_data['gpu']
     
     def get_cpu_cores_usage(self):
-        """Get per-core CPU usage from jetson-stats"""
+        """Get per-core CPU usage from jetson-stats singleton"""
         try:
-            with jtop() as jt:
-                stats = jt.stats
-                cores_usage = []
-                
-                # Look for individual CPU cores (CPU1, CPU2, etc.)
-                cpu_keys = [key for key in stats.keys() if key.startswith('CPU') and key[3:].isdigit()]
-                cpu_keys.sort()  # Sort to get consistent order
-                
-                for key in cpu_keys:
-                    if isinstance(stats[key], (int, float)):
-                        cores_usage.append(safe_float(stats[key]))
-                
-                return cores_usage if cores_usage else [self.system_data['cpu']['usage']]
+            jt = self.jtop_manager.get_jtop()
+            stats = jt.stats
+            cores_usage = []
+            
+            # Look for individual CPU cores (CPU1, CPU2, etc.)
+            cpu_keys = [key for key in stats.keys() if key.startswith('CPU') and key[3:].isdigit()]
+            cpu_keys.sort()  # Sort to get consistent order
+            
+            for key in cpu_keys:
+                if isinstance(stats[key], (int, float)):
+                    cores_usage.append(safe_float(stats[key]))
+            
+            return cores_usage if cores_usage else [self.system_data['cpu']['usage']]
                 
         except Exception as e:
             logger.debug(f"Error getting CPU cores usage: {e}")
@@ -640,7 +644,7 @@ After installation, you may need to reboot your system.
         return []
     
     def get_jetson_info(self):
-        """Get Jetson-specific information from jetson-stats"""
+        """Get Jetson-specific information from jetson-stats singleton"""
         info = {
             'nvp_model': self.system_data.get('nvp_model', 'Unknown'),
             'jetson_model': self.system_data.get('jetson_model', 'Unknown'),
@@ -650,16 +654,16 @@ After installation, you may need to reboot your system.
             'board_name': 'Unknown'
         }
         
-        # Try to get additional info from jetson-stats
+        # Try to get additional info from jetson-stats singleton
         try:
-            with jtop() as jt:
-                stats = jt.stats
-                
-                # Board information
-                if 'board' in stats:
-                    board_info = stats['board']
-                    if isinstance(board_info, dict):
-                        info['board_name'] = str(board_info.get('model', board_info.get('name', 'Unknown')))
+            jt = self.jtop_manager.get_jtop()
+            stats = jt.stats
+            
+            # Board information
+            if 'board' in stats:
+                board_info = stats['board']
+                if isinstance(board_info, dict):
+                    info['board_name'] = str(board_info.get('model', board_info.get('name', 'Unknown')))
                 
         except Exception as e:
             logger.debug(f"Error getting Jetson info: {e}")
@@ -667,70 +671,55 @@ After installation, you may need to reboot your system.
         return info
     
     def restart_jtop_connection(self):
-        """Restart the jtop connection after service installation"""
+        """Restart the jtop singleton connection after service installation"""
         logger.info("Restarting jtop connection...")
         
         # Clear any existing error state
         self.system_data['error'] = None
         
-        # Wait a moment for the service to be fully ready
-        time.sleep(2)
-        
-        # Try multiple times to reconnect with complete reinitialization
-        for attempt in range(3):
-            try:
-                logger.info(f"Attempting jtop reconnection (attempt {attempt + 1}/3)")
-                
-                # Force complete reinitialization by calling jtop() fresh each time
-                # This ensures we don't reuse any corrupted connection state
-                success = self._force_jtop_reconnection()
-                
-                if success:
-                    logger.info("jtop connection restarted successfully")
-                    return
-                else:
-                    logger.warning(f"jtop reconnection attempt {attempt + 1} failed")
-                    
-            except Exception as e:
-                logger.warning(f"jtop connection attempt {attempt + 1} failed: {e}")
-                
-            if attempt < 2:  # Don't wait after the last attempt
-                time.sleep(3)
-        
-        logger.error("Failed to restart jtop connection after 3 attempts")
+        # Use the manager's restart method
+        try:
+            self.jtop_manager.restart()
+            logger.info("jtop connection restarted successfully")
+            
+            # Test the connection
+            self._force_jtop_reconnection()
+        except Exception as e:
+            logger.error(f"Failed to restart jtop connection: {e}")
 
     def _force_jtop_reconnection(self):
-        """Force a complete jtop reconnection by creating a new connection"""
+        """Test and update system data using the singleton jtop connection"""
         try:
             # Set up signal handling for this specific operation
             old_handler = signal.signal(signal.SIGPIPE, signal.SIG_IGN)
             
             try:
-                # Create a completely fresh jtop connection
-                with jtop() as jt:
-                    # Test the connection by reading some basic stats
-                    stats = jt.stats
+                # Use the singleton jtop connection
+                jt = self.jtop_manager.get_jtop()
+                
+                # Test the connection by reading some basic stats
+                stats = jt.stats
+                
+                # If we can read stats, the connection is working
+                if stats:
+                    # Update our system data with the fresh connection
+                    self._update_cpu_data(stats)
+                    self._update_memory_data(stats)
+                    self._update_gpu_data(stats)
+                    self._update_disk_data(stats)
+                    self._update_network_data(stats)
+                    self._update_fan_data(stats)
+                    self._update_process_data()
+                    self._update_system_logs()
+                    self._update_system_info(stats, jt)
+                    self.system_data['last_updated'] = datetime.now().isoformat()
+                    self.system_data['error'] = None
                     
-                    # If we can read stats, the connection is working
-                    if stats:
-                        # Update our system data with the fresh connection
-                        self._update_cpu_data(stats)
-                        self._update_memory_data(stats)
-                        self._update_gpu_data(stats)
-                        self._update_disk_data(stats)
-                        self._update_network_data(stats)
-                        self._update_fan_data(stats)
-                        self._update_process_data()
-                        self._update_system_logs()
-                        self._update_system_info(stats, jt)
-                        self.system_data['last_updated'] = datetime.now().isoformat()
-                        self.system_data['error'] = None
-                        
-                        logger.info("Successfully tested new jtop connection")
-                        return True
-                    else:
-                        logger.warning("jtop connection established but no stats available")
-                        return False
+                    logger.info("Successfully tested jtop singleton connection")
+                    return True
+                else:
+                    logger.warning("jtop connection established but no stats available")
+                    return False
             finally:
                 # Restore the original signal handler
                 signal.signal(signal.SIGPIPE, old_handler)
@@ -748,7 +737,7 @@ After installation, you may need to reboot your system.
         
         # Stop current monitoring
         was_monitoring = self.monitoring
-        self.stop_monitoring()
+        self.stop_monitoring()  # This also closes the jtop connection
         
         # Wait for thread to fully stop
         time.sleep(3)
@@ -759,16 +748,16 @@ After installation, you may need to reboot your system.
         # Wait additional time for jtop service to be fully ready
         time.sleep(5)
         
-        # Test jtop connection before restarting monitoring
+        # Restart the jtop connection through the manager
         max_retries = 5
         for attempt in range(max_retries):
             try:
-                with jtop() as jt:
-                    # Try to read stats to verify connection works
-                    stats = jt.stats
-                    if stats:
-                        logger.info(f"jtop connection verified on attempt {attempt + 1}")
-                        break
+                # Use the manager's restart functionality
+                if self.jtop_manager.restart():
+                    logger.info(f"jtop connection verified on attempt {attempt + 1}")
+                    break
+                else:
+                    raise Exception("Manager restart returned False")
             except Exception as e:
                 logger.warning(f"jtop connection test failed (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
