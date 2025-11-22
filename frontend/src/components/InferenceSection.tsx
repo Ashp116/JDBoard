@@ -2014,22 +2014,104 @@ const StatusTooltip = styled.div`
   }
 `;
 
+const PaginationTop = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 0;
+  margin-bottom: 16px;
+
+  .pagination-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pagination-info {
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .pagination-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    
+    .pagination-left {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+`;
+
+const PageSizeSelector = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  label {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  select {
+    padding: 6px 12px;
+    background: ${props => props.theme.colors.background.tertiary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    cursor: pointer;
+    outline: none;
+
+    &:hover {
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+
+    &:focus {
+      border-color: ${props => props.theme.colors.nvidia.green};
+      box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.2);
+    }
+  }
+`;
+
 const Pagination = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  background: ${props => props.theme.colors.background.primary};
+  background: ${props => props.theme.colors.background.secondary};
   border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 0 0 12px 12px;
+  margin-top: 0;
 
   .pagination-info {
-    color: ${props => props.theme.colors.text.secondary};
+    color: ${props => props.theme.colors.text.primary};
     font-size: 14px;
+    font-weight: 500;
   }
 
   .pagination-controls {
     display: flex;
     gap: 10px;
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
   }
 `;
 
@@ -2046,9 +2128,20 @@ const PaginationButton = styled.button<{disabled?: boolean}>`
   cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
   transition: all ${props => props.theme.transitions.standard};
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  i {
+    font-size: 12px;
+  }
 
   &:hover:not(:disabled) {
     background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+
+  &:disabled {
+    opacity: 0.5;
   }
 `;
 
@@ -3767,6 +3860,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       if (data.success) {
         setInferenceLogs(data.data.logs || []);
         setPagination({
+          page: data.data.page || 1,
+          per_page: data.data.per_page || 20,
+          total: data.data.total || 0,
+          pages: data.data.pages || 1
+        });
+        console.log('Pagination data:', {
           page: data.data.page,
           per_page: data.data.per_page,
           total: data.data.total,
@@ -3829,6 +3928,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const handlePageChange = (newPage: number) => {
     const newFilters = { ...filters, page: newPage };
+    setFilters(newFilters);
+    fetchInferenceLogs(newFilters);
+  };
+
+  const handlePageSizeChange = (newPageSize: number) => {
+    const newFilters = { ...filters, per_page: newPageSize, page: 1 };
     setFilters(newFilters);
     fetchInferenceLogs(newFilters);
   };
@@ -5465,6 +5570,49 @@ print(result)`)}>
                 {viewMode === 'table' ? (
                   /* Table View */
                   <>
+                    {/* Pagination Controls at Top */}
+                    {inferenceLogs.length > 0 && (
+                      <PaginationTop>
+                        <div className="pagination-left">
+                          <span className="pagination-info">
+                            Showing {((pagination.page || 1) - 1) * (pagination.per_page || 20) + 1} to {Math.min((pagination.page || 1) * (pagination.per_page || 20), pagination.total || 0)} of {pagination.total || 0} entries
+                          </span>
+                          <PageSizeSelector>
+                            <label>Show:</label>
+                            <select 
+                              value={filters.per_page} 
+                              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                            >
+                              <option value={10}>10</option>
+                              <option value={20}>20</option>
+                              <option value={50}>50</option>
+                              <option value={100}>100</option>
+                            </select>
+                            <label>entries</label>
+                          </PageSizeSelector>
+                        </div>
+                        <div className="pagination-controls">
+                          <PaginationButton
+                            onClick={() => handlePageChange(pagination.page - 1)}
+                            disabled={pagination.page <= 1}
+                          >
+                            <i className="fas fa-chevron-left" />
+                            Previous
+                          </PaginationButton>
+                          <span className="pagination-info">
+                            Page {pagination.page || 1} of {pagination.pages || 1}
+                          </span>
+                          <PaginationButton
+                            onClick={() => handlePageChange(pagination.page + 1)}
+                            disabled={pagination.page >= pagination.pages}
+                          >
+                            Next
+                            <i className="fas fa-chevron-right" />
+                          </PaginationButton>
+                        </div>
+                      </PaginationTop>
+                    )}
+
                     {/* Logs Table */}
                     <Table>
                       <thead>
@@ -5531,22 +5679,22 @@ print(result)`)}>
                   </tbody>
                 </Table>
 
-                {/* Pagination */}
-                {pagination.pages > 1 && (
+                {/* Bottom Pagination */}
+                {inferenceLogs.length > 0 && (
                   <Pagination>
                     <PaginationButton
                       onClick={() => handlePageChange(pagination.page - 1)}
-                      disabled={pagination.page === 1}
+                      disabled={pagination.page <= 1}
                     >
                       <i className="fas fa-chevron-left" />
                       Previous
                     </PaginationButton>
                     <span className="pagination-info">
-                      Page {pagination.page} of {pagination.pages} ({pagination.total} total)
+                      Page {pagination.page || 1} of {pagination.pages || 1}
                     </span>
                     <PaginationButton
                       onClick={() => handlePageChange(pagination.page + 1)}
-                      disabled={pagination.page === pagination.pages}
+                      disabled={pagination.page >= pagination.pages}
                     >
                       Next
                       <i className="fas fa-chevron-right" />
