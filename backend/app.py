@@ -1762,28 +1762,28 @@ def toggle_jetson_clocks():
 
 @app.route('/system/power-modes', methods=['GET'])
 def get_power_modes():
-    """Get available power modes from jtop"""
+    """Get available power modes from jtop singleton"""
     try:
-        from jtop import jtop
+        # Use system_monitor's singleton jtop connection
+        jetson = system_monitor._get_jtop()
         
-        with jtop() as jetson:
-            if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
-                # Get available power modes
-                available_modes = jetson.nvpmodel.models if hasattr(jetson.nvpmodel, 'models') else []
-                current_mode = jetson.nvpmodel.name if hasattr(jetson.nvpmodel, 'name') else 'Unknown'
-                
-                return jsonify({
-                    'success': True,
-                    'available_modes': available_modes,
-                    'current_mode': current_mode
-                })
-            else:
-                # Fallback to default modes if jtop is not available
-                return jsonify({
-                    'success': True,
-                    'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
-                    'current_mode': 'MAXN_SUPER'
-                })
+        if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
+            # Get available power modes
+            available_modes = jetson.nvpmodel.models if hasattr(jetson.nvpmodel, 'models') else []
+            current_mode = jetson.nvpmodel.name if hasattr(jetson.nvpmodel, 'name') else 'Unknown'
+            
+            return jsonify({
+                'success': True,
+                'available_modes': available_modes,
+                'current_mode': current_mode
+            })
+        else:
+            # Fallback to default modes if jtop is not available
+            return jsonify({
+                'success': True,
+                'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
+                'current_mode': 'MAXN_SUPER'
+            })
                 
     except Exception as e:
         logger.error(f"Error getting power modes: {str(e)}")
@@ -1805,18 +1805,18 @@ def set_power_mode():
         if not sudo_password:
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
-        # Get available modes from jtop to create dynamic mapping
+        # Get available modes from jtop singleton to create dynamic mapping
         try:
-            from jtop import jtop
+            # Use system_monitor's singleton jtop connection
+            jetson = system_monitor._get_jtop()
             
-            with jtop() as jetson:
-                if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
-                    available_modes = jetson.nvpmodel.models
-                    # Create mode to ID mapping based on array index
-                    mode_map = {mode_name: idx for idx, mode_name in enumerate(available_modes)}
-                else:
-                    # Fallback mapping
-                    mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
+            if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
+                available_modes = jetson.nvpmodel.models
+                # Create mode to ID mapping based on array index
+                mode_map = {mode_name: idx for idx, mode_name in enumerate(available_modes)}
+            else:
+                # Fallback mapping
+                mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
         except:
             # Fallback mapping if jtop fails
             mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
@@ -2924,13 +2924,14 @@ def get_terminal_user_info():
         }), 500
 
 def get_jetpack_version():
-    """Get JetPack version"""
-    with jtop() as jt:
-        try:
-            jetpack_version = jt.board['hardware'].get('Jetpack', 'Unknown')
-            return jetpack_version
-        except Exception:
-            return 'Unknown'
+    """Get JetPack version from singleton"""
+    try:
+        # Use system_monitor's singleton jtop connection
+        jt = system_monitor._get_jtop()
+        jetpack_version = jt.board['hardware'].get('Jetpack', 'Unknown')
+        return jetpack_version
+    except Exception:
+        return 'Unknown'
 
 def get_kernel_version():
     """Get kernel version"""
@@ -2941,22 +2942,23 @@ def get_kernel_version():
         return 'Unknown'
 
 def get_jtop_board_info():
-    """Get jtop board information"""
+    """Get jtop board information from singleton"""
     try:
-        with jtop() as jt:
-            # Wait for data to be available
-            time.sleep(0.1)
+        # Use system_monitor's singleton jtop connection
+        jt = system_monitor._get_jtop()
+        # Wait for data to be available
+        time.sleep(0.1)
+        
+        board_info = {}
+        
+        # Get board information
+        if hasattr(jt, 'board') and jt.board:
+            if 'hardware' in jt.board:
+                board_info['Model'] = jt.board['hardware']['Model']
+                board_info['Module'] = jt.board['hardware']['Module']
             
-            board_info = {}
-            
-            # Get board information
-            if hasattr(jt, 'board') and jt.board:
-                if 'hardware' in jt.board:
-                    board_info['Model'] = jt.board['hardware']['Model']
-                    board_info['Module'] = jt.board['hardware']['Module']
-                
-            
-            return board_info
+        
+        return board_info
             
     except Exception as e:
         logger.error(f"Error getting jtop board info: {str(e)}")
