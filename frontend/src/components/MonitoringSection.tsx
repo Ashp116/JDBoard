@@ -17,6 +17,7 @@ import { Line, Bar } from 'react-chartjs-2';
 import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
 // Styled component interfaces
 interface StyledConnectionProps {
@@ -305,54 +306,6 @@ const MemorySection = styled.div`
     i {
       color: ${props => props.theme.colors.nvidia.green};
     }
-  }
-`;
-
-const SudoModal = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: ${props => props.theme.zIndex?.modal || 1000};
-  backdrop-filter: blur(5px);
-`;
-
-const SudoModalContent = styled.div`
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 16px;
-  padding: 24px;
-  min-width: 400px;
-  max-width: 500px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  
-  ${props => props.theme.media?.mobile} {
-    min-width: 90vw;
-    margin: 20px;
-    padding: 20px;
-  }
-  
-  h3 {
-    margin: 0 0 16px 0;
-    color: ${props => props.theme.colors.text.primary};
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-    }
-  }
-  
-  p {
-    color: ${props => props.theme.colors.text.secondary};
-    margin: 0 0 20px 0;
-    line-height: 1.5;
   }
 `;
 
@@ -1283,50 +1236,55 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
     </Container>
     
     {/* Sudo Password Modal for Cache Clearing */}
-    {showSudoModal && (
-      <SudoModal>
-        <SudoModalContent>
-          <h3>
-            <i className="fas fa-broom"></i>
-            Clear System Cache
-          </h3>
-          <p>
-            Enter your sudo password to clear system cache and free up memory:
-          </p>
-          <SudoPasswordInput
-            type="password"
-            placeholder="Enter sudo password"
-            value={sudoPassword}
-            onChange={(e) => setSudoPassword(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                executeCacheClear();
-              } else if (e.key === 'Escape') {
-                cancelSudoModal();
-              }
-            }}
-            autoFocus
-          />
-          <SudoModalButtons>
-            <button
-              type="button"
-              className="cancel"
-              onClick={cancelSudoModal}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="confirm"
-              onClick={executeCacheClear}
-              disabled={!sudoPassword.trim()}
-            >
-              Clear Cache
-            </button>
-          </SudoModalButtons>
-        </SudoModalContent>
-      </SudoModal>
-    )}
+    <Modal isOpen={showSudoModal} onClose={cancelSudoModal} maxWidth="500px">
+      <ModalHeader>
+        <h3>
+          <i className="fas fa-broom"></i>
+          Clear System Cache
+        </h3>
+        <ModalCloseButton onClick={cancelSudoModal}>
+          <i className="fas fa-times"></i>
+        </ModalCloseButton>
+      </ModalHeader>
+      <ModalBody>
+        <p style={{ color: 'var(--text-secondary)', margin: '0 0 20px 0', lineHeight: '1.5' }}>
+          Enter your sudo password to clear system cache and free up memory:
+        </p>
+        <SudoPasswordInput
+          type="password"
+          placeholder="Enter sudo password"
+          value={sudoPassword}
+          onChange={(e) => setSudoPassword(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              executeCacheClear();
+            } else if (e.key === 'Escape') {
+              cancelSudoModal();
+            }
+          }}
+          autoFocus
+        />
+      </ModalBody>
+      <ModalFooter>
+        <SudoModalButtons>
+          <button
+            type="button"
+            className="cancel"
+            onClick={cancelSudoModal}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="confirm"
+            onClick={executeCacheClear}
+            disabled={!sudoPassword.trim()}
+          >
+            Clear Cache
+          </button>
+        </SudoModalButtons>
+      </ModalFooter>
+    </Modal>
     </>
   );
 };

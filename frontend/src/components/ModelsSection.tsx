@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import styled from 'styled-components';
 import { ModelsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
 // Model-related interfaces
 interface ModelInfo {
@@ -558,147 +558,6 @@ const ClearLogsButton = styled.button`
 
 const LogsContainer = styled.div`
   position: relative;
-`;
-
-const Modal = styled.div<{ $show: boolean }>`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  z-index: ${props => props.theme.zIndex.modal};
-  display: ${props => props.$show ? 'flex' : 'none'};
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  backdrop-filter: blur(5px);
-  
-  ${props => props.theme.media.mobile} {
-    padding: 10px;
-    align-items: flex-start;
-    padding-top: 20px;
-  }
-`;
-
-const ModalContent = styled.div`
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 16px;
-  max-width: 650px;
-  width: 100%;
-  max-height: 90vh;
-  position: relative;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-  
-  ${props => props.theme.media.mobile} {
-    max-width: 100%;
-    max-height: 95vh;
-    border-radius: 12px;
-    margin: 0;
-  }
-`;
-
-const ModalHeader = styled.div`
-  padding: 24px;
-  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
-  flex-shrink: 0;
-  border-radius: 16px 16px 0 0;
-  
-  ${props => props.theme.media.mobile} {
-    padding: 15px;
-    border-radius: 12px 12px 0 0;
-  }
-
-  h3 {
-    color: ${props => props.theme.colors.text.primary};
-    margin: 0;
-    font-size: 20px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    
-    ${props => props.theme.media.mobile} {
-      font-size: 18px;
-      gap: 8px;
-    }
-
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-      font-size: 18px;
-      
-      ${props => props.theme.media.mobile} {
-        font-size: 16px;
-      }
-    }
-  }
-`;
-
-const CloseButton = styled.button`
-  position: absolute;
-  top: 15px;
-  right: 15px;
-  background: transparent;
-  border: none;
-  color: ${props => props.theme.colors.text.secondary};
-  cursor: pointer;
-  font-size: 18px;
-  padding: 5px;
-
-  &:hover {
-    color: ${props => props.theme.colors.text.primary};
-  }
-`;
-
-const ModalBody = styled.div`
-  padding: 24px;
-  background: ${props => props.theme.colors.background.primary};
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  
-  ${props => props.theme.media.mobile} {
-    padding: 15px;
-  }
-
-  /* Custom scrollbar styling for webkit browsers */
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: ${props => props.theme.colors.border.secondary};
-    border-radius: 4px;
-    
-    &:hover {
-      background: ${props => props.theme.colors.text.secondary};
-    }
-  }
-`;
-
-const ModalFooter = styled.div`
-  padding: 20px 24px;
-  background: ${props => props.theme.colors.background.primary};
-  border-top: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 0 0 16px 16px;
-  flex-shrink: 0;
-  
-  ${props => props.theme.media.mobile} {
-    padding: 15px;
-    border-radius: 0 0 12px 12px;
-  }
 `;
 
 const OptionTabs = styled.div`
@@ -2742,18 +2601,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </ModelsList>
       )}
 
-      {showModal && createPortal(
-        <Modal $show={showModal}>
-          <ModalContent>
-            <ModalHeader>
-              <h3>
-                <i className="fas fa-plus"></i>
-                Add New Model
-              </h3>
-              <CloseButton onClick={() => resetModal()}>
-                <i className="fas fa-times"></i>
-              </CloseButton>
-            </ModalHeader>
+      {showModal && (
+        <Modal isOpen={showModal} onClose={() => resetModal()}>
+          <ModalHeader>
+            <h3>
+              <i className="fas fa-plus"></i>
+              Add New Model
+            </h3>
+            <ModalCloseButton onClick={() => resetModal()}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
 
           <ModalBody ref={modalBodyRef}>
             <OptionTabs>
@@ -2956,10 +2814,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               )}
             </ActionButtons>
           </ModalFooter>
-        </ModalContent>
-      </Modal>,
-      document.body
-    )}
+        </Modal>
+      )}
     </Container>
   );
 };
