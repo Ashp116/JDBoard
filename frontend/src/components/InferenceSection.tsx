@@ -2695,132 +2695,6 @@ const ClickableTableRow = styled.tr`
   }
 `;
 
-const Modal = styled.div<{$isOpen: boolean}>`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  z-index: ${props => props.theme.zIndex.modal};
-  display: ${props => props.$isOpen ? 'flex' : 'none'};
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  backdrop-filter: blur(5px);
-`;
-
-const ModalContent = styled.div`
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 16px;
-  max-width: 900px;
-  width: 100%;
-  max-height: 90vh;
-  position: relative;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-  
-  /* Mobile styles */
-  @media (max-width: 767px) {
-    width: 95%;
-    max-height: 95vh;
-    border-radius: 8px;
-    max-width: none;
-  }\n`;
-
-const ModalHeader = styled.div`
-  padding: 24px;
-  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
-  flex-shrink: 0;
-  border-radius: 16px 16px 0 0;
-  
-  h3 {
-    margin: 0;
-    color: ${props => props.theme.colors.text.primary};
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 20px;
-    font-weight: 600;
-    
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-      font-size: 18px;
-    }
-    
-    /* Mobile responsive */
-    @media (max-width: 767px) {
-      font-size: 18px;
-      gap: 8px;
-      
-      i {
-        font-size: 16px;
-      }
-    }
-  }
-  
-  /* Mobile styles */
-  @media (max-width: 767px) {
-    padding: 16px;
-    border-radius: 8px 8px 0 0;
-  }
-`;
-
-const ModalCloseButton = styled.button`
-  position: absolute;
-  top: 15px;
-  right: 15px;
-  background: transparent;
-  border: none;
-  color: ${props => props.theme.colors.text.secondary};
-  cursor: pointer;
-  font-size: 18px;
-  padding: 5px;
-  
-  &:hover {
-    color: ${props => props.theme.colors.text.primary};
-  }
-`;
-
-const ModalBody = styled.div`
-  padding: 24px;
-  background: ${props => props.theme.colors.background.primary};
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  border-radius: 0 0 16px 16px;
-
-  /* Custom scrollbar styling for webkit browsers */
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 0 0 16px 0;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: ${props => props.theme.colors.border.secondary};
-    border-radius: 4px;
-    
-    &:hover {
-      background: ${props => props.theme.colors.text.secondary};
-    }
-  }
-
-  /* For Firefox */
-  scrollbar-width: thin;
-  scrollbar-color: ${props => props.theme.colors.border.secondary} transparent;
-`;
-
 const DetailGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -5817,26 +5691,24 @@ print(result)`)}>
       )}
       
       {/* Log Details Modal */}
-      {isModalOpen && createPortal(
-        <Modal $isOpen={isModalOpen} onClick={closeModal}>
-        <ModalContent onClick={(e) => e.stopPropagation()}>
-          <ModalCloseButton onClick={closeModal}>
-            <i className="fas fa-times" />
-          </ModalCloseButton>
-          
-          {selectedLogForModal && (
-            <>
-              <ModalHeader>
-                <h3>
-                  <i className="fas fa-analytics" />
-                  Inference Log Details
-                  <span style={{fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '12px'}}>
-                    #{selectedLogForModal.id}
-                  </span>
-                </h3>
-              </ModalHeader>
-              
-              <ModalBody>
+      <Modal isOpen={isModalOpen} onClose={closeModal} maxWidth="900px">
+        <ModalCloseButton onClick={closeModal}>
+          <i className="fas fa-times" />
+        </ModalCloseButton>
+        
+        {selectedLogForModal && (
+          <>
+            <ModalHeader>
+              <h3>
+                <i className="fas fa-analytics" />
+                Inference Log Details
+                <span style={{fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '12px'}}>
+                  #{selectedLogForModal.id}
+                </span>
+              </h3>
+            </ModalHeader>
+            
+            <ModalBody>
                 <DetailGrid>
                   <DetailCard>
                     <h4>
@@ -6027,10 +5899,7 @@ print(result)`)}>
               </ModalBody>
             </>
           )}
-        </ModalContent>
-      </Modal>,
-      document.body
-      )}
+      </Modal>
     </Container>
   );
 };
