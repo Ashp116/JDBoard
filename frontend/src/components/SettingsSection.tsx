@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
 // Styled component interfaces
 interface StyledActiveProps {
@@ -250,47 +250,6 @@ const Button = styled.button<StyledVariantProps>`
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-`;
-
-const Modal = styled.div`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: ${props => props.theme.zIndex.modal};
-  backdrop-filter: blur(5px);
-`;
-
-const ModalContent = styled.div`
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 12px;
-  padding: 24px;
-  min-width: 400px;
-  max-width: 500px;
-
-  h3 {
-    color: ${props => props.theme.colors.text.primary};
-    margin: 0 0 16px 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-    }
-  }
-
-  p {
-    color: ${props => props.theme.colors.text.secondary};
-    margin: 0 0 16px 0;
-    line-height: 1.5;
   }
 `;
 
@@ -1237,56 +1196,59 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       </SettingsGrid>
 
       {/* Sudo Password Modal */}
-      {sudoModal.show && createPortal(
-        <Modal>
-          <ModalContent>
-            <h3>
-              <i className="fas fa-lock"></i>
-              Administrator Authentication Required
-            </h3>
-            <p>
-              To {sudoModal.action}, please enter your sudo password:
+      <Modal isOpen={sudoModal.show} onClose={handleSudoCancel} maxWidth="500px">
+        <ModalHeader>
+          <h3>
+            <i className="fas fa-lock"></i>
+            Administrator Authentication Required
+          </h3>
+          <ModalCloseButton onClick={handleSudoCancel}>
+            <i className="fas fa-times"></i>
+          </ModalCloseButton>
+        </ModalHeader>
+        <ModalBody>
+          <p style={{ color: 'var(--text-secondary)', margin: '0 0 16px 0', lineHeight: '1.5' }}>
+            To {sudoModal.action}, please enter your sudo password:
+          </p>
+          
+          <PasswordInput
+            type="password"
+            placeholder="Enter sudo password"
+            value={sudoModal.password}
+            onChange={(e) => setSudoModal(prev => ({ 
+              ...prev, 
+              password: e.target.value,
+              error: '' 
+            }))}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleSudoSubmit();
+              }
+            }}
+            autoFocus
+          />
+          
+          {sudoModal.error && (
+            <p style={{ color: '#FF6B6B', fontSize: '14px', margin: '0 0 16px 0' }}>
+              {sudoModal.error}
             </p>
-            
-            <PasswordInput
-              type="password"
-              placeholder="Enter sudo password"
-              value={sudoModal.password}
-              onChange={(e) => setSudoModal(prev => ({ 
-                ...prev, 
-                password: e.target.value,
-                error: '' 
-              }))}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleSudoSubmit();
-                }
-              }}
-              autoFocus
-            />
-            
-            {sudoModal.error && (
-              <p style={{ color: '#FF6B6B', fontSize: '14px', margin: '0 0 16px 0' }}>
-                {sudoModal.error}
-              </p>
-            )}
-            
-            <ModalButtons>
-              <Button $variant="normal" onClick={handleSudoCancel}>
-                Cancel
-              </Button>
-              <Button 
-                $variant="normal"
-                onClick={handleSudoSubmit}
-                disabled={!sudoModal.password.trim()}
-              >
-                Authenticate
-              </Button>
-            </ModalButtons>
-          </ModalContent>
-        </Modal>,
-        document.body
-      )}
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <ModalButtons>
+            <Button $variant="normal" onClick={handleSudoCancel}>
+              Cancel
+            </Button>
+            <Button 
+              $variant="normal"
+              onClick={handleSudoSubmit}
+              disabled={!sudoModal.password.trim()}
+            >
+              Authenticate
+            </Button>
+          </ModalButtons>
+        </ModalFooter>
+      </Modal>
     </Container>
   );
 };

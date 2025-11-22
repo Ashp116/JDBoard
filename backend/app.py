@@ -1270,9 +1270,16 @@ def get_inference_logs():
             device_info=filter_device_info
         )
         
+        # Flatten the response structure
         return jsonify({
             'success': True,
-            'data': logs
+            'data': {
+                'logs': logs.get('logs', []),
+                'page': logs.get('pagination', {}).get('page', page),
+                'per_page': logs.get('pagination', {}).get('per_page', per_page),
+                'total': logs.get('pagination', {}).get('total', 0),
+                'pages': logs.get('pagination', {}).get('pages', 0)
+            }
         })
     except Exception as e:
         logger.error(f"Error getting inference logs: {str(e)}")

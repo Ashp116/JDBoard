@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import styled, { createGlobalStyle } from 'styled-components';
 import DatePicker from 'react-datepicker';
@@ -19,6 +18,7 @@ import {
 } from 'chart.js';
 import { Line, Bar, Doughnut } from 'react-chartjs-2';
 import { InferenceSectionProps } from '../types';
+import Modal, { ModalHeader, ModalBody, ModalCloseButton } from './shared/Modal';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
 
@@ -2014,22 +2014,104 @@ const StatusTooltip = styled.div`
   }
 `;
 
+const PaginationTop = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 0;
+  margin-bottom: 16px;
+
+  .pagination-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .pagination-info {
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .pagination-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    
+    .pagination-left {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
+    }
+  }
+`;
+
+const PageSizeSelector = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  label {
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  select {
+    padding: 6px 12px;
+    background: ${props => props.theme.colors.background.tertiary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+    cursor: pointer;
+    outline: none;
+
+    &:hover {
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+
+    &:focus {
+      border-color: ${props => props.theme.colors.nvidia.green};
+      box-shadow: 0 0 0 2px rgba(118, 185, 0, 0.2);
+    }
+  }
+`;
+
 const Pagination = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 20px;
-  background: ${props => props.theme.colors.background.primary};
+  background: ${props => props.theme.colors.background.secondary};
   border-top: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 0 0 12px 12px;
+  margin-top: 0;
 
   .pagination-info {
-    color: ${props => props.theme.colors.text.secondary};
+    color: ${props => props.theme.colors.text.primary};
     font-size: 14px;
+    font-weight: 500;
   }
 
   .pagination-controls {
     display: flex;
     gap: 10px;
+  }
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
   }
 `;
 
@@ -2046,9 +2128,20 @@ const PaginationButton = styled.button<{disabled?: boolean}>`
   cursor: ${props => props.disabled ? 'not-allowed' : 'pointer'};
   transition: all ${props => props.theme.transitions.standard};
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  i {
+    font-size: 12px;
+  }
 
   &:hover:not(:disabled) {
     background: ${props => props.theme.colors.nvidia.darkGreen};
+  }
+
+  &:disabled {
+    opacity: 0.5;
   }
 `;
 
@@ -2693,132 +2786,6 @@ const ClickableTableRow = styled.tr`
   &:hover {
     background: ${props => props.theme.colors.background.tertiary} !important;
   }
-`;
-
-const Modal = styled.div<{$isOpen: boolean}>`
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.8);
-  z-index: ${props => props.theme.zIndex.modal};
-  display: ${props => props.$isOpen ? 'flex' : 'none'};
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  backdrop-filter: blur(5px);
-`;
-
-const ModalContent = styled.div`
-  background: ${props => props.theme.colors.background.secondary};
-  border: 1px solid ${props => props.theme.colors.border.secondary};
-  border-radius: 16px;
-  max-width: 900px;
-  width: 100%;
-  max-height: 90vh;
-  position: relative;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(10px);
-  display: flex;
-  flex-direction: column;
-  
-  /* Mobile styles */
-  @media (max-width: 767px) {
-    width: 95%;
-    max-height: 95vh;
-    border-radius: 8px;
-    max-width: none;
-  }\n`;
-
-const ModalHeader = styled.div`
-  padding: 24px;
-  border-bottom: 1px solid ${props => props.theme.colors.border.secondary};
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(135deg, ${props => props.theme.colors.background.secondary} 0%, ${props => props.theme.colors.background.primary} 100%);
-  flex-shrink: 0;
-  border-radius: 16px 16px 0 0;
-  
-  h3 {
-    margin: 0;
-    color: ${props => props.theme.colors.text.primary};
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-size: 20px;
-    font-weight: 600;
-    
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-      font-size: 18px;
-    }
-    
-    /* Mobile responsive */
-    @media (max-width: 767px) {
-      font-size: 18px;
-      gap: 8px;
-      
-      i {
-        font-size: 16px;
-      }
-    }
-  }
-  
-  /* Mobile styles */
-  @media (max-width: 767px) {
-    padding: 16px;
-    border-radius: 8px 8px 0 0;
-  }
-`;
-
-const ModalCloseButton = styled.button`
-  position: absolute;
-  top: 15px;
-  right: 15px;
-  background: transparent;
-  border: none;
-  color: ${props => props.theme.colors.text.secondary};
-  cursor: pointer;
-  font-size: 18px;
-  padding: 5px;
-  
-  &:hover {
-    color: ${props => props.theme.colors.text.primary};
-  }
-`;
-
-const ModalBody = styled.div`
-  padding: 24px;
-  background: ${props => props.theme.colors.background.primary};
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
-  border-radius: 0 0 16px 16px;
-
-  /* Custom scrollbar styling for webkit browsers */
-  &::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  &::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 0 0 16px 0;
-  }
-
-  &::-webkit-scrollbar-thumb {
-    background: ${props => props.theme.colors.border.secondary};
-    border-radius: 4px;
-    
-    &:hover {
-      background: ${props => props.theme.colors.text.secondary};
-    }
-  }
-
-  /* For Firefox */
-  scrollbar-width: thin;
-  scrollbar-color: ${props => props.theme.colors.border.secondary} transparent;
 `;
 
 const DetailGrid = styled.div`
@@ -3893,6 +3860,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
       if (data.success) {
         setInferenceLogs(data.data.logs || []);
         setPagination({
+          page: data.data.page || 1,
+          per_page: data.data.per_page || 20,
+          total: data.data.total || 0,
+          pages: data.data.pages || 1
+        });
+        console.log('Pagination data:', {
           page: data.data.page,
           per_page: data.data.per_page,
           total: data.data.total,
@@ -3955,6 +3928,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   const handlePageChange = (newPage: number) => {
     const newFilters = { ...filters, page: newPage };
+    setFilters(newFilters);
+    fetchInferenceLogs(newFilters);
+  };
+
+  const handlePageSizeChange = (newPageSize: number) => {
+    const newFilters = { ...filters, per_page: newPageSize, page: 1 };
     setFilters(newFilters);
     fetchInferenceLogs(newFilters);
   };
@@ -5591,6 +5570,49 @@ print(result)`)}>
                 {viewMode === 'table' ? (
                   /* Table View */
                   <>
+                    {/* Pagination Controls at Top */}
+                    {inferenceLogs.length > 0 && (
+                      <PaginationTop>
+                        <div className="pagination-left">
+                          <span className="pagination-info">
+                            Showing {((pagination.page || 1) - 1) * (pagination.per_page || 20) + 1} to {Math.min((pagination.page || 1) * (pagination.per_page || 20), pagination.total || 0)} of {pagination.total || 0} entries
+                          </span>
+                          <PageSizeSelector>
+                            <label>Show:</label>
+                            <select 
+                              value={filters.per_page} 
+                              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                            >
+                              <option value={10}>10</option>
+                              <option value={20}>20</option>
+                              <option value={50}>50</option>
+                              <option value={100}>100</option>
+                            </select>
+                            <label>entries</label>
+                          </PageSizeSelector>
+                        </div>
+                        <div className="pagination-controls">
+                          <PaginationButton
+                            onClick={() => handlePageChange(pagination.page - 1)}
+                            disabled={pagination.page <= 1}
+                          >
+                            <i className="fas fa-chevron-left" />
+                            Previous
+                          </PaginationButton>
+                          <span className="pagination-info">
+                            Page {pagination.page || 1} of {pagination.pages || 1}
+                          </span>
+                          <PaginationButton
+                            onClick={() => handlePageChange(pagination.page + 1)}
+                            disabled={pagination.page >= pagination.pages}
+                          >
+                            Next
+                            <i className="fas fa-chevron-right" />
+                          </PaginationButton>
+                        </div>
+                      </PaginationTop>
+                    )}
+
                     {/* Logs Table */}
                     <Table>
                       <thead>
@@ -5657,22 +5679,22 @@ print(result)`)}>
                   </tbody>
                 </Table>
 
-                {/* Pagination */}
-                {pagination.pages > 1 && (
+                {/* Bottom Pagination */}
+                {inferenceLogs.length > 0 && (
                   <Pagination>
                     <PaginationButton
                       onClick={() => handlePageChange(pagination.page - 1)}
-                      disabled={pagination.page === 1}
+                      disabled={pagination.page <= 1}
                     >
                       <i className="fas fa-chevron-left" />
                       Previous
                     </PaginationButton>
                     <span className="pagination-info">
-                      Page {pagination.page} of {pagination.pages} ({pagination.total} total)
+                      Page {pagination.page || 1} of {pagination.pages || 1}
                     </span>
                     <PaginationButton
                       onClick={() => handlePageChange(pagination.page + 1)}
-                      disabled={pagination.page === pagination.pages}
+                      disabled={pagination.page >= pagination.pages}
                     >
                       Next
                       <i className="fas fa-chevron-right" />
@@ -5817,26 +5839,24 @@ print(result)`)}>
       )}
       
       {/* Log Details Modal */}
-      {isModalOpen && createPortal(
-        <Modal $isOpen={isModalOpen} onClick={closeModal}>
-        <ModalContent onClick={(e) => e.stopPropagation()}>
-          <ModalCloseButton onClick={closeModal}>
-            <i className="fas fa-times" />
-          </ModalCloseButton>
-          
-          {selectedLogForModal && (
-            <>
-              <ModalHeader>
-                <h3>
-                  <i className="fas fa-analytics" />
-                  Inference Log Details
-                  <span style={{fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '12px'}}>
-                    #{selectedLogForModal.id}
-                  </span>
-                </h3>
-              </ModalHeader>
-              
-              <ModalBody>
+      <Modal isOpen={isModalOpen} onClose={closeModal} maxWidth="900px">
+        <ModalCloseButton onClick={closeModal}>
+          <i className="fas fa-times" />
+        </ModalCloseButton>
+        
+        {selectedLogForModal && (
+          <>
+            <ModalHeader>
+              <h3>
+                <i className="fas fa-analytics" />
+                Inference Log Details
+                <span style={{fontSize: '14px', fontWeight: 'normal', color: '#666', marginLeft: '12px'}}>
+                  #{selectedLogForModal.id}
+                </span>
+              </h3>
+            </ModalHeader>
+            
+            <ModalBody>
                 <DetailGrid>
                   <DetailCard>
                     <h4>
@@ -6027,10 +6047,7 @@ print(result)`)}>
               </ModalBody>
             </>
           )}
-        </ModalContent>
-      </Modal>,
-      document.body
-      )}
+      </Modal>
     </Container>
   );
 };
