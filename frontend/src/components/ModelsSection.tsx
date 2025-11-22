@@ -1311,6 +1311,47 @@ const EmptyState = styled.div`
   }
 `;
 
+const LoadingState = styled.div`
+  text-align: center;
+  padding: 80px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  
+  ${props => props.theme.media.mobile} {
+    padding: 60px 15px;
+  }
+`;
+
+const LoadingSpinnerLarge = styled.div`
+  width: 50px;
+  height: 50px;
+  border: 4px solid ${props => props.theme.colors.background.tertiary};
+  border-radius: 50%;
+  border-top-color: ${props => props.theme.colors.nvidia.green};
+  animation: spin 1s ease-in-out infinite;
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+`;
+
+const LoadingText = styled.div`
+  color: ${props => props.theme.colors.text.secondary};
+  
+  h3 {
+    color: ${props => props.theme.colors.text.primary};
+    margin: 0 0 8px 0;
+    font-size: 20px;
+  }
+  
+  p {
+    margin: 0;
+    font-size: 14px;
+  }
+`;
+
 const LoadingSpinner = styled.div`
   display: inline-block;
   width: 16px;
@@ -1490,6 +1531,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [filteredModels, setFilteredModels] = useState<ModelInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(true); // Track initial model fetch
   const [dragOver, setDragOver] = useState(false);
   
   // Download tracking states
@@ -1619,6 +1661,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     } catch (error) {
       console.error('Error loading models:', error);
       setModels([]);
+    } finally {
+      setFetchingModels(false);
     }
   };
 
@@ -2462,7 +2506,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </DownloadsSection>
       )}
 
-      {models.length === 0 ? (
+      {fetchingModels ? (
+        <LoadingState>
+          <LoadingSpinnerLarge />
+          <LoadingText>
+            <h3>Loading Models</h3>
+            <p>Fetching your AI models...</p>
+          </LoadingText>
+        </LoadingState>
+      ) : models.length === 0 ? (
         <EmptyState>
           <i className="fas fa-brain"></i>
           <h3>No Models Found</h3>
