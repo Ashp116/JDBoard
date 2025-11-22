@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import styled, { keyframes } from 'styled-components';
 import { useNotifications, Notification } from '../contexts/NotificationContext';
 import { getBackendUrl } from '../utils/api';
+import { useSocket } from '../hooks/useSocket';
 
 const slideIn = keyframes`
   from {
@@ -487,6 +488,7 @@ const getNotificationIcon = (type: Notification['type']) => {
 
 const GlobalNotifications: React.FC = () => {
   const { notifications, removeNotification, addNotification, systemError, setSystemError } = useNotifications();
+  const { socket } = useSocket();
   const [isResolving, setIsResolving] = useState(false);
   const [showSudoModal, setShowSudoModal] = useState(false);
   const [sudoPassword, setSudoPassword] = useState('');
@@ -500,36 +502,9 @@ const GlobalNotifications: React.FC = () => {
     isRestart: boolean;
   } | null>(null);
 
-  // Log monitoring for broken pipe errors
+  // Log monitoring for broken pipe errors (using WebSocket)
   useEffect(() => {
-    let logMonitorInterval: NodeJS.Timeout;
-    let lastLogCheck = Date.now();
-
-    const monitorLogsForBrokenPipes = async () => {
-      try {
-        const response = await fetch(`${getBackendUrl()}/system/logs?since=${lastLogCheck}&filter=broken_pipe`);
-        if (response.ok) {
-          const logData = await response.json();
-          
-          if (logData.logs && logData.logs.length > 0) {
-            const brokenPipeEntries = logData.logs.filter((log: any) => 
-              log.message?.toLowerCase().includes('broken pipe') || 
-              log.message?.toLowerCase().includes('errno 32')
-            );
-
-            if (brokenPipeEntries.length > 0 && !isMonitoringLogs) {
-              console.log(`Detected ${brokenPipeEntries.length} broken pipe errors, starting auto-recovery...`);
-              setBrokenPipeCount(prev => prev + brokenPipeEntries.length);
-              setIsMonitoringLogs(true);
-              startAutomaticRecovery();
-            }
-          }
-        }
-        lastLogCheck = Date.now();
-      } catch (error) {
-        console.error('Error monitoring logs:', error);
-      }
-    };
+    const lastLogCheckRef = { current: Date.now() };
 
     const startAutomaticRecovery = async () => {
       let recoveryAttempts = 0;
@@ -551,26 +526,44 @@ const GlobalNotifications: React.FC = () => {
               // Check if broken pipe errors have stopped for a few seconds
               await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
               
-              const checkResponse = await fetch(`${getBackendUrl()}/system/logs?since=${Date.now() - 10000}&filter=broken_pipe`);
-              if (checkResponse.ok) {
-                const checkData = await checkResponse.json();
-                const recentBrokenPipes = checkData.logs?.filter((log: any) => 
-                  log.message?.toLowerCase().includes('broken pipe') || 
-                  log.message?.toLowerCase().includes('errno 32')
-                ) || [];
+              // Use WebSocket to check for recent broken pipe errors
+              return new Promise<boolean>((resolve) => {
+                const checkHandler = (checkData: any) => {
+                  const recentBrokenPipes = checkData.logs?.filter((log: any) => 
+                    log.message?.toLowerCase().includes('broken pipe') || 
+                    log.message?.toLowerCase().includes('errno 32')
+                  ) || [];
 
-                if (recentBrokenPipes.length === 0) {
-                  console.log('Auto-recovery successful: No more broken pipe errors detected');
-                  setIsMonitoringLogs(false);
-                  setBrokenPipeCount(0);
-                  addNotification({
-                    type: 'success',
-                    title: 'Auto-Recovery Successful',
-                    message: `jtop connection automatically restored after ${recoveryAttempts} attempts!`
+                  if (recentBrokenPipes.length === 0) {
+                    console.log('Auto-recovery successful: No more broken pipe errors detected');
+                    setIsMonitoringLogs(false);
+                    setBrokenPipeCount(0);
+                    addNotification({
+                      type: 'success',
+                      title: 'Auto-Recovery Successful',
+                      message: `jtop connection automatically restored after ${recoveryAttempts} attempts!`
+                    });
+                    resolve(true);
+                  } else {
+                    resolve(false);
+                  }
+                  
+                  // Clean up the handler
+                  if (socket) {
+                    socket.off('logs_update', checkHandler);
+                  }
+                };
+
+                if (socket) {
+                  socket.once('logs_update', checkHandler);
+                  socket.emit('subscribe_logs', {
+                    since: Date.now() - 10000,
+                    filter: 'broken_pipe'
                   });
-                  return true;
+                } else {
+                  resolve(false);
                 }
-              }
+              });
             }
           }
         } catch (error) {
@@ -601,15 +594,51 @@ const GlobalNotifications: React.FC = () => {
       runRecoveryLoop();
     };
 
-    // Start log monitoring
-    logMonitorInterval = setInterval(monitorLogsForBrokenPipes, 2000); // Check every 2 seconds
+    const monitorLogsForBrokenPipes = (logData: any) => {
+      try {
+        if (logData.logs && logData.logs.length > 0) {
+          const brokenPipeEntries = logData.logs.filter((log: any) => 
+            log.message?.toLowerCase().includes('broken pipe') || 
+            log.message?.toLowerCase().includes('errno 32')
+          );
 
-    return () => {
-      if (logMonitorInterval) {
-        clearInterval(logMonitorInterval);
+          if (brokenPipeEntries.length > 0 && !isMonitoringLogs) {
+            console.log(`Detected ${brokenPipeEntries.length} broken pipe errors, starting auto-recovery...`);
+            setBrokenPipeCount(prev => prev + brokenPipeEntries.length);
+            setIsMonitoringLogs(true);
+            startAutomaticRecovery();
+          }
+        }
+        lastLogCheckRef.current = Date.now();
+      } catch (error) {
+        console.error('Error processing logs:', error);
       }
     };
-  }, [addNotification, isMonitoringLogs]);
+
+    // Set up WebSocket listener for log updates
+    if (socket) {
+      socket.on('logs_update', monitorLogsForBrokenPipes);
+      
+      // Request log updates every 2 seconds
+      const logMonitorInterval = setInterval(() => {
+        if (socket?.connected) {
+          socket.emit('subscribe_logs', {
+            since: lastLogCheckRef.current,
+            filter: 'broken_pipe'
+          });
+        }
+      }, 2000);
+
+      return () => {
+        if (socket) {
+          socket.off('logs_update', monitorLogsForBrokenPipes);
+        }
+        clearInterval(logMonitorInterval);
+      };
+    }
+    
+    return () => {}; // Cleanup function when socket is not available
+  }, [socket, addNotification, isMonitoringLogs]);
 
   const handleResolveJtopError = async () => {
     if (!systemError || systemError.errorType !== 'jtop_service_inactive') return;

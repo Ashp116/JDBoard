@@ -1519,6 +1519,71 @@ def handle_system_data_request():
             'error': str(e)
         })
 
+@socketio.on('subscribe_logs')
+def handle_log_subscription(data):
+    """Handle subscription to filtered log updates"""
+    try:
+        since_timestamp = data.get('since', 0)
+        filter_term = data.get('filter', '')
+        
+        logs = []
+        log_file_path = '../logs/app.log'
+        
+        if os.path.exists(log_file_path):
+            with open(log_file_path, 'r') as f:
+                lines = f.readlines()
+                
+            # Parse recent logs
+            for line in reversed(lines[-1000:]):  # Check last 1000 lines
+                try:
+                    # Parse log line format: timestamp - logger - level - message
+                    parts = line.strip().split(' - ', 3)
+                    if len(parts) >= 4:
+                        timestamp_str = parts[0]
+                        # Handle both comma and period in timestamp
+                        timestamp_str = timestamp_str.replace(',', '.')
+                        try:
+                            timestamp = datetime.fromisoformat(timestamp_str).timestamp() * 1000
+                        except:
+                            continue
+                        
+                        # Filter by timestamp if provided
+                        if since_timestamp and timestamp < since_timestamp:
+                            continue
+                            
+                        logger_name = parts[1]
+                        level = parts[2]
+                        message = parts[3]
+                        
+                        # Filter by term if provided
+                        if filter_term and filter_term.lower() not in message.lower():
+                            continue
+                        
+                        logs.append({
+                            'timestamp': timestamp,
+                            'logger': logger_name,
+                            'level': level,
+                            'message': message
+                        })
+                        
+                except (ValueError, IndexError):
+                    continue
+        
+        # Sort by timestamp (newest first)
+        logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        emit('logs_update', {
+            'success': True,
+            'logs': logs,
+            'count': len(logs)
+        })
+    except Exception as e:
+        logger.error(f"Error handling log subscription: {str(e)}")
+        emit('logs_update', {
+            'success': False,
+            'error': str(e)
+        })
+
 # System Settings API Endpoints
 @app.route('/auth/sudo', methods=['POST'])
 def authenticate_sudo():
