@@ -31,4 +31,6 @@ echo ""
 # export FLASK_DEBUG=1
 
 cd backend
+echo $PYTHON
+pwd
 $PYTHON app.py

@@ -5,6 +5,7 @@ Handles model loading, inference, and management
 """
 
 import os
+import sys
 import json
 import time
 import logging
@@ -14,21 +15,27 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 import hashlib
+import importlib.util
 
 # AI/ML imports with fallbacks
-try:
-    import onnxruntime as ort
-    ONNX_AVAILABLE = True
-except ImportError:
-    ONNX_AVAILABLE = False
+# ONNX Runtime can cause bus errors on some Jetson devices
+# Disable it entirely to avoid crashes
+ONNX_AVAILABLE = False
+# try:
+#     import onnxruntime as ort
+#     ONNX_AVAILABLE = True
+# except ImportError:
+#     ONNX_AVAILABLE = False
 
 try:
     import tensorrt as trt
-    import pycuda.driver as cuda
-    import pycuda.autoinit
+    # Don't import pycuda to avoid context issues
+    # TensorRT models will use Ultralytics YOLO which handles CUDA internally
     TENSORRT_AVAILABLE = True
+    PYCUDA_INITIALIZED = False
 except ImportError:
     TENSORRT_AVAILABLE = False
+    PYCUDA_INITIALIZED = False
 
 try:
     import torch
@@ -56,6 +63,20 @@ import gc
 # Create a specific logger for model operations
 logger = logging.getLogger('ai_inference')
 logger.setLevel(logging.INFO)
+
+# Log ONNX Runtime status
+if not ONNX_AVAILABLE:
+    logger.info("ONNX Runtime support disabled (known to cause bus errors on Jetson)")
+
+# PyCUDA context management is disabled - Ultralytics YOLO handles CUDA internally
+# This prevents "context stack was not empty upon module cleanup" errors
+def initialize_pycuda():
+    """PyCUDA initialization disabled - not needed for Ultralytics YOLO"""
+    global PYCUDA_INITIALIZED
+    # No-op function - PyCUDA not used
+    PYCUDA_INITIALIZED = True
+    logger.info("PyCUDA initialization skipped (Ultralytics YOLO handles CUDA internally)")
+    return True
 
 class CUDAMemoryManager:
     """Enhanced CUDA memory manager for Jetson devices with limited GPU memory"""
@@ -169,6 +190,98 @@ class CUDAMemoryManager:
         
         return mem_info
 
+
+class CustomScriptLoader:
+    """Loads and manages custom inference scripts for models"""
+    
+    def __init__(self, logger=None):
+        self.logger = logger or logging.getLogger('custom_script_loader')
+        self.loaded_scripts = {}  # Cache loaded script modules
+    
+    def load_script(self, script_path):
+        """
+        Dynamically load a custom inference script.
+        
+        Args:
+            script_path: Path to the Python script file
+            
+        Returns:
+            The CustomModelInference class from the script
+        """
+        script_path = Path(script_path)
+        
+        if not script_path.exists():
+            raise FileNotFoundError(f"Custom script not found: {script_path}")
+        
+        if not script_path.suffix == '.py':
+            raise ValueError(f"Custom script must be a Python file: {script_path}")
+        
+        # Use cached module if already loaded
+        script_key = str(script_path.absolute())
+        if script_key in self.loaded_scripts:
+            self.logger.info(f"Using cached custom script: {script_path.name}")
+            return self.loaded_scripts[script_key]
+        
+        try:
+            # Load the module dynamically
+            module_name = f"custom_inference_{script_path.stem}_{id(script_path)}"
+            spec = importlib.util.spec_from_file_location(module_name, script_path)
+            module = importlib.util.module_from_spec(spec)
+            
+            # Add to sys.modules so imports work correctly
+            sys.modules[module_name] = module
+            
+            # Execute the module
+            spec.loader.exec_module(module)
+            
+            # Get the CustomModelInference class
+            if not hasattr(module, 'CustomModelInference'):
+                raise AttributeError(
+                    f"Custom script must define a 'CustomModelInference' class: {script_path}"
+                )
+            
+            custom_class = module.CustomModelInference
+            
+            # Validate that the class has required methods
+            required_methods = ['preprocess', 'inference', 'postprocess']
+            for method in required_methods:
+                if not hasattr(custom_class, method):
+                    raise AttributeError(
+                        f"CustomModelInference class must implement '{method}' method"
+                    )
+            
+            # Cache the loaded class
+            self.loaded_scripts[script_key] = custom_class
+            self.logger.info(f"Successfully loaded custom script: {script_path.name}")
+            
+            return custom_class
+            
+        except Exception as e:
+            self.logger.error(f"Error loading custom script {script_path}: {e}")
+            raise RuntimeError(f"Failed to load custom inference script: {e}")
+    
+    def validate_script(self, script_path):
+        """
+        Validate a custom script without caching it.
+        
+        Args:
+            script_path: Path to the Python script file
+            
+        Returns:
+            True if valid, raises exception otherwise
+        """
+        try:
+            self.load_script(script_path)
+            return True
+        except Exception as e:
+            raise ValueError(f"Invalid custom script: {e}")
+    
+    def clear_cache(self):
+        """Clear the cached loaded scripts"""
+        self.loaded_scripts.clear()
+        self.logger.info("Cleared custom script cache")
+
+
 class AIModelManager:
     def __init__(self, models_dir='../models'):
         self.models_dir = Path(models_dir)
@@ -177,6 +290,7 @@ class AIModelManager:
         self.loaded_models = {}
         self.registry_file = self.models_dir / 'models_registry.json'
         self.memory_manager = CUDAMemoryManager()
+        self.script_loader = CustomScriptLoader(logger)
         self._load_registry()
         
         # Log initial GPU memory status
@@ -269,8 +383,8 @@ class AIModelManager:
         
         return model_name
     
-    def register_model(self, model_name, file_path, model_type='vision', original_filename=''):
-        """Register a new model in the system"""
+    def register_model(self, model_name, file_path, model_type='vision', original_filename='', custom_script_path=None):
+        """Register a new model in the system with optional custom inference script"""
         # Validate and clean the model name
         model_name = self._validate_model_name(model_name)
         
@@ -291,6 +405,19 @@ class AIModelManager:
         # Determine framework
         framework = self._detect_framework(file_extension)
         
+        # Validate custom script if provided
+        if custom_script_path:
+            custom_script_path = Path(custom_script_path)
+            if not custom_script_path.exists():
+                raise FileNotFoundError(f"Custom script not found: {custom_script_path}")
+            
+            # Validate the script
+            try:
+                self.script_loader.validate_script(custom_script_path)
+                logger.info(f"Validated custom inference script: {custom_script_path.name}")
+            except Exception as e:
+                raise ValueError(f"Invalid custom script: {e}")
+        
         model_info = {
             'id': model_id,
             'name': model_name,
@@ -303,7 +430,8 @@ class AIModelManager:
             'created_at': datetime.now().isoformat(),
             'last_used': None,
             'inference_count': 0,
-            'loaded': False
+            'loaded': False,
+            'custom_script_path': str(custom_script_path) if custom_script_path else None
         }
         
         self.models_registry[model_id] = model_info
@@ -398,11 +526,25 @@ class AIModelManager:
             
             load_time = time.time() - start_time
             
+            # Load custom script if provided
+            custom_handler = None
+            if model_info.get('custom_script_path'):
+                try:
+                    custom_script_path = model_info['custom_script_path']
+                    logger.info(f"Loading custom inference script: {custom_script_path}")
+                    CustomInferenceClass = self.script_loader.load_script(custom_script_path)
+                    custom_handler = CustomInferenceClass(model, model_info, logger)
+                    logger.info(f"Custom inference handler initialized for {model_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to load custom script, using default inference: {e}")
+                    custom_handler = None
+            
             self.loaded_models[model_id] = {
                 'model': model,
                 'info': model_info,
                 'loaded_at': datetime.now().isoformat(),
-                'load_time': load_time
+                'load_time': load_time,
+                'custom_handler': custom_handler
             }
             
             # Update registry
@@ -447,6 +589,10 @@ class AIModelManager:
     def _load_tensorrt_model(self, file_path):
         """Load a TensorRT model using ultralytics YOLO with memory optimization and verbose logging"""
         try:
+            # Initialize PyCUDA if needed (deferred to avoid bus errors on import)
+            if TENSORRT_AVAILABLE:
+                initialize_pycuda()
+            
             if not ULTRALYTICS_AVAILABLE:
                 raise ImportError("ultralytics not available for TensorRT loading")
             
@@ -654,7 +800,7 @@ class AIModelManager:
         return True
 
     def run_inference(self, model_id, image):
-        """Run inference on an image"""
+        """Run inference on an image using custom script if available"""
         if model_id not in self.loaded_models:
             raise ValueError(f"Model {model_id} not loaded")
         
@@ -662,6 +808,7 @@ class AIModelManager:
         model = model_data['model']
         model_info = model_data['info']
         framework = model_info['framework']
+        custom_handler = model_data.get('custom_handler')
         
         # Store original image dimensions before any processing
         original_height, original_width = image.shape[:2]
@@ -739,19 +886,54 @@ class AIModelManager:
             # Monitor memory before execution
             pre_mem = self.memory_manager.get_gpu_memory_info()
             
-            # Check if it's a YOLO model (works for all formats when loaded with ultralytics)
-            if hasattr(model, 'predict'):  # YOLO model from ultralytics
-                result = self._run_yolo_inference(model, processed_image, original_width, original_height, scale_factor_x, scale_factor_y)
-            elif framework == 'onnx':
-                result = self._run_onnx_inference(model, processed_image)
-            elif framework == 'pytorch':
-                result = self._run_pytorch_inference(model, processed_image)
-            elif framework == 'tensorrt':
-                result = self._run_tensorrt_inference(model, processed_image)
-            elif framework == 'tensorflow':
-                result = self._run_tensorflow_inference(model, processed_image)
-            else:
-                raise ValueError(f"Inference not implemented for framework: {framework}")
+            # Use custom handler if available
+            if custom_handler:
+                logger.info(f"Using custom inference handler for {model_id}")
+                try:
+                    # Run custom preprocessing
+                    preprocessed_data = custom_handler.preprocess(
+                        processed_image,
+                        original_width=original_width,
+                        original_height=original_height,
+                        scale_factor_x=scale_factor_x,
+                        scale_factor_y=scale_factor_y
+                    )
+                    
+                    # Run custom inference
+                    raw_output = custom_handler.inference(preprocessed_data)
+                    
+                    # Run custom postprocessing
+                    result = custom_handler.postprocess(
+                        raw_output,
+                        original_width=original_width,
+                        original_height=original_height
+                    )
+                    
+                    # Custom postprocess now returns a list of predictions
+                    num_detections = len(result) if isinstance(result, list) else result.get('total_detections', 0)
+                    logger.info(f"Custom inference completed: {num_detections} detections")
+                    
+                except Exception as custom_error:
+                    logger.error(f"Error in custom inference handler: {custom_error}")
+                    logger.warning("Falling back to default inference method")
+                    # Fall back to default inference
+                    custom_handler = None
+            
+            # Use default inference if no custom handler or custom handler failed
+            if not custom_handler:
+                # Check if it's a YOLO model (works for all formats when loaded with ultralytics)
+                # YOLO models handle TensorRT, ONNX, PyTorch internally - no need to route by framework
+                if hasattr(model, 'predict'):  # YOLO model from ultralytics
+                    logger.info(f"Using default YOLO inference for {framework} model")
+                    result = self._run_yolo_inference(model, processed_image, original_width, original_height, scale_factor_x, scale_factor_y)
+                elif framework == 'onnx':
+                    result = self._run_onnx_inference(model, processed_image)
+                elif framework == 'pytorch':
+                    result = self._run_pytorch_inference(model, processed_image)
+                elif framework == 'tensorflow':
+                    result = self._run_tensorflow_inference(model, processed_image)
+                else:
+                    raise ValueError(f"Inference not implemented for framework: {framework}")
             
             inference_time = time.time() - start_time
             
@@ -1197,8 +1379,8 @@ class AIModelManager:
         
         return detailed_models
 
-    def download_yolo_model(self, model_url, model_name, target_format='PyTorch', progress_callback=None, cancel_check_callback=None):
-        """Download a YOLO model and optionally convert it to different format with progress tracking and cancellation support"""
+    def download_yolo_model(self, model_url, model_name, target_format='PyTorch', custom_script_path=None, progress_callback=None, cancel_check_callback=None):
+        """Download a YOLO model and optionally convert it to different format with progress tracking, custom script support, and cancellation support"""
         import urllib.request
         import shutil
         from pathlib import Path
@@ -1361,17 +1543,19 @@ class AIModelManager:
             update_progress(90, 'Registering model...')
             check_cancelled()
             
-            # Register the model
+            # Register the model with custom script if provided
             model_info = self.register_model(
                 model_name=model_name,
                 file_path=final_path.resolve(),  # Use absolute path
                 model_type='vision',
-                original_filename=url_filename
+                original_filename=url_filename,
+                custom_script_path=custom_script_path
             )
             
             update_progress(100, 'Model ready for use!')
             
-            logger.info(f"YOLO model {model_name} successfully downloaded and registered")
+            logger.info(f"YOLO model {model_name} successfully downloaded and registered" + 
+                       (" with custom script" if custom_script_path else ""))
             
             return {
                 'model_id': model_info['id'],

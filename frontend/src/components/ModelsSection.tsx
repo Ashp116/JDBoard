@@ -743,6 +743,136 @@ const ErrorMessage = styled.div`
   }
 `;
 
+const CustomScriptSection = styled.div`
+  margin-top: 24px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: ${props => props.theme.colors.background.secondary};
+  border: 1px solid ${props => props.theme.colors.border.primary};
+  border-radius: 8px;
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: ${props => props.theme.colors.text.primary};
+    margin-bottom: 12px;
+    font-weight: 500;
+
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
+const ScriptOptions = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ScriptOption = styled.div<{ $selected: boolean }>`
+  padding: 12px;
+  background: ${props => props.$selected ? props.theme.colors.nvidia.green : props.theme.colors.background.tertiary};
+  border: 2px solid ${props => props.$selected ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+    transform: translateY(-2px);
+  }
+
+  i {
+    display: block;
+    font-size: 20px;
+    margin-bottom: 8px;
+    color: ${props => props.$selected ? '#fff' : props.theme.colors.nvidia.green};
+  }
+
+  span {
+    display: block;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+    color: ${props => props.$selected ? '#fff' : props.theme.colors.text.primary};
+  }
+
+  small {
+    display: block;
+    font-size: 11px;
+    color: ${props => props.$selected ? 'rgba(255,255,255,0.8)' : props.theme.colors.text.secondary};
+  }
+`;
+
+const CustomScriptUpload = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: center;
+
+  .upload-button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: ${props => props.theme.colors.background.tertiary};
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: ${props => props.theme.colors.text.primary};
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: ${props => props.theme.colors.nvidia.green};
+      background: ${props => props.theme.colors.background.secondary};
+    }
+
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+
+  .remove-button {
+    padding: 10px 12px;
+    background: #ff6b6b;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: #ff5252;
+    }
+  }
+`;
+
+const ScriptInfo = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid ${props => props.theme.colors.nvidia.green};
+  border-radius: 6px;
+  font-size: 13px;
+  color: ${props => props.theme.colors.text.secondary};
+
+  i {
+    color: ${props => props.theme.colors.nvidia.green};
+  }
+`;
+
 const FormatSelector = styled.div`
   margin-top: 15px;
 
@@ -1546,6 +1676,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState('');
   const [modelType, setModelType] = useState('vision');
+  const [customScript, setCustomScript] = useState<File | null>(null);
+  const [scriptOption, setScriptOption] = useState<'yolo11' | 'custom'>('yolo11');
   
   // YOLO download states
   const [selectedVersion, setSelectedVersion] = useState<YOLOVersion | null>(null);
@@ -2067,6 +2199,13 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       formData.append('model_name', modelName.trim());
       formData.append('model_type', modelType);
       formData.append('download_id', uploadId); // Send download ID to backend
+      
+      // Add custom script if selected
+      if (scriptOption === 'custom' && customScript) {
+        formData.append('custom_script', customScript);
+      } else if (scriptOption === 'yolo11') {
+        formData.append('use_yolo11_script', 'true');
+      }
 
       // Close modal immediately to allow user to continue
       resetModal();
@@ -2110,18 +2249,24 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // Close modal immediately to allow user to continue
       resetModal();
 
+      // Use FormData to support custom script upload
+      const formData = new FormData();
+      formData.append('model_url', selectedYOLO.url);
+      formData.append('model_name', yoloModelName.trim());
+      formData.append('target_format', selectedFormat);
+      formData.append('original_format', 'PyTorch');
+      formData.append('download_id', downloadId);
+      
+      // Add custom script if selected
+      if (scriptOption === 'custom' && customScript) {
+        formData.append('custom_script', customScript);
+      } else if (scriptOption === 'yolo11') {
+        formData.append('use_yolo11_script', 'true');
+      }
+
       const response = await fetch(`${getBackendUrl()}/models/download-yolo`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model_url: selectedYOLO.url,
-          model_name: yoloModelName.trim(),
-          target_format: selectedFormat,
-          original_format: 'PyTorch',
-          download_id: downloadId // Send download ID to backend
-        })
+        body: formData
       });
 
       if (!response.ok) {
@@ -2160,6 +2305,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     setSelectedFile(null);
     setModelName('');
     setModelType('vision');
+    setCustomScript(null);
+    setScriptOption('yolo11');
     setNameError('');
   };
 
@@ -2740,6 +2887,79 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <option value="other">Other</option> */}
                 </select>
               </FormGroup>
+
+              <CustomScriptSection>
+                <label>
+                    <i className="fas fa-code"></i> Inference Script
+                  </label>
+                  
+                  <ScriptOptions>
+                    <ScriptOption
+                      $selected={scriptOption === 'yolo11'}
+                      onClick={() => {
+                        setScriptOption('yolo11');
+                        setCustomScript(null);
+                      }}
+                    >
+                      <i className="fas fa-robot"></i>
+                      <span>YOLO Template</span>
+                      <small>Optimized for YOLO models</small>
+                    </ScriptOption>
+                    
+                    <ScriptOption
+                      $selected={scriptOption === 'custom'}
+                      onClick={() => setScriptOption('custom')}
+                    >
+                      <i className="fas fa-file-code"></i>
+                      <span>Custom Script</span>
+                      <small>Upload your own .py file</small>
+                    </ScriptOption>
+                  </ScriptOptions>
+
+                  {scriptOption === 'custom' && (
+                    <CustomScriptUpload>
+                      <input
+                        type="file"
+                        accept=".py"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (!file.name.endsWith('.py')) {
+                              addNotification({
+                                type: 'error',
+                                title: 'Invalid File',
+                                message: 'Custom script must be a Python (.py) file'
+                              });
+                              return;
+                            }
+                            setCustomScript(file);
+                          }
+                        }}
+                        style={{ display: 'none' }}
+                        id="custom-script-upload"
+                      />
+                      <label htmlFor="custom-script-upload" className="upload-button">
+                        <i className="fas fa-upload"></i>
+                        {customScript ? customScript.name : 'Choose Python File'}
+                      </label>
+                      {customScript && (
+                        <button
+                          onClick={() => setCustomScript(null)}
+                          className="remove-button"
+                        >
+                          <i className="fas fa-times"></i>
+                        </button>
+                      )}
+                    </CustomScriptUpload>
+                  )}
+
+                  {scriptOption === 'yolo11' && (
+                    <ScriptInfo>
+                      <i className="fas fa-info-circle"></i>
+                      Using built-in YOLO11 custom inference template with optimized preprocessing and postprocessing
+                    </ScriptInfo>
+                  )}
+                </CustomScriptSection>
             </div>
           )}
 
@@ -2829,6 +3049,79 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       ))}
                     </div>
                   </FormatSelector>
+
+                  <CustomScriptSection>
+                    <label>
+                      <i className="fas fa-code"></i> Inference Script
+                    </label>
+                    
+                    <ScriptOptions>
+                      <ScriptOption
+                        $selected={scriptOption === 'yolo11'}
+                        onClick={() => {
+                          setScriptOption('yolo11');
+                          setCustomScript(null);
+                        }}
+                      >
+                        <i className="fas fa-robot"></i>
+                        <span>YOLO Template</span>
+                        <small>Optimized for YOLO models</small>
+                      </ScriptOption>
+                      
+                      <ScriptOption
+                        $selected={scriptOption === 'custom'}
+                        onClick={() => setScriptOption('custom')}
+                      >
+                        <i className="fas fa-file-code"></i>
+                        <span>Custom Script</span>
+                        <small>Upload your own .py file</small>
+                      </ScriptOption>
+                    </ScriptOptions>
+
+                    {scriptOption === 'custom' && (
+                      <CustomScriptUpload>
+                        <input
+                          type="file"
+                          accept=".py"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              if (!file.name.endsWith('.py')) {
+                                addNotification({
+                                  type: 'error',
+                                  title: 'Invalid File',
+                                  message: 'Custom script must be a Python (.py) file'
+                                });
+                                return;
+                              }
+                              setCustomScript(file);
+                            }
+                          }}
+                          style={{ display: 'none' }}
+                          id="custom-script-upload-yolo"
+                        />
+                        <label htmlFor="custom-script-upload-yolo" className="upload-button">
+                          <i className="fas fa-upload"></i>
+                          {customScript ? customScript.name : 'Choose Python File'}
+                        </label>
+                        {customScript && (
+                          <button
+                            onClick={() => setCustomScript(null)}
+                            className="remove-button"
+                          >
+                            <i className="fas fa-times"></i>
+                          </button>
+                        )}
+                      </CustomScriptUpload>
+                    )}
+
+                    {scriptOption === 'yolo11' && (
+                      <ScriptInfo>
+                        <i className="fas fa-info-circle"></i>
+                        Using built-in YOLO11 custom inference template with optimized preprocessing and postprocessing
+                      </ScriptInfo>
+                    )}
+                  </CustomScriptSection>
                 </>
               )}
             </div>

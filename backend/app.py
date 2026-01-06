@@ -4,7 +4,6 @@ Jetson Edge AI Dashboard - Backend Server
 A cyberpunk-themed dashboard for Jetson devices with AI model management
 """
 
-import signal
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -21,7 +20,7 @@ import psutil
 import GPUtil
 
 # Ignore SIGPIPE signal to handle broken pipe errors gracefully
-signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+#signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
@@ -406,7 +405,7 @@ def get_gpu_memory():
 
 @app.route('/models/upload', methods=['POST'])
 def upload_model():
-    """Upload a new AI model with real-time progress updates"""
+    """Upload a new AI model with optional custom inference script and real-time progress updates"""
     client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -428,6 +427,10 @@ def upload_model():
     model_name = request.form.get('model_name', '')
     model_type = request.form.get('model_type', 'vision')
     download_id = request.form.get('download_id', str(uuid.uuid4()))
+    
+    # Check for optional custom script or use_yolo11_script flag
+    custom_script = request.files.get('custom_script')
+    use_yolo11_script = request.form.get('use_yolo11_script', 'false') == 'true'
     
     if file.filename == '':
         return jsonify({
@@ -452,6 +455,7 @@ def upload_model():
             
             # Start async upload process
             def upload_async():
+                custom_script_path = None
                 try:
                     # Track this download with persistent information
                     active_downloads[download_id] = {
@@ -488,41 +492,80 @@ def upload_model():
                     
                     file.save(file_path)
                     
+                    # Handle custom script
+                    if use_yolo11_script:
+                        # Use the built-in YOLO11 script
+                        yolo11_script_path = os.path.join(os.path.dirname(__file__), '../models/yolo11_custom_inference.py')
+                        if os.path.exists(yolo11_script_path):
+                            custom_script_path = os.path.abspath(yolo11_script_path)
+                            progress_callback(50, 'Using YOLO11 inference template...')
+                            logger.info(f"Using built-in YOLO11 custom inference script")
+                        else:
+                            logger.warning(f"YOLO11 script not found at {yolo11_script_path}, proceeding without custom script")
+                    elif custom_script and custom_script.filename != '':
+                        # Save uploaded custom script
+                        if not custom_script.filename.endswith('.py'):
+                            raise ValueError("Custom script must be a Python (.py) file")
+                        
+                        progress_callback(50, 'Saving custom inference script...')
+                        
+                        script_filename = secure_filename(custom_script.filename)
+                        unique_script_name = f"{uuid.uuid4().hex}_{script_filename}"
+                        custom_script_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_script_name)
+                        custom_script.save(custom_script_path)
+                        
+                        logger.info(f"Custom script saved: {script_filename}")
+                    
                     progress_callback(70, 'Registering model...')
                     
                     # Check for cancellation
                     if is_download_cancelled(download_id):
-                        # Clean up uploaded file if cancelled
+                        # Clean up uploaded files if cancelled
                         try:
                             os.remove(file_path)
+                            if custom_script_path:
+                                os.remove(custom_script_path)
                         except:
                             pass
                         cleanup_download(download_id)
                         return
                     
-                    # Register the model with absolute path
+                    # Register the model with absolute path and custom script
                     model_info = ai_manager.register_model(
                         model_name=model_name,
                         file_path=os.path.abspath(file_path),
                         model_type=model_type,
-                        original_filename=filename
+                        original_filename=filename,
+                        custom_script_path=os.path.abspath(custom_script_path) if custom_script_path else None
                     )
                     
                     progress_callback(100, 'Upload complete')
                     
-                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}")
+                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}" + 
+                               (' (with YOLO11 template)' if use_yolo11_script else 
+                                f' (with custom script)' if custom_script_path else ''))
                     
                     socketio.emit('download_complete', {
                         'download_id': download_id,
                         'success': True,
                         'model_name': model_name,
-                        'message': f'Model {model_name} uploaded and ready for use!'
+                        'message': f'Model {model_name} uploaded and ready for use!' +
+                                  (' Using YOLO11 inference template.' if use_yolo11_script else
+                                   ' Custom inference script loaded.' if custom_script_path else '')
                     })
                     
                     cleanup_download(download_id)
                     
                 except Exception as e:
                     logger.error(f"Error uploading model: {str(e)}")
+                    # Clean up on error
+                    try:
+                        if 'file_path' in locals() and os.path.exists(file_path):
+                            os.remove(file_path)
+                        if custom_script_path and os.path.exists(custom_script_path):
+                            os.remove(custom_script_path)
+                    except:
+                        pass
                     socketio.emit('download_error', {
                         'download_id': download_id,
                         'error': str(e)
@@ -777,15 +820,25 @@ def rename_model(model_id):
 
 @app.route('/models/download-yolo', methods=['POST'])
 def download_yolo_model():
-    """Download and optionally convert a YOLO model with real-time progress updates"""
+    """Download and optionally convert a YOLO model with custom script support and real-time progress updates"""
     client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
-    data = request.get_json()
+    # Support both JSON and FormData
+    if request.is_json:
+        data = request.get_json()
+        custom_script = None
+        use_yolo11_script = False
+    else:
+        # FormData
+        data = request.form.to_dict()
+        custom_script = request.files.get('custom_script')
+        use_yolo11_script = request.form.get('use_yolo11_script', 'false') == 'true'
+    
     if not data:
         return jsonify({
             'success': False,
-            'error': 'No JSON data provided'
+            'error': 'No data provided'
         }), 400
     
     request_logger.log_request(
@@ -793,7 +846,7 @@ def download_yolo_model():
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method,
-        data=data
+        data={k: v for k, v in data.items() if k != 'download_id'}
     )
     
     model_url = data.get('model_url')
@@ -823,6 +876,7 @@ def download_yolo_model():
         
         # Start async download process
         def download_async():
+            custom_script_path = None
             try:
                 # Track this download with persistent information
                 active_downloads[download_id] = {
@@ -836,10 +890,33 @@ def download_yolo_model():
                     'status': 'Starting download...'
                 }
                 
+                # Handle custom script
+                if use_yolo11_script:
+                    # Use the built-in YOLO11 script
+                    yolo11_script_path = os.path.join(os.path.dirname(__file__), '../models/yolo11_custom_inference.py')
+                    if os.path.exists(yolo11_script_path):
+                        custom_script_path = os.path.abspath(yolo11_script_path)
+                        logger.info(f"Using built-in YOLO11 custom inference script for download")
+                    else:
+                        logger.warning(f"YOLO11 script not found at {yolo11_script_path}")
+                elif custom_script and hasattr(custom_script, 'filename') and custom_script.filename != '':
+                    # Save uploaded custom script
+                    if not custom_script.filename.endswith('.py'):
+                        raise ValueError("Custom script must be a Python (.py) file")
+                    
+                    script_filename = secure_filename(custom_script.filename)
+                    unique_script_name = f"{uuid.uuid4().hex}_{script_filename}"
+                    custom_script_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_script_name)
+                    custom_script.save(custom_script_path)
+                    custom_script_path = os.path.abspath(custom_script_path)
+                    
+                    logger.info(f"Custom script saved for YOLO download: {script_filename}")
+                
                 result = ai_manager.download_yolo_model(
                     model_url=model_url,
                     model_name=model_name,
                     target_format=target_format,
+                    custom_script_path=custom_script_path,
                     progress_callback=progress_callback,
                     cancel_check_callback=lambda: is_download_cancelled(download_id)
                 )
@@ -849,19 +926,30 @@ def download_yolo_model():
                     cleanup_download(download_id)
                     return
                 
-                logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}")
+                logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}" +
+                           (' (with YOLO11 template)' if use_yolo11_script else
+                            ' (with custom script)' if custom_script_path else ''))
                 
                 socketio.emit('download_complete', {
                     'download_id': download_id,
                     'success': True,
                     'model_name': model_name,
-                    'message': f'YOLO model {model_name} is ready for inference!'
+                    'message': f'YOLO model {model_name} is ready for inference!' +
+                              (' Using YOLO11 inference template.' if use_yolo11_script else
+                               ' Custom inference script loaded.' if custom_script_path else '')
                 })
                 
                 cleanup_download(download_id)
                 
             except Exception as e:
                 logger.error(f"Error downloading YOLO model: {str(e)}")
+                # Clean up custom script on error if it was uploaded (not YOLO11 template)
+                if custom_script_path and not use_yolo11_script:
+                    try:
+                        if os.path.exists(custom_script_path):
+                            os.remove(custom_script_path)
+                    except:
+                        pass
                 socketio.emit('download_error', {
                     'download_id': download_id,
                     'error': str(e)
