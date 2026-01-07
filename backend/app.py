@@ -5,7 +5,7 @@ A cyberpunk-themed dashboard for Jetson devices with AI model management
 """
 
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 import json
@@ -813,6 +813,107 @@ def rename_model(model_id):
         })
     except Exception as e:
         logger.error(f"Error renaming model {model_id}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/models/custom-script-template', methods=['GET'])
+def download_custom_script_template():
+    """Download the custom model inference script template"""
+    client_ip = get_client_ip()
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/models/custom-script-template',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        template_path = os.path.join(os.path.dirname(__file__), '../models/custom_model_template.py')
+        
+        if not os.path.exists(template_path):
+            return jsonify({
+                'success': False,
+                'error': 'Template file not found'
+            }), 404
+        
+        logger.info(f"Custom script template downloaded by {client_ip}")
+        
+        return send_file(
+            template_path,
+            as_attachment=True,
+            download_name='custom_model_template.py',
+            mimetype='text/x-python'
+        )
+    except Exception as e:
+        logger.error(f"Error downloading custom script template: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/models/<model_id>/custom-script', methods=['GET'])
+def get_model_custom_script(model_id):
+    """Get the custom inference script for a specific model"""
+    client_ip = get_client_ip()
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/models/{model_id}/custom-script',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        # Get model info from registry
+        models = ai_manager.list_models()
+        target_model = None
+        for model in models:
+            if model['id'] == model_id:
+                target_model = model
+                break
+        
+        if not target_model:
+            return jsonify({
+                'success': False,
+                'error': 'Model not found'
+            }), 404
+        
+        # Check if model has a custom script
+        custom_script_path = target_model.get('custom_script_path')
+        
+        if not custom_script_path:
+            return jsonify({
+                'success': False,
+                'error': 'Model does not have a custom inference script'
+            }), 404
+        
+        if not os.path.exists(custom_script_path):
+            return jsonify({
+                'success': False,
+                'error': 'Custom script file not found on disk'
+            }), 404
+        
+        # Read the script content
+        with open(custom_script_path, 'r', encoding='utf-8') as f:
+            script_content = f.read()
+        
+        logger.info(f"Custom script for model {model_id} retrieved by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'script_content': script_content,
+                'script_path': custom_script_path,
+                'model_name': target_model['name']
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting custom script for model {model_id}: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

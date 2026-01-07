@@ -1496,6 +1496,158 @@ const LoadingSpinner = styled.div`
   }
 `;
 
+const CodeViewerContainer = styled.div`
+  background: #1e1e1e;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 600px;
+  display: flex;
+  flex-direction: column;
+`;
+
+const CodeViewerHeader = styled.div`
+  background: #2d2d2d;
+  padding: 12px 16px;
+  border-bottom: 1px solid #404040;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  h4 {
+    margin: 0;
+    color: #00ff00;
+    font-size: 14px;
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    
+    i {
+      color: #76b900;
+    }
+  }
+`;
+
+const CopyButton = styled.button`
+  background: transparent;
+  border: 1px solid #555;
+  color: #cccccc;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Courier New', monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  &:hover {
+    background: #333;
+    color: #ffffff;
+    border-color: #76b900;
+  }
+  
+  i {
+    font-size: 11px;
+  }
+`;
+
+const CodeContent = styled.pre`
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  background: #1e1e1e;
+  flex: 1;
+  
+  /* Custom scrollbar */
+  &::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: #2d2d2d;
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 5px;
+  }
+  
+  &::-webkit-scrollbar-thumb:hover {
+    background: #777;
+  }
+  
+  /* Syntax highlighting */
+  .keyword {
+    color: #569cd6;
+    font-weight: bold;
+  }
+  
+  .string {
+    color: #ce9178;
+  }
+  
+  .comment {
+    color: #6a9955;
+    font-style: italic;
+  }
+  
+  .function {
+    color: #dcdcaa;
+  }
+  
+  .class-name {
+    color: #4ec9b0;
+  }
+  
+  .decorator {
+    color: #c586c0;
+  }
+  
+  .number {
+    color: #b5cea8;
+  }
+  
+  .operator {
+    color: #d4d4d4;
+  }
+  
+  .builtin {
+    color: #4ec9b0;
+  }
+`;
+
+const ScriptInfoBanner = styled.div`
+  background: rgba(118, 185, 0, 0.1);
+  border-left: 3px solid #76b900;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  
+  i {
+    color: #76b900;
+    font-size: 16px;
+  }
+  
+  p {
+    margin: 0;
+    color: ${props => props.theme.colors.text.secondary};
+    font-size: 13px;
+    line-height: 1.4;
+  }
+`;
+
 // YOLO versions and models available for download
 const YOLO_VERSIONS: YOLOVersion[] = [
   {
@@ -1702,6 +1854,19 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [editNameError, setEditNameError] = useState('');
+  
+  // Custom script viewing states
+  const [viewingScript, setViewingScript] = useState<{
+    modelId: string;
+    modelName: string;
+    scriptContent: string;
+  } | null>(null);
+  const [loadingScript, setLoadingScript] = useState(false);
+  
+  // Template viewing state
+  const [viewingTemplate, setViewingTemplate] = useState(false);
+  const [templateContent, setTemplateContent] = useState('');
+  const [loadingTemplate, setLoadingTemplate] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logsTerminalRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -2524,6 +2689,217 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
+  const handleDownloadTemplate = async () => {
+    setLoadingTemplate(true);
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/custom-script-template`);
+      const blob = await response.blob();
+      const text = await blob.text();
+      
+      setTemplateContent(text);
+      setViewingTemplate(true);
+    } catch (error) {
+      console.error('Error fetching template:', error);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to load template script'
+      });
+    } finally {
+      setLoadingTemplate(false);
+    }
+  };
+  
+  const handleDownloadTemplateFile = () => {
+    if (!templateContent) return;
+    
+    // Create blob and download
+    const blob = new Blob([templateContent], { type: 'text/x-python' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'custom_model_template.py';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    addNotification({
+      type: 'success',
+      title: 'Template Downloaded',
+      message: 'Custom inference script template downloaded successfully!'
+    });
+  };
+  
+  const handleCopyTemplate = () => {
+    if (!templateContent) return;
+    
+    navigator.clipboard.writeText(templateContent).then(() => {
+      addNotification({
+        type: 'success',
+        title: 'Copied!',
+        message: 'Template script copied to clipboard'
+      });
+    }).catch((err) => {
+      console.error('Failed to copy:', err);
+      addNotification({
+        type: 'error',
+        title: 'Copy Failed',
+        message: 'Failed to copy template to clipboard'
+      });
+    });
+  };
+
+  const handleViewCustomScript = async (modelId: string, modelName: string) => {
+    setLoadingScript(true);
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setViewingScript({
+          modelId,
+          modelName,
+          scriptContent: data.data.script_content
+        });
+      } else {
+        addNotification({
+          type: 'error',
+          title: 'Failed to Load Script',
+          message: data.error || 'Could not retrieve custom script'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching custom script:', error);
+      addNotification({
+        type: 'error',
+        title: 'Error',
+        message: 'Failed to load custom inference script'
+      });
+    } finally {
+      setLoadingScript(false);
+    }
+  };
+
+  const highlightPythonSyntax = (code: string): JSX.Element[] => {
+    // Process code line by line to avoid HTML escaping issues
+    const lines = code.split('\n');
+    const keywords = new Set(['def', 'class', 'import', 'from', 'return', 'if', 'else', 'elif', 'for', 'while', 
+                              'try', 'except', 'finally', 'with', 'as', 'pass', 'break', 'continue', 'yield',
+                              'async', 'await', 'lambda', 'raise', 'assert', 'del', 'global', 'nonlocal', 'in',
+                              'is', 'not', 'and', 'or', 'None', 'True', 'False']);
+    const builtins = new Set(['print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict', 'tuple', 'set',
+                              'type', 'isinstance', 'super', 'self', 'open', 'input', 'map', 'filter']);
+    
+    return lines.map((line, lineIndex) => {
+      const tokens: JSX.Element[] = [];
+      let i = 0;
+      
+      // Check if line is a comment
+      const trimmedLine = line.trim();
+      if (trimmedLine.startsWith('#')) {
+        return <span key={lineIndex} className="comment">{line}{'\n'}</span>;
+      }
+      
+      // Check for docstring
+      if (trimmedLine.startsWith('"""') || trimmedLine.startsWith("'''")) {
+        return <span key={lineIndex} className="string">{line}{'\n'}</span>;
+      }
+      
+      while (i < line.length) {
+        // Handle strings
+        if (line[i] === '"' || line[i] === "'") {
+          const quote = line[i];
+          let str = quote;
+          i++;
+          while (i < line.length && line[i] !== quote) {
+            if (line[i] === '\\' && i + 1 < line.length) {
+              str += line[i] + line[i + 1];
+              i += 2;
+            } else {
+              str += line[i];
+              i++;
+            }
+          }
+          if (i < line.length) str += line[i++];
+          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="string">{str}</span>);
+          continue;
+        }
+        
+        // Handle comments
+        if (line[i] === '#') {
+          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="comment">{line.substring(i)}</span>);
+          break;
+        }
+        
+        // Handle decorators
+        if (line[i] === '@' && /[a-zA-Z_]/.test(line[i + 1] || '')) {
+          let decorator = '@';
+          i++;
+          while (i < line.length && /[a-zA-Z0-9_]/.test(line[i])) {
+            decorator += line[i++];
+          }
+          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="decorator">{decorator}</span>);
+          continue;
+        }
+        
+        // Handle numbers
+        if (/\d/.test(line[i])) {
+          let num = '';
+          while (i < line.length && /[\d.]/.test(line[i])) {
+            num += line[i++];
+          }
+          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="number">{num}</span>);
+          continue;
+        }
+        
+        // Handle identifiers (keywords, builtins, or regular)
+        if (/[a-zA-Z_]/.test(line[i])) {
+          let word = '';
+          while (i < line.length && /[a-zA-Z0-9_]/.test(line[i])) {
+            word += line[i++];
+          }
+          
+          if (keywords.has(word)) {
+            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="keyword">{word}</span>);
+          } else if (builtins.has(word)) {
+            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="builtin">{word}</span>);
+          } else if (/^[A-Z]/.test(word)) {
+            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="class-name">{word}</span>);
+          } else {
+            tokens.push(<span key={`${lineIndex}-${tokens.length}`}>{word}</span>);
+          }
+          continue;
+        }
+        
+        // Handle other characters
+        tokens.push(<span key={`${lineIndex}-${tokens.length}`}>{line[i++]}</span>);
+      }
+      
+      tokens.push(<span key={`${lineIndex}-newline`}>{'\n'}</span>);
+      return <span key={lineIndex}>{tokens}</span>;
+    });
+  };
+
+  const handleCopyScript = () => {
+    if (viewingScript) {
+      navigator.clipboard.writeText(viewingScript.scriptContent).then(() => {
+        addNotification({
+          type: 'success',
+          title: 'Copied!',
+          message: 'Custom inference script copied to clipboard'
+        });
+      }).catch((err) => {
+        console.error('Failed to copy:', err);
+        addNotification({
+          type: 'error',
+          title: 'Copy Failed',
+          message: 'Failed to copy script to clipboard'
+        });
+      });
+    }
+  };
+
   const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -2795,6 +3171,33 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   Delete
                 </button>
               </div>
+              
+              {(model as any).custom_script_path && (
+                <div style={{ marginTop: '8px' }}>
+                  <button
+                    onClick={() => handleViewCustomScript(model.id, model.name)}
+                    disabled={loadingScript}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: 'transparent',
+                      border: '1px solid #76b900',
+                      borderRadius: '4px',
+                      color: '#76b900',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <i className="fas fa-code"></i>
+                    {loadingScript ? 'Loading...' : 'View Custom Inference Script'}
+                  </button>
+                </div>
+              )}
             </ModelCard>
           ))}
         </ModelsList>
@@ -2889,9 +3292,38 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               </FormGroup>
 
               <CustomScriptSection>
-                <label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <label style={{ margin: 0 }}>
                     <i className="fas fa-code"></i> Inference Script
                   </label>
+                  <button
+                    onClick={handleDownloadTemplate}
+                    disabled={loadingTemplate}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid #76b900',
+                      color: '#76b900',
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      cursor: loadingTemplate ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease',
+                      opacity: loadingTemplate ? 0.5 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!loadingTemplate) e.currentTarget.style.background = 'rgba(118, 185, 0, 0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent';
+                    }}
+                  >
+                    <i className={loadingTemplate ? "fas fa-spinner fa-spin" : "fas fa-file-code"}></i>
+                    {loadingTemplate ? 'Loading...' : 'View Template'}
+                  </button>
+                </div>
                   
                   <ScriptOptions>
                     <ScriptOption
@@ -3051,9 +3483,36 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   </FormatSelector>
 
                   <CustomScriptSection>
-                    <label>
-                      <i className="fas fa-code"></i> Inference Script
-                    </label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <label style={{ margin: 0 }}>
+                        <i className="fas fa-code"></i> Inference Script
+                      </label>
+                      <button
+                        onClick={handleDownloadTemplate}
+                        style={{
+                          background: 'transparent',
+                          border: '1px solid #76b900',
+                          color: '#76b900',
+                          padding: '6px 12px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          transition: 'all 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(118, 185, 0, 0.1)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                        }}
+                      >
+                        <i className="fas fa-download"></i>
+                        Download Template
+                      </button>
+                    </div>
                     
                     <ScriptOptions>
                       <ScriptOption
@@ -3157,6 +3616,108 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   </Button>
                 </>
               )}
+            </ActionButtons>
+          </ModalFooter>
+        </Modal>
+      )}
+      
+      {/* Custom Script Viewer Modal */}
+      {viewingScript && (
+        <Modal isOpen={true} onClose={() => setViewingScript(null)}>
+          <ModalHeader>
+            <h3>
+              <i className="fas fa-code"></i>
+              Custom Inference Script - {viewingScript.modelName}
+            </h3>
+            <ModalCloseButton onClick={() => setViewingScript(null)}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
+
+          <ModalBody>
+            <ScriptInfoBanner>
+              <i className="fas fa-info-circle"></i>
+              <p>
+                This is the custom inference script used by this model. You can copy it to create similar scripts for other models.
+              </p>
+            </ScriptInfoBanner>
+            
+            <CodeViewerContainer>
+              <CodeViewerHeader>
+                <h4>
+                  <i className="fas fa-file-code"></i>
+                  custom_inference.py
+                </h4>
+                <CopyButton onClick={handleCopyScript}>
+                  <i className="fas fa-copy"></i>
+                  Copy to Clipboard
+                </CopyButton>
+              </CodeViewerHeader>
+              <CodeContent>
+                {highlightPythonSyntax(viewingScript.scriptContent)}
+              </CodeContent>
+            </CodeViewerContainer>
+          </ModalBody>
+
+          <ModalFooter>
+            <ActionButtons>
+              <Button variant="secondary" onClick={() => setViewingScript(null)}>
+                Close
+              </Button>
+            </ActionButtons>
+          </ModalFooter>
+        </Modal>
+      )}
+      
+      {/* Template Viewer Modal */}
+      {viewingTemplate && (
+        <Modal isOpen={true} onClose={() => setViewingTemplate(false)}>
+          <ModalHeader>
+            <h3>
+              <i className="fas fa-file-code"></i>
+              Custom Inference Script Template
+            </h3>
+            <ModalCloseButton onClick={() => setViewingTemplate(false)}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
+
+          <ModalBody>
+            <ScriptInfoBanner>
+              <i className="fas fa-lightbulb"></i>
+              <p>
+                This template shows the structure for creating custom inference scripts. Copy or download this template to create your own custom preprocessing, inference, and postprocessing logic for your models.
+              </p>
+            </ScriptInfoBanner>
+            
+            <CodeViewerContainer>
+              <CodeViewerHeader>
+                <h4>
+                  <i className="fas fa-file-code"></i>
+                  custom_model_template.py
+                </h4>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <CopyButton onClick={handleCopyTemplate}>
+                    <i className="fas fa-copy"></i>
+                    Copy to Clipboard
+                  </CopyButton>
+                  <CopyButton onClick={handleDownloadTemplateFile}>
+                    <i className="fas fa-download"></i>
+                    Download File
+                  </CopyButton>
+                </div>
+              </CodeViewerHeader>
+              <CodeContent>
+                {highlightPythonSyntax(templateContent)}
+              </CodeContent>
+            </CodeViewerContainer>
+          </ModalBody>
+
+          <ModalFooter>
+            <ActionButtons>
+              <Button variant="secondary" onClick={() => setViewingTemplate(false)}>
+                Close
+              </Button>
             </ActionButtons>
           </ModalFooter>
         </Modal>
