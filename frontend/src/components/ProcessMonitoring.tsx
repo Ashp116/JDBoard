@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { getBackendUrl } from '../utils/api';
 
@@ -343,7 +343,7 @@ const ProcessMonitoring: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
 
-  const fetchProcesses = async () => {
+  const fetchProcesses = useCallback(async () => {
     setIsLoading(true);
     try {
       const params = new URLSearchParams({
@@ -366,7 +366,7 @@ const ProcessMonitoring: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentPage, itemsPerPage, sortBy, searchQuery]);
 
   const killProcess = async (pid: number) => {
     if (!confirm(`Are you sure you want to kill process ${pid}?`)) {
@@ -390,14 +390,15 @@ const ProcessMonitoring: React.FC = () => {
     }
   };
 
+  //@ts-ignore
   useEffect(() => {
     fetchProcesses();
     
     if (autoRefresh) {
-      const interval = setInterval(fetchProcesses, 3000);
+     const interval = setInterval(fetchProcesses, 3000);
       return () => clearInterval(interval);
     }
-  }, [autoRefresh, currentPage, itemsPerPage, sortBy, searchQuery]);
+  }, [autoRefresh, fetchProcesses]);
 
   // Pagination calculations
   const startIndex = (currentPage - 1) * itemsPerPage;
