@@ -8,6 +8,7 @@ import Dashboard from './components/Dashboard';
 import ModelsSection from './components/ModelsSection';
 import InferenceSection from './components/InferenceSection';
 import MonitoringSection from './components/MonitoringSection';
+import ProcessMonitoring from './components/ProcessMonitoring';
 import TerminalSection from './components/TerminalSection';
 import LogsSection from './components/LogsSection';
 import SettingsSection from './components/SettingsSection';
@@ -81,7 +82,7 @@ const ContentSection = styled.section<{ $active: boolean }>`
   }
 `;
 
-type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'terminal' | 'logs' | 'settings';
+type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'processes' | 'terminal' | 'logs' | 'settings';
 
 interface RouteParams {
   section?: string;
@@ -130,6 +131,7 @@ const AppContent: React.FC = () => {
       models: 'Models',
       inference: 'Inference', 
       monitoring: 'Monitoring',
+      processes: 'Process Monitor',
       terminal: 'Terminal',
       logs: 'Logs',
       settings: 'Settings'
@@ -177,6 +179,7 @@ const AppContent: React.FC = () => {
     models: ModelsSection,
     inference: InferenceSection,
     monitoring: MonitoringSection,
+    processes: ProcessMonitoring,
     terminal: TerminalSection,
     logs: LogsSection,
     settings: SettingsSection
@@ -255,6 +258,10 @@ const AppContent: React.FC = () => {
                 getBufferStats,
                 clearDataBuffer
               })} 
+            />
+            <Route 
+              path="/processes" 
+              element={renderSectionWithProps(ProcessMonitoring)} 
             />
             <Route 
               path="/terminal" 

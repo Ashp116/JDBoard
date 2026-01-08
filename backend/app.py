@@ -3277,6 +3277,137 @@ def background_system_updates():
         
         socketio.sleep(0.5)  # Update every 0.5 seconds for more responsive data
 
+@app.route('/system/processes', methods=['GET'])
+def get_processes():
+    """Get list of running processes with optional pagination and sorting"""
+    client_ip = get_client_ip()
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint='/system/processes',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        # Get query parameters for pagination and sorting
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        sort_by = request.args.get('sort_by', 'cpu', type=str)
+        search = request.args.get('search', '', type=str)
+        
+        # Limit per_page to reasonable values
+        per_page = min(max(per_page, 10), 500)
+        
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info', 'status', 'username', 'cmdline', 'create_time']):
+            try:
+                pinfo = proc.info
+                # Get cmdline safely
+                cmdline = ' '.join(pinfo.get('cmdline', [])) if pinfo.get('cmdline') else pinfo.get('name', '')
+                
+                process_data = {
+                    'pid': pinfo.get('pid'),
+                    'name': pinfo.get('name', 'Unknown'),
+                    'cpu_percent': pinfo.get('cpu_percent', 0) or 0,
+                    'memory_percent': proc.memory_percent() if hasattr(proc, 'memory_percent') else 0,
+                    'memory_mb': pinfo.get('memory_info').rss / (1024 * 1024) if pinfo.get('memory_info') else 0,
+                    'status': pinfo.get('status', 'unknown'),
+                    'username': pinfo.get('username', 'unknown'),
+                    'cmdline': cmdline[:100],  # Limit command line length
+                    'create_time': pinfo.get('create_time', 0)
+                }
+                
+                # Apply search filter if provided
+                if search:
+                    search_lower = search.lower()
+                    if not (search_lower in process_data['name'].lower() or 
+                           search_lower in process_data['cmdline'].lower() or 
+                           search in str(process_data['pid'])):
+                        continue
+                
+                processes.append(process_data)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        
+        # Apply sorting
+        if sort_by == 'cpu':
+            processes.sort(key=lambda p: p['cpu_percent'], reverse=True)
+        elif sort_by == 'memory':
+            processes.sort(key=lambda p: p['memory_percent'], reverse=True)
+        elif sort_by == 'name':
+            processes.sort(key=lambda p: p['name'].lower())
+        elif sort_by == 'pid':
+            processes.sort(key=lambda p: p['pid'])
+        
+        # Calculate pagination
+        total_count = len(processes)
+        total_pages = (total_count + per_page - 1) // per_page
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_processes = processes[start_idx:end_idx]
+        
+        return jsonify({
+            'success': True,
+            'processes': paginated_processes,
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total_count': total_count,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting processes: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/system/processes/<int:pid>/kill', methods=['POST'])
+def kill_process(pid):
+    """Kill a process by PID"""
+    client_ip = get_client_ip()
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    
+    request_logger.log_request(
+        endpoint=f'/system/processes/{pid}/kill',
+        client_ip=client_ip,
+        user_agent=user_agent,
+        method=request.method
+    )
+    
+    try:
+        proc = psutil.Process(pid)
+        proc_name = proc.name()
+        proc.kill()
+        
+        logger.info(f"Process {pid} ({proc_name}) killed by {client_ip}")
+        
+        return jsonify({
+            'success': True,
+            'message': f'Process {pid} ({proc_name}) killed successfully'
+        })
+    except psutil.NoSuchProcess:
+        return jsonify({
+            'success': False,
+            'error': 'Process not found'
+        }), 404
+    except psutil.AccessDenied:
+        return jsonify({
+            'success': False,
+            'error': 'Access denied. Cannot kill this process.'
+        }), 403
+    except Exception as e:
+        logger.error(f"Error killing process {pid}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     # Ensure directories exist
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
