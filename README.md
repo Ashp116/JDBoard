@@ -1,15 +1,15 @@
 
 <p align="center">
-   <img src="/JBoardIcon.svg" alt="JBoard Logo" width="120" />
+   <img src="/JDBoardIcon.svg" alt="JDBoard Logo" width="120" />
 </p>
 
-# JBoard
+# JDBoard
 
 A modern edge AI dashboard for NVIDIA Jetson devices with real-time monitoring and inferencing.
 
 ## Overview
 
-JBoard is a full-stack application that combines a React TypeScript frontend with a Python Flask backend to deliver a comprehensive edge AI management platform. Built specifically for NVIDIA Jetson devices, it offers seamless integration with CUDA, TensorRT, and other AI frameworks while providing real-time system monitoring and performance analytics.
+JDBoard is a full-stack application that combines a React TypeScript frontend with a Python Flask backend to deliver a comprehensive edge AI management platform. Built specifically for NVIDIA Jetson devices, it offers seamless integration with CUDA, TensorRT, and other AI frameworks while providing real-time system monitoring and performance analytics.
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ JBoard is a full-stack application that combines a React TypeScript frontend wit
 
 **Installation**
 ```bash
-git clone https://github.com/Ashp116/JBoard.git
+git clone https://github.com/Ashp116/JDBoard.git
 cd Jetson_Edge
 
 # Backend setup

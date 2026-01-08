@@ -998,13 +998,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         <SettingsCard>
           <h3>
             <i className="fas fa-desktop"></i>
-            JBoard Settings [Not working, fix this later bro]
+            JDBoard Settings [Not working, fix this later bro]
           </h3>
 
           <SettingItem>
             <div>
-              <div className="label">Auto-start JBoard</div>
-              <div className="description">Start JBoard on boot</div>
+              <div className="label">Auto-start JDBoard</div>
+              <div className="description">Start JDBoard on boot</div>
             </div>
             <Toggle 
               $active={settings.autoStartDashboard} 

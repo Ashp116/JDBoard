@@ -2928,7 +2928,7 @@ def execute_terminal_command():
         # Handle help command
         if command.strip() in ['help', 'jetsonboard-help']:
             help_text = """
-JBoard Terminal - Available Commands:
+JDBoard Terminal - Available Commands:
 
 File & Directory Operations:
   ls, cat, head, tail, less, more, file, stat, du, df

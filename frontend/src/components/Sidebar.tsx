@@ -494,7 +494,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
           <i className={`fas ${isMobileMenuOpen ? 'fa-times' : 'fa-bars'}`}></i>
         </MobileMenuButton>
         <MobileTitle>
-          <img src="/JBoardIcon.svg" alt="JBoard Icon" />
+          <img src="/JDBoardIcon.svg" alt="JDBoard Icon" />
           <span>Jetson Board</span>
         </MobileTitle>
         <div style={{ width: '44px' }}></div> {/* Spacer for centering */}
@@ -507,7 +507,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
       <SidebarContainer $isOpen={isMobileMenuOpen}>
         <SidebarBrand>
           <SidebarLogo>
-            <img className='brand-icon' src="/JBoardIcon.svg" alt="JBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
+            <img className='brand-icon' src="/JDBoardIcon.svg" alt="JDBoard Icon" style={{ height: '32px', width: 'auto', maxHeight: '100%' }} />
             <span className="brand-text" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: '0px' }}>
               v{packageJson.version}
             </span>

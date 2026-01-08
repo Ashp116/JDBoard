@@ -332,8 +332,8 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
           textAlign: isMobile ? 'center' : 'left'
         }}>
           <img 
-            src="/JBoardIcon.svg" 
-            alt="JBoard Icon" 
+            src="/JDBoardIcon.svg" 
+            alt="JDBoard Icon" 
             style={{ 
               height: isMobile ? '60px' : '90px', 
               width: 'auto', 

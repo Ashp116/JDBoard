@@ -1,4 +1,4 @@
-// TypeScript type definitions for JBoard
+// TypeScript type definitions for JDBoard
 
 export interface CPUData {
   usage: number;
