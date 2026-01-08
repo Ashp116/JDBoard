@@ -3027,6 +3027,22 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper functions to generate copy text for code examples
+  const getCurlExample = () => {
+    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    return `curl -X POST "${getBackendUrl()}/inference/${modelName}" \\\n  -F "image=@/path/to/your/image.jpg"`;
+  };
+
+  const getJavaScriptExample = () => {
+    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    return `const formData = new FormData();\nformData.append('image', imageFile);\n\nconst modelId = '${modelName}';\nconst response = await fetch(\`${getBackendUrl()}/inference/\${modelId}\`, {\n  method: 'POST',\n  body: formData\n});\n\nconst result = await response.json();\nconsole.log(result);`;
+  };
+
+  const getPythonExample = () => {
+    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    return `import requests\n\nmodel_id = "${modelName}"\nurl = f"${getBackendUrl()}/inference/{'{model_id}'}"\nfiles = {'image': open('/path/to/your/image.jpg', 'rb')}\n\nresponse = requests.post(url, files=files)\nresult = response.json()\nprint(result)`;
+  };
+
   // Sync state with URL parameters
   useEffect(() => {
     const newTab = getValidTab(tab);
@@ -4315,9 +4331,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     try {
       const formData = new FormData();
       formData.append('image', selectedImage);
-      formData.append('model_id', selectedModel);
 
-      const response = await fetch(`${getBackendUrl()}/inference`, {
+      const response = await fetch(`${getBackendUrl()}/inference/${selectedModel}`, {
         method: 'POST',
         body: formData,
       });
@@ -5151,6 +5166,19 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
               
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ display: 'grid', gap: '10px' }}>
+                  
+                  {/* Inference Routes */}
+                  <h3 style={{ 
+                    fontSize: '15px', 
+                    fontWeight: '600', 
+                    color: '#76b900', 
+                    margin: '20px 0 10px 0',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    Inference
+                  </h3>
+
                   {/* POST /api/inference */}
                   <div style={{ 
                     background: '#2a2a2a', 
@@ -5169,12 +5197,12 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     >
                       <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
                       <RouteUrlContainer>
-                        <RouteUrl>{getBackendUrl()}/inference</RouteUrl>
+                        <RouteUrl>{getBackendUrl()}/inference/<span style={{ color: '#76b900' }}>{'{model_id}'}</span></RouteUrl>
                         <button 
                           className="route-copy-btn"
                           onClick={(e) => {
                             e.stopPropagation();
-                            copyToClipboard(`${getBackendUrl()}/inference`);
+                            copyToClipboard(`${getBackendUrl()}/inference/{model_id}`);
                           }}
                         >
                           <i className="fas fa-copy"></i>
@@ -5205,12 +5233,9 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                               &nbsp;&nbsp;<span className="property">"image"</span>: <span className="comment">// File (required) - Image file to analyze</span><br />
                               &nbsp;&nbsp;<span className="comment">// Supported formats: JPEG, PNG, WebP, BMP</span><br />
                               &nbsp;&nbsp;<span className="comment">// Max size: 10MB</span><br />
-                              <br />
-                              &nbsp;&nbsp;<span className="property">"model_id"</span>: <span className="string">"{selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"</span><span className="comment"> // String (required)</span><br />
-                              &nbsp;&nbsp;<span className="comment">// Available models: "YOLOv11n", "YOLOv11x"</span><br />
                               {`}`}
                             </div>
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "image": "// File (required) - Image file to analyze\\n  // Supported formats: JPEG, PNG, WebP, BMP\\n  // Max size: 10MB\\n\\n  "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}" // String (required)\\n  // Available models: \\"YOLOv11n\\", \\"YOLOv11x\\"\\n}"`)}>
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{\n  "image": "// File (required) - Image file to analyze\\n  // Supported formats: JPEG, PNG, WebP, BMP\\n  // Max size: 10MB\\n}"`)}>
                             </i>
                           </CodeBlock>
                         </div>
@@ -5251,10 +5276,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           {/* cURL Tab */}
                           {getCodeTab('inference') === 'curl' && (
                             <CodeBlock language="curl">
-                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/inference" \\
-  -F "image=@/path/to/your/image.jpg" \\
-  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`, 'curl')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/inference" \\\n  -F "image=@/path/to/your/image.jpg" \\\n  -F "model_id=${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}"`)}>
+                              {renderHighlightedCode(getCurlExample(), 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(getCurlExample())}>
                               </i>
                             </CodeBlock>
                           )}
@@ -5262,28 +5285,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           {/* JavaScript Tab */}
                           {getCodeTab('inference') === 'javascript' && (
                             <CodeBlock language="javascript">
-                              {renderHighlightedCode(`const formData = new FormData();
-formData.append('image', imageFile);
-formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
-
-const response = await fetch('${getBackendUrl()}/inference', {
-  method: 'POST',
-  body: formData
-});
-
-const result = await response.json();
-console.log(result);`, 'javascript')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const formData = new FormData();
-formData.append('image', imageFile);
-formData.append('model_id', '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}');
-
-const response = await fetch('${getBackendUrl()}/inference', {
-  method: 'POST',
-  body: formData
-});
-
-const result = await response.json();
-console.log(result);`)}>
+                              {renderHighlightedCode(getJavaScriptExample(), 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(getJavaScriptExample())}>
                               </i>
                             </CodeBlock>
                           )}
@@ -5291,24 +5294,8 @@ console.log(result);`)}>
                           {/* Python Tab */}
                           {getCodeTab('inference') === 'python' && (
                             <CodeBlock language="python">
-                              {renderHighlightedCode(`import requests
-
-url = "${getBackendUrl()}/inference"
-files = {'image': open('/path/to/your/image.jpg', 'rb')}
-data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
-
-response = requests.post(url, files=files, data=data)
-result = response.json()
-print(result)`, 'python')}
-                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
-
-url = "${getBackendUrl()}/inference"
-files = {'image': open('/path/to/your/image.jpg', 'rb')}
-data = {'model_id': '${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}'}
-
-response = requests.post(url, files=files, data=data)
-result = response.json()
-print(result)`)}>
+                              {renderHighlightedCode(getPythonExample(), 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(getPythonExample())}>
                               </i>
                             </CodeBlock>
                           )}
@@ -5364,6 +5351,289 @@ print(result)`)}>
       "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
       "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"
     }
+  }
+}`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Model Management Routes */}
+                  <h3 style={{ 
+                    fontSize: '15px', 
+                    fontWeight: '600', 
+                    color: '#76b900', 
+                    margin: '30px 0 10px 0',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px'
+                  }}>
+                    Model Management
+                  </h3>
+
+                  {/* GET /models/list */}
+                  <div style={{ 
+                    background: '#2a2a2a', 
+                    borderRadius: '6px',
+                    border: '1px solid #444'
+                  }}>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '10px', 
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpandedRoute(expandedRoute === 'models-list' ? null : 'models-list')}
+                    >
+                      <MethodBadge method="GET" style={{ marginRight: '15px' }}>GET</MethodBadge>
+                      <RouteUrlContainer>
+                        <RouteUrl>{getBackendUrl()}/models/list</RouteUrl>
+                        <button 
+                          className="route-copy-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${getBackendUrl()}/models/list`);
+                          }}
+                        >
+                          <i className="fas fa-copy"></i>
+                        </button>
+                      </RouteUrlContainer>
+                      <i className={`fas fa-chevron-${expandedRoute === 'models-list' ? 'up' : 'down'}`} style={{ color: '#76b900', marginLeft: '15px' }}></i>
+                    </div>
+                    
+                    {expandedRoute === 'models-list' && (
+                      <div style={{ padding: '0 15px 15px', borderTop: '1px solid #444', margin: '0 10px', paddingTop: '15px' }}>
+                        <RouteDescription>
+                          Get a list of all available models with their details including status, framework, and file paths.
+                        </RouteDescription>
+                        
+                        {/* Code Examples */}
+                        <div style={{ marginTop: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-code"></i> Code Examples
+                          </h4>
+                          
+                          {/* cURL */}
+                          <CodeBlock language="curl">
+                            {renderHighlightedCode(`curl -X GET "${getBackendUrl()}/models/list"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X GET "${getBackendUrl()}/models/list"`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+
+                        {/* Response Example */}
+                        <div style={{ marginTop: '25px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-arrow-left"></i> Response Example
+                          </h4>
+                          <CodeBlock language="json">
+                            {renderHighlightedCode(`{
+  "success": true,
+  "models": [
+    {
+      "id": "yolo11x",
+      "name": "YOLOv11x",
+      "framework": "pytorch",
+      "status": "loaded",
+      "file_path": "/models/yolo11x.pt",
+      "created_at": "2026-01-08T10:30:00Z"
+    }
+  ],
+  "timestamp": "2026-01-08T12:00:00Z"
+}`, 'json')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": true,
+  "models": [
+    {
+      "id": "yolo11x",
+      "name": "YOLOv11x",
+      "framework": "pytorch",
+      "status": "loaded",
+      "file_path": "/models/yolo11x.pt",
+      "created_at": "2026-01-08T10:30:00Z"
+    }
+  ],
+  "timestamp": "2026-01-08T12:00:00Z"
+}`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* POST /models/<model_id>/load */}
+                  <div style={{ 
+                    background: '#2a2a2a', 
+                    borderRadius: '6px',
+                    border: '1px solid #444'
+                  }}>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '10px', 
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpandedRoute(expandedRoute === 'load-model' ? null : 'load-model')}
+                    >
+                      <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
+                      <RouteUrlContainer>
+                        <RouteUrl>{getBackendUrl()}/models/<span style={{ color: '#76b900' }}>{'{model_id}'}</span>/load</RouteUrl>
+                        <button 
+                          className="route-copy-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${getBackendUrl()}/models/{model_id}/load`);
+                          }}
+                        >
+                          <i className="fas fa-copy"></i>
+                        </button>
+                      </RouteUrlContainer>
+                      <i className={`fas fa-chevron-${expandedRoute === 'load-model' ? 'up' : 'down'}`} style={{ color: '#76b900', marginLeft: '15px' }}></i>
+                    </div>
+                    
+                    {expandedRoute === 'load-model' && (
+                      <div style={{ padding: '0 15px 15px', borderTop: '1px solid #444', margin: '0 10px', paddingTop: '15px' }}>
+                        <RouteDescription>
+                          Load a model into GPU memory for inference. The model ID is specified in the URL path.
+                          {!selectedModel && (
+                            <div style={{ color: '#ff4757', fontSize: '14px', marginTop: '8px' }}>
+                              <i className="fas fa-exclamation-triangle"></i> Select a model above to see model-specific examples
+                            </div>
+                          )}
+                        </RouteDescription>
+                        
+                        {/* Code Examples */}
+                        <div style={{ marginTop: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-code"></i> Code Examples
+                          </h4>
+                          
+                          {/* cURL */}
+                          <CodeBlock language="curl">
+                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/load"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/load"`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+
+                        {/* Response Example */}
+                        <div style={{ marginTop: '25px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-arrow-left"></i> Response Example
+                          </h4>
+                          <CodeBlock language="json">
+                            {renderHighlightedCode(`{
+  "success": true,
+  "message": "Model loaded successfully",
+  "data": {
+    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "status": "loaded",
+    "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
+    "gpu_memory_used_gb": 2.4
+  }
+}`, 'json')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": true,
+  "message": "Model loaded successfully",
+  "data": {
+    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "status": "loaded",
+    "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
+    "gpu_memory_used_gb": 2.4
+  }
+}`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* POST /models/<model_id>/unload */}
+                  <div style={{ 
+                    background: '#2a2a2a', 
+                    borderRadius: '6px',
+                    border: '1px solid #444'
+                  }}>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '10px', 
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpandedRoute(expandedRoute === 'unload-model' ? null : 'unload-model')}
+                    >
+                      <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
+                      <RouteUrlContainer>
+                        <RouteUrl>{getBackendUrl()}/models/<span style={{ color: '#76b900' }}>{'{model_id}'}</span>/unload</RouteUrl>
+                        <button 
+                          className="route-copy-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${getBackendUrl()}/models/{model_id}/unload`);
+                          }}
+                        >
+                          <i className="fas fa-copy"></i>
+                        </button>
+                      </RouteUrlContainer>
+                      <i className={`fas fa-chevron-${expandedRoute === 'unload-model' ? 'up' : 'down'}`} style={{ color: '#76b900', marginLeft: '15px' }}></i>
+                    </div>
+                    
+                    {expandedRoute === 'unload-model' && (
+                      <div style={{ padding: '0 15px 15px', borderTop: '1px solid #444', margin: '0 10px', paddingTop: '15px' }}>
+                        <RouteDescription>
+                          Unload a model from GPU memory to free up resources. The model ID is specified in the URL path.
+                          {!selectedModel && (
+                            <div style={{ color: '#ff4757', fontSize: '14px', marginTop: '8px' }}>
+                              <i className="fas fa-exclamation-triangle"></i> Select a model above to see model-specific examples
+                            </div>
+                          )}
+                        </RouteDescription>
+                        
+                        {/* Code Examples */}
+                        <div style={{ marginTop: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-code"></i> Code Examples
+                          </h4>
+                          
+                          {/* cURL */}
+                          <CodeBlock language="curl">
+                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/unload"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/unload"`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+
+                        {/* Response Example */}
+                        <div style={{ marginTop: '25px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-arrow-left"></i> Response Example
+                          </h4>
+                          <CodeBlock language="json">
+                            {renderHighlightedCode(`{
+  "success": true,
+  "message": "Model unloaded successfully",
+  "data": {
+    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "status": "unloaded",
+    "gpu_memory_freed_gb": 2.4
+  }
+}`, 'json')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": true,
+  "message": "Model unloaded successfully",
+  "data": {
+    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "status": "unloaded",
+    "gpu_memory_freed_gb": 2.4
   }
 }`)}>
                             </i>

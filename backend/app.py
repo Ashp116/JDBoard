@@ -1284,15 +1284,15 @@ def debug_client_info():
         'all_headers': dict(request.headers)
     })
 
-@app.route('/inference', methods=['POST'])
-def run_inference():
+@app.route('/inference/<model_id>', methods=['POST'])
+def run_inference(model_id):
     """Run inference on uploaded image"""
     client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
     # Log the request with proper IP
     request_logger.log_request(
-        endpoint='/inference',
+        endpoint=f'/inference/{model_id}',
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method
@@ -1305,13 +1305,6 @@ def run_inference():
         }), 400
     
     file = request.files['image']
-    model_id = request.form.get('model_id')
-    
-    if not model_id:
-        return jsonify({
-            'success': False,
-            'error': 'No model specified'
-        }), 400
     
     try:
         # Read image

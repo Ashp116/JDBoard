@@ -483,7 +483,14 @@ class AIModelManager:
         
         if model_id in self.loaded_models:
             logger.info(f"Model {model_id} already loaded")
-            return {"status": "already_loaded", "model_id": model_id}
+            # Get current model info for response
+            mem_info = self.memory_manager.get_gpu_memory_info()
+            return {
+                "status": "already_loaded",
+                "model_id": model_id,
+                "framework": self.models_registry[model_id]['framework'],
+                "gpu_memory_used_gb": round(mem_info.get('used_gb', 0), 2)
+            }
         
         # Check memory before loading
         mem_info = self.memory_manager.get_gpu_memory_info()
@@ -689,6 +696,17 @@ class AIModelManager:
     def unload_model(self, model_id):
         """Unload a model from memory"""
         try:
+            # Check if model is already unloaded
+            if model_id not in self.loaded_models:
+                logger.info(f"Model {model_id} is not currently loaded")
+                mem_info = self.memory_manager.get_gpu_memory_info()
+                return {
+                    "status": "not_loaded",
+                    "model_id": model_id,
+                    "message": "Model was not loaded",
+                    "gpu_memory_freed_gb": 0
+                }
+            
             # Log memory before unload
             mem_info = self.memory_manager.get_gpu_memory_info()
             if mem_info.get("total", 0) > 0:
@@ -721,14 +739,21 @@ class AIModelManager:
                 logger.info(f"Model {model_id} registry updated to unloaded state")
                 
                 # Log memory after cleanup
-                mem_info = self.memory_manager.get_gpu_memory_info()
-                if mem_info.get("total", 0) > 0:
-                    logger.info(f"Post-unload GPU Memory - Free: {mem_info.get('free_gb', 0):.1f}GB")
+                mem_info_after = self.memory_manager.get_gpu_memory_info()
+                if mem_info_after.get("total", 0) > 0:
+                    logger.info(f"Post-unload GPU Memory - Free: {mem_info_after.get('free_gb', 0):.1f}GB")
                 
-                return True
+                # Calculate freed memory
+                freed_gb = round(mem_info_after.get('free_gb', 0) - mem_info.get('free_gb', 0), 2)
+                
+                return {
+                    "status": "unloaded",
+                    "model_id": model_id,
+                    "gpu_memory_freed_gb": freed_gb
+                }
             else:
                 logger.warning(f"Model {model_id} not found in registry")
-                return False
+                raise ValueError(f"Model {model_id} not found in registry")
                 
         except Exception as e:
             logger.error(f"Error unloading model {model_id}: {str(e)}")
@@ -741,7 +766,7 @@ class AIModelManager:
             
             # Always clear cache on error
             self.memory_manager.clear_cuda_cache()
-            return False
+            raise
     
     def force_reload_model(self, model_id):
         """Force reload a model by first unloading it completely"""
