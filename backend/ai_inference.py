@@ -420,7 +420,7 @@ class AIModelManager:
         
         model_info = {
             'id': model_id,
-            'name': model_name,
+
             'type': model_type,
             'file_path': str(file_path),
             'original_filename': original_filename or file_path.name,
@@ -1340,29 +1340,37 @@ class AIModelManager:
             raise ValueError("New name cannot be empty")
         
         if len(new_name) < 2:
-            raise ValueError("Model name must be at least 2 characters long")
+            raise ValueError("Model ID must be at least 2 characters long")
         
         if len(new_name) > 50:
-            raise ValueError("Model name must be less than 50 characters")
+            raise ValueError("Model ID must be less than 50 characters")
         
-        # Check for name uniqueness (case-insensitive)
-        for existing_id, existing_model in self.models_registry.items():
-            if existing_id != model_id and existing_model['name'].lower() == new_name.lower():
-                raise ValueError("A model with this name already exists")
+        # Check for ID uniqueness
+        if new_name in self.models_registry and new_name != model_id:
+            raise ValueError("A model with this ID already exists")
         
-        # Update the name in registry
-        old_name = self.models_registry[model_id]['name']
-        self.models_registry[model_id]['name'] = new_name
-        self.models_registry[model_id]['modified_at'] = datetime.now().isoformat()
+        # Update the ID in registry (change the key)
+        old_id = model_id
+        model_data = self.models_registry[model_id].copy()
+        model_data['id'] = new_name
+        model_data['modified_at'] = datetime.now().isoformat()
+        
+        # Remove old entry and add new one
+        del self.models_registry[model_id]
+        self.models_registry[new_name] = model_data
+        
+        # Update loaded models if the model is currently loaded
+        if model_id in self.loaded_models:
+            self.loaded_models[new_name] = self.loaded_models.pop(model_id)
         
         # Save registry
         self._save_registry()
         
-        logger.info(f"Model {model_id} renamed from '{old_name}' to '{new_name}'")
+        logger.info(f"Model ID changed from '{old_id}' to '{new_name}'")
         return {
-            'model_id': model_id,
-            'old_name': old_name,
-            'new_name': new_name
+            'old_id': old_id,
+            'new_id': new_name,
+            'model_data': model_data
         }
     
     def get_model_info(self, model_id):

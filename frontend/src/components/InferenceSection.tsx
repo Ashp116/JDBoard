@@ -3029,17 +3029,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
 
   // Helper functions to generate copy text for code examples
   const getCurlExample = () => {
-    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    const modelName = selectedModel ? selectedModel : 'MODEL_NAME';
     return `curl -X POST "${getBackendUrl()}/inference/${modelName}" \\\n  -F "image=@/path/to/your/image.jpg"`;
   };
 
   const getJavaScriptExample = () => {
-    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    const modelName = selectedModel ? selectedModel : 'MODEL_NAME';
     return `const formData = new FormData();\nformData.append('image', imageFile);\n\nconst modelId = '${modelName}';\nconst response = await fetch(\`${getBackendUrl()}/inference/\${modelId}\`, {\n  method: 'POST',\n  body: formData\n});\n\nconst result = await response.json();\nconsole.log(result);`;
   };
 
   const getPythonExample = () => {
-    const modelName = selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME';
+    const modelName = selectedModel ? selectedModel : 'MODEL_NAME';
     return `import requests\n\nmodel_id = "${modelName}"\nurl = f"${getBackendUrl()}/inference/{'{model_id}'}"\nfiles = {'image': open('/path/to/your/image.jpg', 'rb')}\n\nresponse = requests.post(url, files=files)\nresult = response.json()\nprint(result)`;
   };
 
@@ -4635,7 +4635,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             <option value="">Select a model...</option>
             {models.map((model) => (
               <option key={model.id} value={model.id} disabled={model.status !== 'loaded'}>
-                {model.name} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
+                {model.id} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
               </option>
             ))}
           </ModelSelector>
@@ -5127,7 +5127,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     <option value="">Select a model...</option>
                     {models.map((model) => (
                       <option key={model.id} value={model.id}>
-                        {model.name} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
+                        {model.id} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
                       </option>
                     ))}
                   </select>
@@ -5325,7 +5325,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         }
       ],
       "inference_time": 0.123,
-      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+      "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
       "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"
     }
   }
@@ -5348,7 +5348,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         }
       ],
       "inference_time": 0.123,
-      "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+      "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
       "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}"
     }
   }
@@ -5516,8 +5516,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           
                           {/* cURL */}
                           <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/load"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/load"`)}>
+                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`)}>
                             </i>
                           </CodeBlock>
                         </div>
@@ -5532,7 +5532,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   "success": true,
   "message": "Model loaded successfully",
   "data": {
-    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
     "status": "loaded",
     "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
     "gpu_memory_used_gb": 2.4
@@ -5542,7 +5542,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   "success": true,
   "message": "Model loaded successfully",
   "data": {
-    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
     "status": "loaded",
     "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
     "gpu_memory_used_gb": 2.4
@@ -5606,8 +5606,8 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           
                           {/* cURL */}
                           <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/unload"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}/unload"`)}>
+                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`)}>
                             </i>
                           </CodeBlock>
                         </div>
@@ -5622,7 +5622,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   "success": true,
   "message": "Model unloaded successfully",
   "data": {
-    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
     "status": "unloaded",
     "gpu_memory_freed_gb": 2.4
   }
@@ -5631,9 +5631,99 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   "success": true,
   "message": "Model unloaded successfully",
   "data": {
-    "model_id": "${selectedModel ? (getSelectedModelInfo()?.name || selectedModel) : 'MODEL_NAME'}",
+    "model_id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
     "status": "unloaded",
     "gpu_memory_freed_gb": 2.4
+  }
+}`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* POST /models/<model_id>/force-reload */}
+                  <div style={{ 
+                    background: '#2a2a2a', 
+                    borderRadius: '6px',
+                    border: '1px solid #444'
+                  }}>
+                    <div 
+                      style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        padding: '10px', 
+                        cursor: 'pointer',
+                        userSelect: 'none'
+                      }}
+                      onClick={() => setExpandedRoute(expandedRoute === 'force-reload-model' ? null : 'force-reload-model')}
+                    >
+                      <MethodBadge method="POST" style={{ marginRight: '15px' }}>POST</MethodBadge>
+                      <RouteUrlContainer>
+                        <RouteUrl>{getBackendUrl()}/models/<span style={{ color: '#76b900' }}>{'{model_id}'}</span>/force-reload</RouteUrl>
+                        <button 
+                          className="route-copy-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            copyToClipboard(`${getBackendUrl()}/models/{model_id}/force-reload`);
+                          }}
+                        >
+                          <i className="fas fa-copy"></i>
+                        </button>
+                      </RouteUrlContainer>
+                      <i className={`fas fa-chevron-${expandedRoute === 'force-reload-model' ? 'up' : 'down'}`} style={{ color: '#76b900', marginLeft: '15px' }}></i>
+                    </div>
+                    
+                    {expandedRoute === 'force-reload-model' && (
+                      <div style={{ padding: '0 15px 15px', borderTop: '1px solid #444', margin: '0 10px', paddingTop: '15px' }}>
+                        <RouteDescription>
+                          Force unload and reload a model, useful when you need to refresh the model or recover from errors. The model ID is specified in the URL path.
+                          {!selectedModel && (
+                            <div style={{ color: '#ff4757', fontSize: '14px', marginTop: '8px' }}>
+                              <i className="fas fa-exclamation-triangle"></i> Select a model above to see model-specific examples
+                            </div>
+                          )}
+                        </RouteDescription>
+                        
+                        {/* Code Examples */}
+                        <div style={{ marginTop: '20px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-code"></i> Code Examples
+                          </h4>
+                          
+                          {/* cURL */}
+                          <CodeBlock language="curl">
+                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`, 'curl')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`)}>
+                            </i>
+                          </CodeBlock>
+                        </div>
+
+                        {/* Response Example */}
+                        <div style={{ marginTop: '25px' }}>
+                          <h4 style={{ color: '#76b900', marginBottom: '10px', fontSize: '16px' }}>
+                            <i className="fas fa-arrow-left"></i> Response Example
+                          </h4>
+                          <CodeBlock language="json">
+                            {renderHighlightedCode(`{
+  "success": true,
+  "message": "Model ${selectedModel ? selectedModel : 'MODEL_NAME'} force reloaded successfully",
+  "data": {
+    "id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
+    "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
+    "status": "loaded",
+    "loaded": true
+  }
+}`, 'json')}
+                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`{
+  "success": true,
+  "message": "Model ${selectedModel ? selectedModel : 'MODEL_NAME'} force reloaded successfully",
+  "data": {
+    "id": "${selectedModel ? selectedModel : 'MODEL_NAME'}",
+    "framework": "${selectedModel ? (getSelectedModelInfo()?.framework || 'pytorch') : 'FRAMEWORK'}",
+    "status": "loaded",
+    "loaded": true
   }
 }`)}>
                             </i>
@@ -5729,7 +5819,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                     >
                       <option value="">All Models</option>
                       {models.map(model => (
-                        <option key={model.id} value={model.id}>{model.name}</option>
+                        <option key={model.id} value={model.id}>{model.id}</option>
                       ))}
                     </select>
                   </FilterGroup>

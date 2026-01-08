@@ -771,12 +771,12 @@ def rename_model(model_id):
             'error': 'Model name must be less than 50 characters'
         }), 400
     
-    # Check for invalid characters
+    # Check for invalid characters (valid ID format)
     import re
-    if not re.match(r'^[a-zA-Z0-9\s\-_\.()]+$', new_name):
+    if not re.match(r'^[a-zA-Z0-9\-_\.()]+$', new_name):
         return jsonify({
             'success': False,
-            'error': 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed'
+            'error': 'Model ID contains invalid characters. Only letters, numbers, and -_.() are allowed (no spaces)'
         }), 400
     
     try:
@@ -794,22 +794,22 @@ def rename_model(model_id):
                 'error': 'Model not found'
             }), 404
         
-        # Check for name uniqueness (case-insensitive)
+        # Check for ID uniqueness
         for model in models:
-            if model['id'] != model_id and model['name'].lower() == new_name.lower():
+            if model['id'] == new_name:
                 return jsonify({
                     'success': False,
-                    'error': 'A model with this name already exists'
+                    'error': 'A model with this ID already exists'
                 }), 400
         
-        # Perform the rename
+        # Perform the rename (change model ID)
         result = ai_manager.rename_model(model_id, new_name)
         logger.info(f"Model {model_id} renamed to '{new_name}' by {client_ip}")
         
         return jsonify({
             'success': True,
             'data': result,
-            'message': f'Model renamed to "{new_name}" successfully'
+            'message': f'Model ID changed to "{new_name}" successfully'
         })
     except Exception as e:
         logger.error(f"Error renaming model {model_id}: {str(e)}")
@@ -909,7 +909,7 @@ def get_model_custom_script(model_id):
             'data': {
                 'script_content': script_content,
                 'script_path': custom_script_path,
-                'model_name': target_model['name']
+                'model_id': target_model['id']
             }
         })
     except Exception as e:

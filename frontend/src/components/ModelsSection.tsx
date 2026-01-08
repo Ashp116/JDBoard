@@ -2114,7 +2114,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       setFilteredModels(models);
     } else {
       const filtered = models.filter(model => 
-        model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        model.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
         model.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
         model.framework.toLowerCase().includes(searchQuery.toLowerCase())
       );
@@ -2286,7 +2286,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
     
     // Check for uniqueness (case-insensitive)
-    const existingNames = models.map(model => model.name.toLowerCase());
+    const existingNames = models.map(model => model.id.toLowerCase());
     if (existingNames.includes(name.toLowerCase())) {
       return 'A model with this name already exists. Please choose a different name.';
     }
@@ -2635,17 +2635,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       return 'Model name must be less than 50 characters';
     }
     
-    // Check for invalid characters
-    if (!/^[a-zA-Z0-9\s\-_\.()]+$/.test(name)) {
-      return 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed';
+    // Check for valid ID format (no spaces allowed)
+    if (!/^[a-zA-Z0-9\-_\.()]+$/.test(name)) {
+      return 'Model ID contains invalid characters. Only letters, numbers, and -_.() are allowed (no spaces)';
     }
     
-    // Check for uniqueness (case-insensitive) excluding current model
-    const existingNames = models
+    // Check for uniqueness excluding current model
+    const existingIds = models
       .filter(model => model.id !== editingModel)
-      .map(model => model.name.toLowerCase());
-    if (existingNames.includes(name.toLowerCase())) {
-      return 'A model with this name already exists. Please choose a different name.';
+      .map(model => model.id);
+    if (existingIds.includes(name)) {
+      return 'A model with this ID already exists. Please choose a different ID.';
     }
     
     return '';
@@ -3100,16 +3100,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   </EditNameContainer>
                 ) : (
                   <>
-                    <h4>{model.name}</h4>
+                    <h4>{model.id}</h4>
                     <div className="header-actions">
                       <span className={`status ${model.loaded ? 'loaded' : 'unloaded'}`}>
                         {model.loaded ? 'Loaded' : 'Not Loaded'}
                       </span>
                       <button 
                         className="edit-header"
-                        onClick={() => handleEditModelName(model.id, model.name)}
+                        onClick={() => handleEditModelName(model.id, model.id)}
                         disabled={editingModel !== null}
-                        title="Edit model name"
+                        title="Edit model ID"
                       >
                         <i className="fas fa-ellipsis-h"></i>
                       </button>
