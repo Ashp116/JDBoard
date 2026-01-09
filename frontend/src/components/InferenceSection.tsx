@@ -5416,12 +5416,79 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                             <i className="fas fa-code"></i> Code Examples
                           </h4>
                           
-                          {/* cURL */}
-                          <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X GET "${getBackendUrl()}/models/list"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X GET "${getBackendUrl()}/models/list"`)}>
-                            </i>
-                          </CodeBlock>
+                          {/* Language Tabs */}
+                          <div style={{ 
+                            display: 'flex', 
+                            marginBottom: '10px',
+                            borderBottom: '1px solid #444'
+                          }}>
+                            {['curl', 'javascript', 'python'].map(lang => (
+                              <button
+                                key={lang}
+                                onClick={() => setCodeTab('models-list', lang)}
+                                style={{
+                                  background: getCodeTab('models-list') === lang ? '#76b900' : 'transparent',
+                                  color: getCodeTab('models-list') === lang ? '#000' : '#888',
+                                  border: 'none',
+                                  padding: '8px 16px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px 4px 0 0',
+                                  fontSize: '14px',
+                                  fontWeight: getCodeTab('models-list') === lang ? 'bold' : 'normal',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {lang === 'curl' ? 'cURL' : lang}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* cURL Tab */}
+                          {getCodeTab('models-list') === 'curl' && (
+                            <CodeBlock language="curl">
+                              {renderHighlightedCode(`curl -X GET "${getBackendUrl()}/models/list"`, 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X GET "${getBackendUrl()}/models/list"`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* JavaScript Tab */}
+                          {getCodeTab('models-list') === 'javascript' && (
+                            <CodeBlock language="javascript">
+                              {renderHighlightedCode(`const response = await fetch('${getBackendUrl()}/models/list', {
+  method: 'GET'
+});
+
+const result = await response.json();
+console.log(result.models);`, 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const response = await fetch('${getBackendUrl()}/models/list', {
+  method: 'GET'
+});
+
+const result = await response.json();
+console.log(result.models);`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* Python Tab */}
+                          {getCodeTab('models-list') === 'python' && (
+                            <CodeBlock language="python">
+                              {renderHighlightedCode(`import requests
+
+url = "${getBackendUrl()}/models/list"
+response = requests.get(url)
+result = response.json()
+print(result['models'])`, 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
+
+url = "${getBackendUrl()}/models/list"
+response = requests.get(url)
+result = response.json()
+print(result['models'])`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
                         </div>
 
                         {/* Response Example */}
@@ -5514,12 +5581,83 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                             <i className="fas fa-code"></i> Code Examples
                           </h4>
                           
-                          {/* cURL */}
-                          <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`)}>
-                            </i>
-                          </CodeBlock>
+                          {/* Language Tabs */}
+                          <div style={{ 
+                            display: 'flex', 
+                            marginBottom: '10px',
+                            borderBottom: '1px solid #444'
+                          }}>
+                            {['curl', 'javascript', 'python'].map(lang => (
+                              <button
+                                key={lang}
+                                onClick={() => setCodeTab('load-model', lang)}
+                                style={{
+                                  background: getCodeTab('load-model') === lang ? '#76b900' : 'transparent',
+                                  color: getCodeTab('load-model') === lang ? '#000' : '#888',
+                                  border: 'none',
+                                  padding: '8px 16px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px 4px 0 0',
+                                  fontSize: '14px',
+                                  fontWeight: getCodeTab('load-model') === lang ? 'bold' : 'normal',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {lang === 'curl' ? 'cURL' : lang}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* cURL Tab */}
+                          {getCodeTab('load-model') === 'curl' && (
+                            <CodeBlock language="curl">
+                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`, 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/load"`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* JavaScript Tab */}
+                          {getCodeTab('load-model') === 'javascript' && (
+                            <CodeBlock language="javascript">
+                              {renderHighlightedCode(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/load\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`, 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/load\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* Python Tab */}
+                          {getCodeTab('load-model') === 'python' && (
+                            <CodeBlock language="python">
+                              {renderHighlightedCode(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/load"
+response = requests.post(url)
+result = response.json()
+print(result)`, 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/load"
+response = requests.post(url)
+result = response.json()
+print(result)`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
                         </div>
 
                         {/* Response Example */}
@@ -5604,12 +5742,83 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                             <i className="fas fa-code"></i> Code Examples
                           </h4>
                           
-                          {/* cURL */}
-                          <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`)}>
-                            </i>
-                          </CodeBlock>
+                          {/* Language Tabs */}
+                          <div style={{ 
+                            display: 'flex', 
+                            marginBottom: '10px',
+                            borderBottom: '1px solid #444'
+                          }}>
+                            {['curl', 'javascript', 'python'].map(lang => (
+                              <button
+                                key={lang}
+                                onClick={() => setCodeTab('unload-model', lang)}
+                                style={{
+                                  background: getCodeTab('unload-model') === lang ? '#76b900' : 'transparent',
+                                  color: getCodeTab('unload-model') === lang ? '#000' : '#888',
+                                  border: 'none',
+                                  padding: '8px 16px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px 4px 0 0',
+                                  fontSize: '14px',
+                                  fontWeight: getCodeTab('unload-model') === lang ? 'bold' : 'normal',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {lang === 'curl' ? 'cURL' : lang}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* cURL Tab */}
+                          {getCodeTab('unload-model') === 'curl' && (
+                            <CodeBlock language="curl">
+                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`, 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/unload"`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* JavaScript Tab */}
+                          {getCodeTab('unload-model') === 'javascript' && (
+                            <CodeBlock language="javascript">
+                              {renderHighlightedCode(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/unload\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`, 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/unload\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* Python Tab */}
+                          {getCodeTab('unload-model') === 'python' && (
+                            <CodeBlock language="python">
+                              {renderHighlightedCode(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/unload"
+response = requests.post(url)
+result = response.json()
+print(result)`, 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/unload"
+response = requests.post(url)
+result = response.json()
+print(result)`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
                         </div>
 
                         {/* Response Example */}
@@ -5692,12 +5901,83 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                             <i className="fas fa-code"></i> Code Examples
                           </h4>
                           
-                          {/* cURL */}
-                          <CodeBlock language="curl">
-                            {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`, 'curl')}
-                            <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`)}>
-                            </i>
-                          </CodeBlock>
+                          {/* Language Tabs */}
+                          <div style={{ 
+                            display: 'flex', 
+                            marginBottom: '10px',
+                            borderBottom: '1px solid #444'
+                          }}>
+                            {['curl', 'javascript', 'python'].map(lang => (
+                              <button
+                                key={lang}
+                                onClick={() => setCodeTab('force-reload-model', lang)}
+                                style={{
+                                  background: getCodeTab('force-reload-model') === lang ? '#76b900' : 'transparent',
+                                  color: getCodeTab('force-reload-model') === lang ? '#000' : '#888',
+                                  border: 'none',
+                                  padding: '8px 16px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px 4px 0 0',
+                                  fontSize: '14px',
+                                  fontWeight: getCodeTab('force-reload-model') === lang ? 'bold' : 'normal',
+                                  textTransform: 'uppercase'
+                                }}
+                              >
+                                {lang === 'curl' ? 'cURL' : lang}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* cURL Tab */}
+                          {getCodeTab('force-reload-model') === 'curl' && (
+                            <CodeBlock language="curl">
+                              {renderHighlightedCode(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`, 'curl')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`curl -X POST "${getBackendUrl()}/models/${selectedModel ? selectedModel : 'MODEL_NAME'}/force-reload"`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* JavaScript Tab */}
+                          {getCodeTab('force-reload-model') === 'javascript' && (
+                            <CodeBlock language="javascript">
+                              {renderHighlightedCode(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/force-reload\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`, 'javascript')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`const modelId = '${selectedModel ? selectedModel : 'MODEL_NAME'}';
+const response = await fetch(\`${getBackendUrl()}/models/\${modelId}/force-reload\`, {
+  method: 'POST'
+});
+
+const result = await response.json();
+console.log(result);`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
+
+                          {/* Python Tab */}
+                          {getCodeTab('force-reload-model') === 'python' && (
+                            <CodeBlock language="python">
+                              {renderHighlightedCode(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/force-reload"
+response = requests.post(url)
+result = response.json()
+print(result)`, 'python')}
+                              <i className="fas fa-copy copy-icon" onClick={() => copyToClipboard(`import requests
+
+model_id = "${selectedModel ? selectedModel : 'MODEL_NAME'}"
+url = f"${getBackendUrl()}/models/{'{model_id}'}/force-reload"
+response = requests.post(url)
+result = response.json()
+print(result)`)}>
+                              </i>
+                            </CodeBlock>
+                          )}
                         </div>
 
                         {/* Response Example */}
