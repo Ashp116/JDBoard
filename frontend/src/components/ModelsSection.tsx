@@ -1855,7 +1855,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   // Model editing states
   const [editingModel, setEditingModel] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [originalModelId, setOriginalModelId] = useState('');
   const [editNameError, setEditNameError] = useState('');
+  const [showRenameConfirm, setShowRenameConfirm] = useState(false);
+  const [pendingRename, setPendingRename] = useState<{modelId: string, newName: string} | null>(null);
   
   // Custom script viewing states
   const [viewingScript, setViewingScript] = useState<{
@@ -2615,12 +2618,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const handleEditModelName = (modelId: string, currentName: string) => {
     setEditingModel(modelId);
     setEditingName(currentName);
+    setOriginalModelId(modelId);
     setEditNameError('');
   };
 
   const handleCancelEdit = () => {
     setEditingModel(null);
     setEditingName('');
+    setOriginalModelId('');
     setEditNameError('');
   };
 
@@ -2662,13 +2667,37 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       return;
     }
 
+    // If the ID hasn't changed, just close the editor
+    if (trimmedName === originalModelId) {
+      setEditingModel(null);
+      setEditingName('');
+      setOriginalModelId('');
+      setEditNameError('');
+      addNotification({
+        type: 'info',
+        title: 'No Changes',
+        message: 'Model ID was not modified'
+      });
+      return;
+    }
+
+    // Show confirmation modal only if ID changed
+    setPendingRename({ modelId, newName: trimmedName });
+    setShowRenameConfirm(true);
+  };
+
+  const handleConfirmRename = async () => {
+    if (!pendingRename) return;
+
+    const { modelId, newName } = pendingRename;
+
     try {
       const response = await fetch(`${getBackendUrl()}/models/${modelId}/rename`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ new_name: trimmedName })
+        body: JSON.stringify({ new_name: newName })
       });
       
       const data = await response.json();
@@ -2676,19 +2705,31 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         await loadModels();
         setEditingModel(null);
         setEditingName('');
+        setOriginalModelId('');
         setEditNameError('');
+        setShowRenameConfirm(false);
+        setPendingRename(null);
         addNotification({
           type: 'success',
           title: 'Model Renamed',
-          message: 'Model name updated successfully!'
+          message: 'Model ID updated successfully!'
         });
       } else {
+        setShowRenameConfirm(false);
+        setPendingRename(null);
         setEditNameError(data.error || 'Failed to rename model');
       }
     } catch (error) {
       console.error('Rename error:', error);
+      setShowRenameConfirm(false);
+      setPendingRename(null);
       setEditNameError('Failed to rename model');
     }
+  };
+
+  const handleCancelRename = () => {
+    setShowRenameConfirm(false);
+    setPendingRename(null);
   };
 
   const handleDownloadTemplate = async () => {
@@ -3587,6 +3628,57 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             <ActionButtons>
               <Button variant="secondary" onClick={() => setViewingScript(null)}>
                 Close
+              </Button>
+            </ActionButtons>
+          </ModalFooter>
+        </Modal>
+      )}
+      
+      {/* Rename Confirmation Modal */}
+      {showRenameConfirm && pendingRename && (
+        <Modal isOpen={true} onClose={handleCancelRename} maxWidth="450px">
+          <ModalHeader>
+            <h3>
+              <p style={{color: '#ffa500' }}>
+              Warning:
+              </p>
+              Model ID Change
+            </h3>
+            <ModalCloseButton onClick={handleCancelRename}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
+
+          <ModalBody>
+            <div style={{ padding: '30px 20px' }}>
+              <div style={{ 
+                background: 'rgba(255, 165, 0, 0.1)', 
+                border: '1px solid rgba(255, 165, 0, 0.3)',
+                borderRadius: '8px',
+                padding: '20px',
+                marginBottom: '25px'
+              }}>
+                <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.8', color: '#ffa500' }}>
+                  <i className="fas fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
+                  <strong>Warning:</strong> If you change the model ID, all applications and code that use this model ID for inference will be affected and may fail until updated with the new ID.
+                </p>
+              </div>
+              <p style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.8' }}>
+                You are about to change the model ID from <strong>{pendingRename.modelId}</strong> to <strong>{pendingRename.newName}</strong>.
+              </p>
+              <p style={{ margin: 0, fontSize: '14px', color: '#999', lineHeight: '1.6' }}>
+                Are you sure you want to continue?
+              </p>
+            </div>
+          </ModalBody>
+
+          <ModalFooter>
+            <ActionButtons>
+              <Button variant="secondary" onClick={handleCancelRename}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleConfirmRename}>
+                Confirm
               </Button>
             </ActionButtons>
           </ModalFooter>
