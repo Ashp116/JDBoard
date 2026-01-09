@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { ModelsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -2781,104 +2783,26 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
-  const highlightPythonSyntax = (code: string): JSX.Element[] => {
-    // Process code line by line to avoid HTML escaping issues
-    const lines = code.split('\n');
-    const keywords = new Set(['def', 'class', 'import', 'from', 'return', 'if', 'else', 'elif', 'for', 'while', 
-                              'try', 'except', 'finally', 'with', 'as', 'pass', 'break', 'continue', 'yield',
-                              'async', 'await', 'lambda', 'raise', 'assert', 'del', 'global', 'nonlocal', 'in',
-                              'is', 'not', 'and', 'or', 'None', 'True', 'False']);
-    const builtins = new Set(['print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict', 'tuple', 'set',
-                              'type', 'isinstance', 'super', 'self', 'open', 'input', 'map', 'filter']);
-    
-    return lines.map((line, lineIndex) => {
-      const tokens: JSX.Element[] = [];
-      let i = 0;
-      
-      // Check if line is a comment
-      const trimmedLine = line.trim();
-      if (trimmedLine.startsWith('#')) {
-        return <span key={lineIndex} className="comment">{line}{'\n'}</span>;
-      }
-      
-      // Check for docstring
-      if (trimmedLine.startsWith('"""') || trimmedLine.startsWith("'''")) {
-        return <span key={lineIndex} className="string">{line}{'\n'}</span>;
-      }
-      
-      while (i < line.length) {
-        // Handle strings
-        if (line[i] === '"' || line[i] === "'") {
-          const quote = line[i];
-          let str = quote;
-          i++;
-          while (i < line.length && line[i] !== quote) {
-            if (line[i] === '\\' && i + 1 < line.length) {
-              str += line[i] + line[i + 1];
-              i += 2;
-            } else {
-              str += line[i];
-              i++;
-            }
-          }
-          if (i < line.length) str += line[i++];
-          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="string">{str}</span>);
-          continue;
-        }
-        
-        // Handle comments
-        if (line[i] === '#') {
-          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="comment">{line.substring(i)}</span>);
-          break;
-        }
-        
-        // Handle decorators
-        if (line[i] === '@' && /[a-zA-Z_]/.test(line[i + 1] || '')) {
-          let decorator = '@';
-          i++;
-          while (i < line.length && /[a-zA-Z0-9_]/.test(line[i])) {
-            decorator += line[i++];
-          }
-          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="decorator">{decorator}</span>);
-          continue;
-        }
-        
-        // Handle numbers
-        if (/\d/.test(line[i])) {
-          let num = '';
-          while (i < line.length && /[\d.]/.test(line[i])) {
-            num += line[i++];
-          }
-          tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="number">{num}</span>);
-          continue;
-        }
-        
-        // Handle identifiers (keywords, builtins, or regular)
-        if (/[a-zA-Z_]/.test(line[i])) {
-          let word = '';
-          while (i < line.length && /[a-zA-Z0-9_]/.test(line[i])) {
-            word += line[i++];
-          }
-          
-          if (keywords.has(word)) {
-            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="keyword">{word}</span>);
-          } else if (builtins.has(word)) {
-            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="builtin">{word}</span>);
-          } else if (/^[A-Z]/.test(word)) {
-            tokens.push(<span key={`${lineIndex}-${tokens.length}`} className="class-name">{word}</span>);
-          } else {
-            tokens.push(<span key={`${lineIndex}-${tokens.length}`}>{word}</span>);
-          }
-          continue;
-        }
-        
-        // Handle other characters
-        tokens.push(<span key={`${lineIndex}-${tokens.length}`}>{line[i++]}</span>);
-      }
-      
-      tokens.push(<span key={`${lineIndex}-newline`}>{'\n'}</span>);
-      return <span key={lineIndex}>{tokens}</span>;
-    });
+  const highlightPythonSyntax = (code: string) => {
+    return (
+      <SyntaxHighlighter
+        language="python"
+        style={vscDarkPlus}
+        customStyle={{
+          margin: 0,
+          padding: '1rem',
+          background: '#1a1a1a',
+          borderRadius: '4px',
+          fontSize: '0.85rem',
+          lineHeight: '1.5'
+        }}
+        showLineNumbers={true}
+        wrapLines={true}
+        wrapLongLines={true}
+      >
+        {code}
+      </SyntaxHighlighter>
+    );
   };
 
   const handleCopyScript = () => {

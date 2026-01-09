@@ -4,6 +4,8 @@ import styled, { createGlobalStyle } from 'styled-components';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import html2canvas from 'html2canvas';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -3720,84 +3722,35 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     return activeCodeTab[route] || 'curl';
   };
 
-  // Syntax highlighting helper
+  // Syntax highlighting helper using react-syntax-highlighter
   const renderHighlightedCode = (code: string, language: string) => {
-    const parts = [];
-    let lastIndex = 0;
-    
-    const patterns = {
-      curl: [
-        { regex: /(curl|POST|GET|PUT|DELETE)/g, className: 'keyword' },
-        { regex: /(-X|-F|-H|--data|--json|-d)/g, className: 'curl-flag' },
-        { regex: /(https?:\/\/[^\s"\\]+)/g, className: 'curl-url' },
-        { regex: /("(?:[^"\\]|\\.)*")/g, className: 'string' }
-      ],
-      javascript: [
-        { regex: /(const|let|var|function|async|await|fetch|new|return|method)/g, className: 'keyword' },
-        { regex: /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)/g, className: 'string' },
-        { regex: /(\/\/.*$)/gm, className: 'comment' },
-        { regex: /\b(\d+\.?\d*)\b/g, className: 'number' },
-        { regex: /(\w+)(?=\s*\()/g, className: 'function' }
-      ],
-      python: [
-        { regex: /(import|from|def|class|if|else|elif|for|while|try|except|with|as|return|print)/g, className: 'keyword' },
-        { regex: /('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g, className: 'string' },
-        { regex: /(#.*$)/gm, className: 'comment' },
-        { regex: /\b(\d+\.?\d*)\b/g, className: 'number' }
-      ],
-      json: [
-        { regex: /("(?:[^"\\]|\\.)*")(\s*:)/g, className: 'property', group: 1 },
-        { regex: /:\s*("(?:[^"\\]|\\.)*")/g, className: 'string', group: 1 },
-        { regex: /:\s*(\d+\.?\d*)/g, className: 'number', group: 1 },
-        { regex: /:\s*(true|false|null)/g, className: 'keyword', group: 1 }
-      ]
+    // Map language names to SyntaxHighlighter language identifiers
+    const langMap: { [key: string]: string } = {
+      'curl': 'bash',
+      'javascript': 'javascript',
+      'python': 'python',
+      'json': 'json'
     };
 
-    const langPatterns = patterns[language] || [];
-    const matches = [];
-
-    langPatterns.forEach(pattern => {
-      let match;
-      while ((match = pattern.regex.exec(code)) !== null) {
-        matches.push({
-          start: match.index,
-          end: pattern.regex.lastIndex,
-          className: pattern.className,
-          text: pattern.group ? match[pattern.group] : match[0]
-        });
-      }
-    });
-
-    // Sort matches by start position
-    matches.sort((a, b) => a.start - b.start);
-
-    // Remove overlapping matches (keep the first one)
-    const cleanMatches = [];
-    matches.forEach(match => {
-      if (!cleanMatches.some(existing => 
-        (match.start >= existing.start && match.start < existing.end) ||
-        (match.end > existing.start && match.end <= existing.end)
-      )) {
-        cleanMatches.push(match);
-      }
-    });
-
-    cleanMatches.forEach((match, index) => {
-      // Add text before this match
-      if (match.start > lastIndex) {
-        parts.push(code.substring(lastIndex, match.start));
-      }
-      // Add highlighted match
-      parts.push(<span key={index} className={match.className}>{match.text}</span>);
-      lastIndex = match.end;
-    });
-
-    // Add remaining text
-    if (lastIndex < code.length) {
-      parts.push(code.substring(lastIndex));
-    }
-
-    return parts;
+    return (
+      <SyntaxHighlighter
+        language={langMap[language] || 'text'}
+        style={vscDarkPlus}
+        customStyle={{
+          margin: 0,
+          padding: '1rem',
+          background: '#1a1a1a',
+          borderRadius: '4px',
+          fontSize: '0.85rem',
+          lineHeight: '1.5'
+        }}
+        showLineNumbers={false}
+        wrapLines={true}
+        wrapLongLines={true}
+      >
+        {code}
+      </SyntaxHighlighter>
+    );
   };
 
   // Handle detection hover
