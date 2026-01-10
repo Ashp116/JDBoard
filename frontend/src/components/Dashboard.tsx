@@ -291,7 +291,7 @@ const Dashboard: React.FC<DashboardProps> = ({ systemData, isConnected }) => {
         status: systemData.cpu?.temperature > 80 ? 'critical' : systemData.cpu?.temperature > 65 ? 'warning' : 'normal'
       },
       {
-        title: 'NVP Model',
+        title: 'Power Mode',
         value: systemData.nvp_model || 'Unknown',
         unit: '',
         icon: 'fas fa-cogs',

@@ -50,9 +50,12 @@ const SidebarContainer = styled.nav<{ $isOpen?: boolean }>`
     top: 0;
     width: 80px;
     height: 100vh;
-
+    overflow: hidden;
+    
+    /* Only expand when hovering within the 80px zone */
     &:hover {
       width: 250px;
+      overflow: visible;
     }
   }
 `;

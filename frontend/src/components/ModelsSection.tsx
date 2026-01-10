@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Tooltip } from 'react-tooltip';
 import { ModelsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
@@ -1213,16 +1214,25 @@ const ModelCard = styled.div`
 
     button {
       flex: 1;
-      padding: 8px 12px;
+      padding: 10px;
       font-size: 12px;
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      position: relative;
       
       ${props => props.theme.media.mobile} {
-        padding: 10px 12px;
+        padding: 12px;
         font-size: 13px;
         min-height: 40px;
+      }
+      
+      i {
+        font-size: 16px;
       }
 
       &.load {
@@ -3109,31 +3119,38 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <button 
                     className="load"
                     onClick={() => handleLoadModel(model.id)}
+                    data-tooltip-id="tooltip-load"
+                    data-tooltip-content="Load model into memory for inference"
                   >
-                    Load Model
+                    <i className="fas fa-upload"></i>
                   </button>
                 ) : (
                   <>
                     <button 
                       className="unload"
                       onClick={() => handleUnloadModel(model.id)}
+                      data-tooltip-id="tooltip-unload"
+                      data-tooltip-content="Unload model from memory to free resources"
                     >
-                      Unload Model
+                      <i className="fas fa-download"></i>
                     </button>
                     <button 
                       className="force-reload"
                       onClick={() => handleForceReloadModel(model.id)}
-                      title="Force reload model (clears any stuck states)"
+                      data-tooltip-id="tooltip-reload"
+                      data-tooltip-content="Force reload model (clears stuck states)"
                     >
-                      Force Reload
+                      <i className="fas fa-sync-alt"></i>
                     </button>
                   </>
                 )}
                 <button 
                   className="delete"
                   onClick={() => handleDeleteModel(model.id)}
+                  data-tooltip-id="tooltip-delete"
+                  data-tooltip-content="Permanently delete this model"
                 >
-                  Delete
+                  <i className="fas fa-trash"></i>
                 </button>
               </div>
               
@@ -3738,6 +3755,56 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           </ModalFooter>
         </Modal>
       )}
+      
+      {/* Color-coded tooltips for each action */}
+      <Tooltip 
+        id="tooltip-load" 
+        place="top"
+        style={{
+          backgroundColor: '#76b900',
+          color: '#fff',
+          fontSize: '11px',
+          borderRadius: '4px',
+          padding: '6px 10px',
+          zIndex: 9999
+        }}
+      />
+      <Tooltip 
+        id="tooltip-unload" 
+        place="top"
+        style={{
+          backgroundColor: '#ffc107',
+          color: '#000',
+          fontSize: '11px',
+          borderRadius: '4px',
+          padding: '6px 10px',
+          zIndex: 9999
+        }}
+      />
+      <Tooltip 
+        id="tooltip-reload" 
+        place="top"
+        style={{
+          backgroundColor: '#6c757d',
+          color: '#fff',
+          fontSize: '11px',
+          borderRadius: '4px',
+          padding: '6px 10px',
+          zIndex: 9999
+        }}
+      />
+      <Tooltip 
+        id="tooltip-delete" 
+        place="top"
+        style={{
+          backgroundColor: '#dc3545',
+          color: '#fff',
+          fontSize: '11px',
+          borderRadius: '4px',
+          padding: '6px 10px',
+          zIndex: 9999
+        }}
+      />
     </Container>
   );
 };

@@ -915,7 +915,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
             <div className="value">{systemInfo.module}</div>
           </InfoItem>
           <InfoItem>
-            <div className="label">NVP Model</div>
+            <div className="label">Power Model</div>
             <div className="value">{systemInfo.nvpModel}</div>
           </InfoItem>
           <InfoItem>
