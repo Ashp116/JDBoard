@@ -30,6 +30,11 @@ from request_logger import RequestLogger
 
 from jtop import jtop
 
+# Check if running as root/sudo
+def is_running_as_root():
+    """Check if the application is running with root privileges"""
+    return os.geteuid() == 0
+
 app = Flask(__name__)
 
 CORS(app)
@@ -1771,6 +1776,17 @@ def handle_log_subscription(data):
 def authenticate_sudo():
     """Authenticate sudo password"""
     try:
+        # If already running as root, no password needed
+        if is_running_as_root():
+            session_id = str(uuid.uuid4())
+            logger.info(f"Application running as root - sudo authentication bypassed for session {session_id}")
+            return jsonify({
+                'success': True,
+                'session_id': session_id,
+                'message': 'Running as root - no authentication needed',
+                'is_root': True
+            })
+        
         data = request.json
         password = data.get('password', '')
         
@@ -1795,7 +1811,8 @@ def authenticate_sudo():
             return jsonify({
                 'success': True,
                 'session_id': session_id,
-                'message': 'Authentication successful'
+                'message': 'Authentication successful',
+                'is_root': False
             })
         else:
             logger.warning("Failed sudo authentication attempt")
@@ -2755,17 +2772,28 @@ def execute_terminal_command():
         
         # Block sudo commands except allowed ones
         if command_lower.startswith('sudo '):
-            sudo_allowed = False
-            for allowed_cmd in allowed_sudo_commands:
-                if command_lower.startswith(allowed_cmd.lower()):
-                    sudo_allowed = True
-                    break
-            
-            if not sudo_allowed:
-                return jsonify({
-                    'success': False,
-                    'error': 'Sudo command not allowed. Only specific system monitoring commands are permitted.'
-                }), 403
+            # If running as root, remove sudo prefix from allowed commands
+            if is_running_as_root():
+                for allowed_cmd in allowed_sudo_commands:
+                    if command_lower.startswith(allowed_cmd.lower()):
+                        # Remove 'sudo ' prefix since we're already root
+                        command = command[5:].strip()
+                        command_lower = command.lower().strip()
+                        logger.info(f"Running as root - removed sudo prefix: {command}")
+                        break
+            else:
+                # Not running as root, check if sudo command is allowed
+                sudo_allowed = False
+                for allowed_cmd in allowed_sudo_commands:
+                    if command_lower.startswith(allowed_cmd.lower()):
+                        sudo_allowed = True
+                        break
+                
+                if not sudo_allowed:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Sudo command not allowed. Only specific system monitoring commands are permitted.'
+                    }), 403
         
         # 4. Block file operations on critical directories
         critical_dirs = ['/etc/', '/boot/', '/sys/', '/proc/', '/dev/', '/root/', '/usr/bin/', '/usr/sbin/']
