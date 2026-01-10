@@ -20,6 +20,7 @@ interface SudoModalState {
   action: any;
   password: string;
   error: string;
+  loading: boolean;
   resolve?: (password: string) => void;
   reject?: (error: Error) => void;
 }
@@ -424,7 +425,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     show: false,
     action: null,
     password: '',
-    error: ''
+    error: '',
+    loading: false
   });
 
   const [sudoSession, setSudoSession] = useState<SudoSessionState>({
@@ -556,6 +558,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         action,
         password: '',
         error: '',
+        loading: false,
         resolve,
         reject
       });
@@ -563,6 +566,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   };
 
   const handleSudoSubmit = async () => {
+    setSudoModal(prev => ({ ...prev, loading: true, error: '' }));
+    
     try {
       const backendUrl = getBackendUrl();
       
@@ -586,17 +591,19 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         });
         
         // Close modal and resolve promise
-        setSudoModal(prev => ({ ...prev, show: false }));
+        setSudoModal(prev => ({ ...prev, show: false, loading: false }));
         sudoModal.resolve && sudoModal.resolve(sudoModal.password);
       } else {
         setSudoModal(prev => ({ 
           ...prev, 
+          loading: false,
           error: result.error || 'Invalid sudo password'
         }));
       }
     } catch (error) {
       setSudoModal(prev => ({ 
         ...prev, 
+        loading: false,
         error: `Authentication error: ${error.message}`
       }));
     }
@@ -1236,15 +1243,27 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         </ModalBody>
         <ModalFooter>
           <ModalButtons>
-            <Button $variant="normal" onClick={handleSudoCancel}>
+            <Button 
+              $variant="normal" 
+              onClick={handleSudoCancel}
+              disabled={sudoModal.loading}
+            >
               Cancel
             </Button>
             <Button 
               $variant="normal"
               onClick={handleSudoSubmit}
-              disabled={!sudoModal.password.trim()}
+              disabled={!sudoModal.password.trim() || sudoModal.loading}
+              style={{ opacity: sudoModal.loading ? 0.6 : 1 }}
             >
-              Authenticate
+              {sudoModal.loading ? (
+                <>
+                  <i className="fas fa-spinner fa-spin"></i>
+                  {' Authenticating...'}
+                </>
+              ) : (
+                'Authenticate'
+              )}
             </Button>
           </ModalButtons>
         </ModalFooter>
