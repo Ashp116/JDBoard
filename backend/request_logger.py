@@ -622,15 +622,23 @@ class RequestLogger:
         try:
             with self.lock:
                 with sqlite3.connect(self.db_path) as conn:
+                    # Get count before deletion
                     cursor = conn.execute('SELECT COUNT(*) FROM inference_logs')
-                    count_before = cursor.fetchone()[0] if cursor.fetchone() else 0
+                    count_result = cursor.fetchone()
+                    count_before = count_result[0] if count_result else 0
                     
-                    cursor = conn.execute('DELETE FROM inference_logs')
-                    cleared_count = cursor.rowcount
-                    
+                    # Delete all inference logs
+                    conn.execute('DELETE FROM inference_logs')
                     conn.commit()
                     
-                    logger.info(f"Cleared {cleared_count} inference logs")
+                    # Verify deletion
+                    cursor = conn.execute('SELECT COUNT(*) FROM inference_logs')
+                    count_result_after = cursor.fetchone()
+                    count_after = count_result_after[0] if count_result_after else 0
+                    
+                    cleared_count = count_before - count_after
+                    
+                    logger.info(f"Cleared {cleared_count} inference logs (from {count_before} to {count_after})")
                     
                     return {
                         'cleared_count': cleared_count,

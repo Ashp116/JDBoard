@@ -117,7 +117,7 @@ const AppContent: React.FC = () => {
     
     if (location.pathname === '/') {
       setActiveSection('dashboard');
-    } else if (currentSection && ['models', 'inference', 'monitoring', 'terminal', 'logs', 'settings'].includes(currentSection)) {
+    } else if (currentSection && ['models', 'inference', 'monitoring', 'processes', 'terminal', 'logs', 'settings'].includes(currentSection)) {
       setActiveSection(currentSection);
     } else {
       setActiveSection('dashboard');
