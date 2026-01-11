@@ -3449,4 +3449,4 @@ if __name__ == '__main__':
     
     logger.info("Starting Jetson Edge AI Dashboard with WebSocket support on port 5000...")
     # Use app.config['DEBUG'] instead of hardcoded debug=True
-    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'])
+    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'], allow_unsafe_werkzeug=True)
