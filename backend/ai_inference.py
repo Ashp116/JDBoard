@@ -12,6 +12,7 @@ import logging
 import cv2
 import numpy as np
 import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -486,6 +487,15 @@ class AIModelManager:
         }
         return framework_map.get(file_extension, 'unknown')
     
+    def _warn_missing_file(self, model_id, model_info):
+        """Log a registered model whose file is gone - once, not on every listing."""
+        warned = self.__dict__.setdefault('_missing_file_warned', set())
+        if model_id not in warned:
+            warned.add(model_id)
+            logger.warning(f"Model '{model_id}' is registered but its file is missing "
+                           f"({model_info['file_path']}); it is hidden from the model list. "
+                           f"Re-download it, or remove it from models_registry.json.")
+
     def _handler_status(self, model_id, model_info):
         """Which inference handler a model uses: 'custom' or 'default'.
 
@@ -521,7 +531,7 @@ class AIModelManager:
                 
                 models.append(model_copy)
             else:
-                logger.warning(f"Model file missing: {model_info['file_path']}")
+                self._warn_missing_file(model_id, model_info)
         
         return models
     
@@ -1427,7 +1437,7 @@ class AIModelManager:
                 
                 detailed_models.append(detailed_info)
             else:
-                logger.warning(f"Model file missing: {model_info['file_path']}")
+                self._warn_missing_file(model_id, model_info)
         
         return detailed_models
 
@@ -1453,9 +1463,13 @@ class AIModelManager:
             update_progress(5, 'Initializing download...')
             check_cancelled()
             
-            # Generate filename
+            # Unique filename per download. Ultralytics names its .onnx/.engine
+            # outputs after the source file, so a shared name (e.g. two models
+            # both using yolo11x.pt) let one download overwrite - and its failure
+            # cleanup delete - another model's files.
             url_filename = model_url.split('/')[-1]
-            download_path = download_dir / url_filename
+            safe_name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in model_name)[:40] or 'model'
+            download_path = download_dir / f"{safe_name}_{uuid.uuid4().hex[:8]}_{url_filename}"
             
             logger.info(f"Downloading YOLO model from {model_url}")
             logger.info(f"Target file: {download_path}")
@@ -1618,9 +1632,18 @@ class AIModelManager:
             
         except Exception as e:
             logger.error(f"Error downloading YOLO model: {str(e)}")
-            # Clean up partial download
-            if download_path.exists():
-                download_path.unlink()
+            # Clean up this download's files: the source and anything converted
+            # from it (.onnx, partial .engine, ...) - they all share its unique stem.
+            if 'download_path' in locals():  # not set if it failed very early
+                for leftover in download_path.parent.glob(download_path.stem + '*'):
+                    try:
+                        if leftover.is_file():
+                            leftover.unlink()
+                            logger.info(f"Removed leftover file: {leftover.name}")
+                        elif leftover.is_dir():
+                            shutil.rmtree(leftover, ignore_errors=True)
+                    except OSError as cleanup_error:
+                        logger.warning(f"Could not remove {leftover}: {cleanup_error}")
             raise
     
     def _cleanup_intermediate_files(self, source_path, target_format, final_path):
@@ -1883,7 +1906,7 @@ class AIModelManager:
             update_progress(83, 'Loading model for TensorRT conversion...')
             check_cancelled()
             
-            update_progress(85, 'Converting to TensorRT format...')
+            update_progress(85, 'Building TensorRT engine - this takes several minutes (longer for larger models)...')
             check_cancelled()
             
             # Use subprocess to run yolo export with verbose output capture
@@ -1963,6 +1986,11 @@ class AIModelManager:
             conversion_time = time.time() - start_time
             
             if return_code != 0:
+                if return_code == -9:
+                    raise RuntimeError(
+                        "TensorRT export was killed by the system because it ran out of memory. "
+                        "This model is too large to build a TensorRT engine on this device; "
+                        "use a smaller size (n/s/m) or the PyTorch format.")
                 raise RuntimeError(f"TensorRT export failed with return code {return_code}")
             
             logger.info(f"TensorRT conversion completed in {conversion_time:.1f}s")

@@ -26,6 +26,13 @@ interface ModelInfo {
   load_problem?: string | null;   // set when the backend can't load this model (missing framework)
 }
 
+// Progress toasts live in the app-wide notification list and outlive this page
+// (e.g. when switching tabs), so each download's toast gets a fixed id derived
+// from the download. Re-mounting the page then replaces it instead of adding a
+// second, orphaned toast.
+const DOWNLOAD_TOAST_PREFIX = 'download-';
+const downloadToastId = (downloadId: string) => `${DOWNLOAD_TOAST_PREFIX}${downloadId}`;
+
 interface YOLOModelOption {
   name: string;
   size: string;
@@ -1823,7 +1830,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
 ];
 
 const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isConnected }) => {
-  const { addNotification, removeNotification, updateNotification } = useNotifications();
+  const { notifications, addNotification, removeNotification, updateNotification } = useNotifications();
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'yolo'>('upload');
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -1943,12 +1950,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             name: downloadInfo.model_name || 'Unknown Model',
             progress: downloadInfo.progress || 0,
             status: downloadInfo.status || 'In Progress...',
-            notificationId: `restored-${downloadId}` // Generate a notification ID for consistency
+            notificationId: downloadToastId(downloadId)
           });
           
           // Progress toast with the id we track, so it updates and is removed on completion
           addNotification({
-            id: `restored-${downloadId}`,
+            id: downloadToastId(downloadId),
             type: 'info',
             title: 'Downloading Model',
             message: downloadInfo.status || `${downloadInfo.model_name || 'Model'} - In Progress...`,
@@ -1963,14 +1970,35 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           setActiveDownloads(restoredDownloads);
           setShowLogs(restoredLogsState); // Restore logs state
           
+          // Each restored download already has its own progress toast (above)
           console.log(`Restored ${restoredDownloads.size} active downloads:`, Object.fromEntries(restoredDownloads));
-          
-          // Show notification about restored downloads
-          addNotification({
-            type: 'info',
-            title: 'Downloads Restored',
-            message: `Restored ${restoredDownloads.size} active download(s) from previous session`
-          });
+        }
+
+        // Toasts of downloads that finished while this page wasn't mounted:
+        // look up how each one ended, report it, and close the progress toast.
+        const stale = notifications.filter(n =>
+          n.id.startsWith(DOWNLOAD_TOAST_PREFIX) &&
+          !(n.id.slice(DOWNLOAD_TOAST_PREFIX.length) in data.active_downloads));
+        for (const toast of stale) {
+          const downloadId = toast.id.slice(DOWNLOAD_TOAST_PREFIX.length);
+          removeNotification(toast.id);
+          try {
+            const statusResponse = await fetch(`${getBackendUrl()}/models/downloads/${encodeURIComponent(downloadId)}/status`);
+            const status = await statusResponse.json();
+            if (status.state === 'failed') {
+              completeDownload(downloadId, false, status.error, { modelName: status.model_name });
+            } else if (status.state === 'completed') {
+              addNotification({
+                type: status.warning ? 'warning' : 'success',
+                title: status.warning ? 'Model Added - Not Loadable Yet' : 'Model Ready',
+                message: [status.message || `${status.model_name || 'Model'} is ready for use!`, status.warning]
+                  .filter(Boolean).join(' '),
+                ...(status.warning ? { persistent: true } : {})
+              });
+            }
+          } catch (error) {
+            console.error('Error checking finished download:', error);
+          }
         }
       }
     } catch (error) {
@@ -2221,7 +2249,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   // Download progress management
   const startDownload = (downloadId: string, modelName: string) => {
-    const notificationId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const notificationId = downloadToastId(downloadId);
     
     const notification = {
       id: notificationId,

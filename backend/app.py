@@ -70,6 +70,9 @@ def cleanup_download(download_id):
     download_cancel_flags.pop(download_id, None)
     download_threads.pop(download_id, None)
 
+# Minimum total RAM to attempt a TensorRT build of large (l/x) YOLO models
+TENSORRT_LARGE_MODEL_MIN_RAM_GB = 12
+
 # Final result of each download/upload, kept so the frontend can still learn the
 # outcome if it missed the socket event (reconnect, page reload, fast failure).
 finished_downloads = {}
@@ -983,6 +986,21 @@ def download_yolo_model():
         logger.error(f"YOLO download of {model_name} rejected: {missing}")
         return jsonify({'success': False, 'error': missing}), 400
 
+    # Building a TensorRT engine for the large YOLO sizes needs more memory than
+    # 8 GB boards have (YOLOv11x was OOM-killed after minutes on an Orin Nano 8GB),
+    # so refuse up front instead of failing partway through.
+    if target_format == 'TensorRT':
+        import re
+        size_match = re.search(r'yolo\D*\d*([nsmlx])u?\.pt$', model_url.split('?')[0].lower())
+        total_ram_gb = psutil.virtual_memory().total / 1024 ** 3
+        if size_match and size_match.group(1) in ('l', 'x') and total_ram_gb < TENSORRT_LARGE_MODEL_MIN_RAM_GB:
+            error = (f"Building a TensorRT engine for this model size ('{size_match.group(1)}') is likely to run "
+                     f"out of memory on this device ({total_ram_gb:.1f} GB RAM; about "
+                     f"{TENSORRT_LARGE_MODEL_MIN_RAM_GB} GB is needed). Use size n, s or m for TensorRT, "
+                     f"or download this size in PyTorch format.")
+            logger.error(f"YOLO download of {model_name} rejected: {error}")
+            return jsonify({'success': False, 'error': error}), 400
+
     # Save an uploaded custom script now; the request's file stream is closed
     # by the time the background thread runs.
     saved_script_path = None
@@ -1063,7 +1081,12 @@ def download_yolo_model():
                             os.remove(custom_script_path)
                     except:
                         pass
-                finish_download(download_id, False, model_name, error=str(e))
+                if is_download_cancelled(download_id):
+                    # Cancelled by the user: the cancel endpoint already told clients
+                    logger.info(f"YOLO download {model_name} stopped after cancel")
+                    cleanup_download(download_id)
+                else:
+                    finish_download(download_id, False, model_name, error=str(e))
         
         # Start download in background thread and track it
         download_thread = threading.Thread(target=download_async, daemon=True)
@@ -1135,30 +1158,11 @@ def cancel_download():
         # Set the cancel flag
         set_download_cancelled(download_id)
         
-        # Clean up any partial files
-        try:
-            # Clean up based on download type and progress
-            model_name = download_info.get('model_name', '')
-            if model_name:
-                # Clean up model directory and partial files
-                models_dir = os.path.join(UPLOAD_FOLDER, model_name)
-                if os.path.exists(models_dir):
-                    import shutil
-                    shutil.rmtree(models_dir)
-                    logger.info(f"Cleaned up model directory: {models_dir}")
-                
-                # Clean up any partial downloads in downloads directory
-                downloads_dir = os.path.join(UPLOAD_FOLDER, 'downloads')
-                if os.path.exists(downloads_dir):
-                    for file in os.listdir(downloads_dir):
-                        if model_name.lower() in file.lower():
-                            file_path = os.path.join(downloads_dir, file)
-                            if os.path.isfile(file_path):
-                                os.remove(file_path)
-                                logger.info(f"Cleaned up partial file: {file_path}")
-        except Exception as cleanup_error:
-            logger.warning(f"Error during cleanup for download {download_id}: {cleanup_error}")
-        
+        # File cleanup is done by the download/upload thread itself when it sees
+        # the cancel flag: it removes only the files it created. (Deleting every
+        # file whose name contains the model name here also removed other models'
+        # files, e.g. cancelling "YOLOv11x" deleted "YOLOv11x-pt".)
+
         logger.info(f"Download {download_id} cancelled by {client_ip}")
         
         # Emit cancellation event
