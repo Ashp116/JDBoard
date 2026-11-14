@@ -440,6 +440,38 @@ class AIModelManager:
         logger.info(f"Registered model: {model_name}")
         return model_info
     
+    # pip commands shown to the user when a framework is missing
+    TORCH_INSTALL_HINT = ("pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132 "
+                          "(inside JDBoard's .venv)")
+    ULTRALYTICS_INSTALL_HINT = "pip install ultralytics --no-deps (inside JDBoard's .venv, after PyTorch)"
+
+    def missing_requirement(self, framework=None, yolo=False, target_format=None):
+        """Return a user-facing message if the backend can't handle this model, else None.
+
+        framework:     registry framework ('pytorch', 'onnx', 'tensorrt', 'tensorflow', ...)
+        yolo:          the model is an Ultralytics YOLO model (download-yolo flow)
+        target_format: requested conversion target in the download-yolo flow
+        """
+        if yolo or target_format:
+            if not TORCH_AVAILABLE:
+                return f"PyTorch is not installed on the backend, so YOLO models can't be loaded. Install it: {self.TORCH_INSTALL_HINT}"
+            if not ULTRALYTICS_AVAILABLE:
+                return f"Ultralytics is not installed on the backend, so YOLO models can't be loaded or converted. Install it: {self.ULTRALYTICS_INSTALL_HINT}"
+            if target_format == 'TensorRT' and not TENSORRT_AVAILABLE:
+                return "TensorRT Python bindings are not available on the backend, so the model can't be converted to TensorRT."
+            return None
+        if framework == 'pytorch' and not TORCH_AVAILABLE:
+            return f"PyTorch is not installed on the backend, so .pt/.pth models can't be loaded. Install it: {self.TORCH_INSTALL_HINT}"
+        if framework == 'onnx' and not ONNX_AVAILABLE:
+            return "ONNX Runtime support is disabled on the backend (it caused bus errors on Jetson). Use a .pt or TensorRT .engine model instead."
+        if framework == 'tensorrt' and not TENSORRT_AVAILABLE:
+            return "TensorRT Python bindings are not available on the backend, so .engine/.trt models can't be loaded."
+        if framework == 'tensorflow' and not TF_AVAILABLE:
+            return "TensorFlow is not installed on the backend, so .pb models can't be loaded."
+        if framework in ('keras', 'unknown'):
+            return f"'{framework}' models are not supported for inference."
+        return None
+
     def _detect_framework(self, file_extension):
         """Detect the ML framework based on file extension"""
         framework_map = {
@@ -454,6 +486,22 @@ class AIModelManager:
         }
         return framework_map.get(file_extension, 'unknown')
     
+    def _handler_status(self, model_id, model_info):
+        """Which inference handler a model uses: 'custom' or 'default'.
+
+        script_status: 'none' (no script), 'pending' (not loaded yet),
+        'active', or 'failed' (script error -> default handler is used).
+        """
+        if not model_info.get('custom_script_path'):
+            return {'inference_handler': 'default', 'script_status': 'none', 'script_error': None}
+        loaded = self.loaded_models.get(model_id)
+        if loaded is None:
+            return {'inference_handler': 'custom', 'script_status': 'pending', 'script_error': None}
+        error = loaded.get('script_error')
+        if error:
+            return {'inference_handler': 'default', 'script_status': 'failed', 'script_error': error}
+        return {'inference_handler': 'custom', 'script_status': 'active', 'script_error': None}
+
     def list_models(self):
         """List all registered models"""
         models = []
@@ -463,6 +511,7 @@ class AIModelManager:
                 model_copy = model_info.copy()
                 # Check actual loaded state (not just registry flag)
                 model_copy['loaded'] = model_id in self.loaded_models
+                model_copy.update(self._handler_status(model_id, model_info))
                 
                 # Update registry if it's out of sync
                 if self.models_registry[model_id]['loaded'] != model_copy['loaded']:
@@ -529,12 +578,13 @@ class AIModelManager:
             elif framework == 'tensorflow' and TF_AVAILABLE:
                 model = self._load_tensorflow_model(file_path)
             else:
-                raise ValueError(f"Unsupported framework: {framework} or framework not available")
+                raise ValueError(self.missing_requirement(framework) or f"Unsupported framework: {framework}")
             
             load_time = time.time() - start_time
             
             # Load custom script if provided
             custom_handler = None
+            script_error = None
             if model_info.get('custom_script_path'):
                 try:
                     custom_script_path = model_info['custom_script_path']
@@ -545,13 +595,15 @@ class AIModelManager:
                 except Exception as e:
                     logger.warning(f"Failed to load custom script, using default inference: {e}")
                     custom_handler = None
+                    script_error = f"Failed to load script: {e}"
             
             self.loaded_models[model_id] = {
                 'model': model,
                 'info': model_info,
                 'loaded_at': datetime.now().isoformat(),
                 'load_time': load_time,
-                'custom_handler': custom_handler
+                'custom_handler': custom_handler,
+                'script_error': script_error
             }
             
             # Update registry
@@ -868,6 +920,7 @@ class AIModelManager:
         
         # Store the processed image
         processed_image = image
+        script_fallback_error = model_data.get('script_error')
         
         start_time = time.time()
         
@@ -899,13 +952,17 @@ class AIModelManager:
                     
                     # Custom postprocess now returns a list of predictions
                     num_detections = len(result) if isinstance(result, list) else result.get('total_detections', 0)
+                    model_data['script_error'] = None
+                    script_fallback_error = None
                     logger.info(f"Custom inference completed: {num_detections} detections")
                     
                 except Exception as custom_error:
                     logger.error(f"Error in custom inference handler: {custom_error}")
                     logger.warning("Falling back to default inference method")
-                    # Fall back to default inference
+                    # Fall back to default inference, and surface the failure
                     custom_handler = None
+                    script_fallback_error = f"Script error during inference: {custom_error}"
+                    model_data['script_error'] = script_fallback_error
             
             # Use default inference if no custom handler or custom handler failed
             if not custom_handler:
@@ -935,17 +992,21 @@ class AIModelManager:
             
             logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s - Memory: {post_mem.get('free_gb', 0):.1f}GB free")
             
-            return {
+            response = {
                 'predictions': result,
                 'inference_time': inference_time,
                 'model_id': model_id,
                 'framework': framework,
+                'inference_handler': 'custom' if custom_handler else 'default',
                 'memory_info': {
                     'pre_inference_free_gb': pre_mem.get('free_gb', 0),
                     'post_inference_free_gb': post_mem.get('free_gb', 0),
                     'usage_percent': post_mem.get('usage_percent', 0)
                 }
             }
+            if model_info.get('custom_script_path') and script_fallback_error:
+                response['warning'] = f"Custom script failed, default handler used. {script_fallback_error}"
+            return response
             
         except RuntimeError as e:
             error_msg = str(e)
@@ -1353,6 +1414,9 @@ class AIModelManager:
                 detailed_info = model_info.copy()
                 detailed_info['id'] = model_id
                 detailed_info['loaded'] = model_id in self.loaded_models
+                detailed_info.update(self._handler_status(model_id, model_info))
+                # Why this model can't be loaded on this backend, if it can't (shown on the card)
+                detailed_info['load_problem'] = self.missing_requirement(model_info.get('framework'))
                 
                 if model_id in self.loaded_models:
                     load_info = self.loaded_models[model_id]
@@ -1826,9 +1890,17 @@ class AIModelManager:
             logger.info("Starting TensorRT export - this may take a few minutes...")
             start_time = time.time()
             
-            # Build command for YOLO export
+            # Build command for YOLO export. Use the `yolo` CLI that belongs to
+            # this interpreter (.venv/bin/yolo) - it isn't on PATH when the
+            # backend is started as `.venv/bin/python app.py`.
+            yolo_cli = os.path.join(os.path.dirname(sys.executable), 'yolo')
+            if not os.path.exists(yolo_cli):
+                yolo_cli = shutil.which('yolo')
+            if not yolo_cli:
+                raise RuntimeError("The Ultralytics 'yolo' command was not found next to the backend's Python. "
+                                   f"Reinstall it: {self.ULTRALYTICS_INSTALL_HINT}")
             cmd = [
-                'yolo', 'export',
+                yolo_cli, 'export',
                 f'model={source_path}',
                 'format=engine',
                 'device=0',

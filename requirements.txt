@@ -1,0 +1,32 @@
+# JDBoard backend requirements
+# jetson-stats (jtop) is installed system-wide: sudo pip3 install -U jetson-stats
+# OpenCV/numpy come from JetPack; create the venv with --system-site-packages
+# so both are visible:  python3 -m venv --system-site-packages .venv
+Flask>=3.0
+flask-cors>=4.0
+Flask-SocketIO>=5.3
+simple-websocket>=1.0
+psutil>=5.9
+
+# Keep numpy on 1.x: JetPack's OpenCV (cv2) and SciPy are built against it.
+numpy==1.26.4
+
+# --- Model inference (JetPack 7.2 / CUDA 13.2, tested on Orin Nano) ----------
+# PyTorch's own CUDA 13.2 aarch64 wheels run natively on JetPack 7.2 (no
+# cuda-compat package needed). Install them FIRST, from PyTorch's index:
+#   .venv/bin/pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
+# Then Ultralytics WITHOUT deps, so pip can't swap torch for a CPU build or
+# shadow JetPack's OpenCV with opencv-python:
+#   .venv/bin/pip install ultralytics --no-deps
+# and its remaining dependencies (onnx/onnxslim are for TensorRT export):
+#   .venv/bin/pip install -r requirements.txt
+matplotlib
+pillow
+polars
+requests
+ultralytics-thop
+ultralytics-platform
+onnx
+onnxslim
+ml-dtypes>=0.5,<0.6   # 0.6+ requires numpy 2
+# TensorRT Python bindings come from JetPack (system site-packages).

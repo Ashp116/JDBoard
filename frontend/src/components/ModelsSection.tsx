@@ -19,6 +19,11 @@ interface ModelInfo {
   loaded?: boolean;
   status?: string;
   upload_date?: string;
+  custom_script_path?: string | null;
+  inference_handler?: 'default' | 'custom';
+  script_status?: 'none' | 'pending' | 'active' | 'failed';
+  script_error?: string | null;
+  load_problem?: string | null;   // set when the backend can't load this model (missing framework)
 }
 
 interface YOLOModelOption {
@@ -1835,13 +1840,20 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     notificationId: string;
     status?: string;
   }>>(new Map());
+  // Always-current view of activeDownloads for socket handlers / async code.
+  // Updated synchronously in start/complete so a failure reported in the same
+  // tick as the start (or before React re-renders) is never dropped.
+  const activeDownloadsRef = useRef(activeDownloads);
+  const reportedFailuresRef = useRef<Set<string>>(new Set());
+  useEffect(() => { activeDownloadsRef.current = activeDownloads; }, [activeDownloads]);
   
   // File upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState('');
   const [modelType, setModelType] = useState('vision');
   const [customScript, setCustomScript] = useState<File | null>(null);
-  const [scriptOption, setScriptOption] = useState<'yolo11' | 'custom'>('yolo11');
+  // 'default' = built-in handler (no script sent); 'custom' = user-supplied .py
+  const [scriptOption, setScriptOption] = useState<'default' | 'custom'>('default');
   
   // YOLO download states
   const [selectedVersion, setSelectedVersion] = useState<YOLOVersion | null>(null);
@@ -2053,30 +2065,35 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       success: boolean; 
       message?: string;
       model_name?: string;
+      warning?: string | null;
     }) => {
-      completeDownload(data.download_id, data.success, data.message);
+      const wasTracked = activeDownloadsRef.current.has(data.download_id);
+      completeDownload(data.download_id, data.success, data.message,
+                       { modelName: data.model_name, warning: data.warning });
       if (data.success) {
         loadModels(); // Refresh models list
-        addLog('info', `✅ ${data.model_name || 'Model'} download completed successfully`);
-      } else {
-        addLog('error', `❌ ${data.model_name || 'Model'} download failed: ${data.message}`);
+        if (wasTracked) addLog('info', `✅ ${data.model_name || 'Model'} download completed successfully`);
       }
     };
 
     const handleDownloadError = (data: { 
       download_id: string; 
       error: string;
+      model_name?: string;
     }) => {
-      completeDownload(data.download_id, false, data.error);
-      addLog('error', `❌ Download ${data.download_id} failed: ${data.error}`);
+      completeDownload(data.download_id, false, data.error, { modelName: data.model_name });
+      loadModels();
     };
 
     const handleDownloadCancelled = (data: { 
       download_id: string; 
     }) => {
-      const download = activeDownloads.get(data.download_id);
+      const download = activeDownloadsRef.current.get(data.download_id);
       if (download) {
         removeNotification(download.notificationId);
+        const remaining = new Map(activeDownloadsRef.current);
+        remaining.delete(data.download_id);
+        activeDownloadsRef.current = remaining;
         setActiveDownloads(prev => {
           const updated = new Map(prev);
           updated.delete(data.download_id);
@@ -2121,7 +2138,54 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       socket.off('download_cancelled', handleDownloadCancelled);
       socket.off('log_message', handleLogMessage);
     };
-  }, [socket, activeDownloads, removeNotification, addNotification, loadModels]);
+  }, [socket]); // handlers read state through refs, so no re-subscribing mid-download
+
+  // Safety net for missed socket events (reconnects, very fast failures, the
+  // socket being down): poll the outcome of every download still shown as active.
+  const unknownCountsRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    if (activeDownloads.size === 0) return () => {};
+
+    const checkDownloads = async () => {
+      for (const [downloadId, download] of activeDownloadsRef.current) {
+        try {
+          const response = await fetch(`${getBackendUrl()}/models/downloads/${encodeURIComponent(downloadId)}/status`);
+          if (!response.ok) continue;
+          const status = await response.json();
+          if (status.state === 'failed') {
+            completeDownload(downloadId, false, status.error, { modelName: download.name });
+            loadModels();
+          } else if (status.state === 'completed') {
+            completeDownload(downloadId, true, status.message, { modelName: download.name, warning: status.warning });
+            loadModels();
+          } else if (status.state === 'unknown') {
+            // The backend registers a download a moment after the request; only
+            // give up after it has been unknown for several checks in a row.
+            const count = (unknownCountsRef.current.get(downloadId) || 0) + 1;
+            unknownCountsRef.current.set(downloadId, count);
+            if (count >= 4) {
+              unknownCountsRef.current.delete(downloadId);
+              completeDownload(downloadId, false,
+                'The backend lost track of this download (it may have restarted). Check the logs and try again.',
+                { modelName: download.name });
+            }
+          } else {
+            unknownCountsRef.current.delete(downloadId);
+          }
+        } catch {
+          // Backend unreachable - the connection banner already covers this
+        }
+      }
+    };
+
+    const interval = setInterval(checkDownloads, 3000);
+    const onReconnect = () => { checkDownloads(); };
+    socket?.on('connect', onReconnect);
+    return () => {
+      clearInterval(interval);
+      socket?.off('connect', onReconnect);
+    };
+  }, [activeDownloads.size > 0, socket]);
 
   // Filter models based on search query
   useEffect(() => {
@@ -2162,11 +2226,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     addNotification(notification);
     addLog('info', `🚀 Starting download: ${modelName}`);
     
-    setActiveDownloads(prev => new Map(prev.set(downloadId, {
-      name: modelName,
-      progress: 0,
-      notificationId
-    })));
+    const entry = { name: modelName, progress: 0, notificationId };
+    activeDownloadsRef.current = new Map(activeDownloadsRef.current).set(downloadId, entry);
+    setActiveDownloads(prev => new Map(prev).set(downloadId, entry));
 
     return notificationId;
   };
@@ -2194,37 +2256,60 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     });
   };
 
-  const completeDownload = (downloadId: string, success: boolean, message?: string) => {
-    const download = activeDownloads.get(downloadId);
+  const completeDownload = (
+    downloadId: string,
+    success: boolean,
+    message?: string,
+    options: { modelName?: string; warning?: string | null } = {}
+  ) => {
+    const download = activeDownloadsRef.current.get(downloadId);
+    if (!download && success) {
+      // Already reported (e.g. both the socket event and a status poll arrived)
+      return;
+    }
     if (download) {
-      // Remove the progress notification
       removeNotification(download.notificationId);
-      
-      // Remove from active downloads
+      const remaining = new Map(activeDownloadsRef.current);
+      remaining.delete(downloadId);
+      activeDownloadsRef.current = remaining;
       setActiveDownloads(prev => {
         const updated = new Map(prev);
         updated.delete(downloadId);
         return updated;
       });
-
-      // Clean up logs state for this download
       setShowLogs(prev => {
         const updated = new Map(prev);
         updated.delete(downloadId);
         return updated;
       });
-
-      // Add completion notification
-      addNotification({
-        type: success ? 'success' : 'error',
-        title: success ? 'Model Ready' : 'Download Failed',
-        message: message || `${download.name} ${success ? 'is ready for use!' : 'download failed'}`
-      });
+    } else if (reportedFailuresRef.current.has(downloadId)) {
+      return; // this failure was already shown
     }
+
+    const name = download?.name || options.modelName || 'Model';
+    if (!success) {
+      reportedFailuresRef.current.add(downloadId);
+      addLog('error', `❌ ${name} failed: ${message || 'unknown error'}`);
+    }
+    if (success && options.warning) {
+      addNotification({
+        type: 'warning',
+        title: 'Model Added - Not Loadable Yet',
+        message: `${message || `${name} added.`} ${options.warning}`,
+        persistent: true
+      });
+      return;
+    }
+    addNotification({
+      type: success ? 'success' : 'error',
+      title: success ? 'Model Ready' : 'Download Failed',
+      message: message || `${name} ${success ? 'is ready for use!' : 'download failed'}`,
+      ...(success ? {} : { persistent: true })
+    });
   };
 
   const cancelDownload = async (downloadId: string) => {
-    const download = activeDownloads.get(downloadId);
+    const download = activeDownloadsRef.current.get(downloadId);
     if (!download) return;
 
     try {
@@ -2238,6 +2323,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       });
 
       const data = await response.json();
+
+      if (data.already_finished && data.result) {
+        // It ended before the cancel arrived (we missed the event) - report how
+        completeDownload(downloadId, data.result.state === 'completed',
+                         data.result.state === 'completed' ? data.result.message : data.result.error,
+                         { modelName: download.name, warning: data.result.warning });
+        loadModels();
+        return;
+      }
       
       if (data.success) {
         // Remove from active downloads immediately
@@ -2380,11 +2474,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       formData.append('model_type', modelType);
       formData.append('download_id', uploadId); // Send download ID to backend
       
-      // Add custom script if selected
+      // Only a custom script is sent; otherwise the backend uses its default handler
       if (scriptOption === 'custom' && customScript) {
         formData.append('custom_script', customScript);
-      } else if (scriptOption === 'yolo11') {
-        formData.append('use_yolo11_script', 'true');
       }
 
       // Close modal immediately to allow user to continue
@@ -2404,7 +2496,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // If successful or download started, progress will be handled by WebSocket
     } catch (error) {
       console.error('Upload error:', error);
-      completeDownload(uploadId, false, 'Upload failed: ' + error);
+      completeDownload(uploadId, false, `Upload failed: ${error instanceof Error ? error.message : error}`);
     } finally {
       setLoading(false);
     }
@@ -2437,11 +2529,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       formData.append('original_format', 'PyTorch');
       formData.append('download_id', downloadId);
       
-      // Add custom script if selected
+      // Only a custom script is sent; otherwise the backend uses its default handler
       if (scriptOption === 'custom' && customScript) {
         formData.append('custom_script', customScript);
-      } else if (scriptOption === 'yolo11') {
-        formData.append('use_yolo11_script', 'true');
       }
 
       const response = await fetch(`${getBackendUrl()}/models/download-yolo`, {
@@ -2449,14 +2539,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         body: formData
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const contentType = response.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         const textResponse = await response.text();
-        throw new Error(`Expected JSON response, got: ${contentType}. Response: ${textResponse}`);
+        throw new Error(`Backend returned ${response.status} ${contentType || ''}: ${textResponse.slice(0, 200)}`);
       }
 
       const data = await response.json();
@@ -2468,7 +2554,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // If successful or download started, progress will be handled by WebSocket
     } catch (error) {
       console.error('Download error:', error);
-      completeDownload(downloadId, false, 'Download failed: ' + error);
+      completeDownload(downloadId, false, `Download failed: ${error instanceof Error ? error.message : error}`);
     } finally {
       setLoading(false);
     }
@@ -2486,7 +2572,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     setModelName('');
     setModelType('vision');
     setCustomScript(null);
-    setScriptOption('yolo11');
+    setScriptOption('default');
     setNameError('');
   };
 
@@ -2746,6 +2832,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     setLoadingTemplate(true);
     try {
       const response = await fetch(`${getBackendUrl()}/models/custom-script-template`);
+      if (!response.ok) {
+        throw new Error(`Template request failed (${response.status})`);
+      }
       const blob = await response.blob();
       const text = await blob.text();
       
@@ -3106,6 +3195,31 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <span className="label">Size:</span>
                   <span className="value">{formatFileSize(model.file_size)}</span>
                 </div>
+                <div className="info-row">
+                  <span className="label">Inference:</span>
+                  {model.script_status === 'failed' ? (
+                    <span
+                      className="value"
+                      style={{ color: '#ff6b6b' }}
+                      title={model.script_error || 'Custom script failed'}
+                    >
+                      <i className="fas fa-exclamation-triangle"></i> Custom script failed (using default)
+                    </span>
+                  ) : (
+                    <span className="value">
+                      {model.custom_script_path ? 'Custom script' : 'Default'}
+                    </span>
+                  )}
+                </div>
+                {model.load_problem && !model.loaded && (
+                  <div
+                    className="info-row"
+                    style={{ color: '#ffb020', alignItems: 'flex-start', gap: '6px' }}
+                  >
+                    <span className="label"><i className="fas fa-exclamation-circle"></i> Can't load:</span>
+                    <span className="value" style={{ whiteSpace: 'normal', textAlign: 'right' }}>{model.load_problem}</span>
+                  </div>
+                )}
                 {model.upload_date && (
                   <div className="info-row">
                     <span className="label">Added:</span>
@@ -3154,7 +3268,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </button>
               </div>
               
-              {(model as any).custom_script_path && (
+              {model.custom_script_path && (
                 <div style={{ marginTop: '8px' }}>
                   <button
                     onClick={() => handleViewCustomScript(model.id, model.name)}
@@ -3309,15 +3423,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   
                   <ScriptOptions>
                     <ScriptOption
-                      $selected={scriptOption === 'yolo11'}
+                      $selected={scriptOption === 'default'}
                       onClick={() => {
-                        setScriptOption('yolo11');
+                        setScriptOption('default');
                         setCustomScript(null);
                       }}
                     >
-                      <i className="fas fa-robot"></i>
-                      <span>YOLO Template</span>
-                      <small>Optimized for YOLO models</small>
+                      <i className="fas fa-cogs"></i>
+                      <span>Default</span>
+                      <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
                     </ScriptOption>
                     
                     <ScriptOption
@@ -3367,10 +3481,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     </CustomScriptUpload>
                   )}
 
-                  {scriptOption === 'yolo11' && (
+                  {scriptOption === 'default' && (
                     <ScriptInfo>
                       <i className="fas fa-info-circle"></i>
-                      Using built-in YOLO11 custom inference template with optimized preprocessing and postprocessing
+                      No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
                     </ScriptInfo>
                   )}
                 </CustomScriptSection>
@@ -3498,15 +3612,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     
                     <ScriptOptions>
                       <ScriptOption
-                        $selected={scriptOption === 'yolo11'}
+                        $selected={scriptOption === 'default'}
                         onClick={() => {
-                          setScriptOption('yolo11');
+                          setScriptOption('default');
                           setCustomScript(null);
                         }}
                       >
-                        <i className="fas fa-robot"></i>
-                        <span>YOLO Template</span>
-                        <small>Optimized for YOLO models</small>
+                        <i className="fas fa-cogs"></i>
+                        <span>Default</span>
+                        <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
                       </ScriptOption>
                       
                       <ScriptOption
@@ -3556,10 +3670,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       </CustomScriptUpload>
                     )}
 
-                    {scriptOption === 'yolo11' && (
+                    {scriptOption === 'default' && (
                       <ScriptInfo>
                         <i className="fas fa-info-circle"></i>
-                        Using built-in YOLO11 custom inference template with optimized preprocessing and postprocessing
+                        No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
                       </ScriptInfo>
                     )}
                   </CustomScriptSection>
@@ -3579,7 +3693,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <Button 
                     variant="primary" 
                     onClick={handleFileUpload}
-                    disabled={loading || !selectedFile || !modelName.trim() || !!nameError}
+                    disabled={loading || !selectedFile || !modelName.trim() || !!nameError || (scriptOption === 'custom' && !customScript)}
                   >
                     {loading ? <LoadingSpinner /> : 'Upload Model'}
                   </Button>
@@ -3592,7 +3706,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <Button 
                     variant="primary" 
                     onClick={handleYOLODownload}
-                    disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError}
+                    disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError || (scriptOption === 'custom' && !customScript)}
                   >
                     {loading ? <LoadingSpinner /> : 'Download & Convert'}
                   </Button>

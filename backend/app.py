@@ -17,18 +17,13 @@ import uuid
 import threading
 from pathlib import Path
 import psutil
-import GPUtil
-
-# Ignore SIGPIPE signal to handle broken pipe errors gracefully
-#signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 from system_monitor import SystemMonitor
 from ai_inference import AIModelManager
 from request_logger import RequestLogger
-
-from jtop import jtop
+from jtop import JtopException
 
 # Check if running as root/sudo
 def is_running_as_root():
@@ -74,6 +69,37 @@ def cleanup_download(download_id):
     active_downloads.pop(download_id, None)
     download_cancel_flags.pop(download_id, None)
     download_threads.pop(download_id, None)
+
+# Final result of each download/upload, kept so the frontend can still learn the
+# outcome if it missed the socket event (reconnect, page reload, fast failure).
+finished_downloads = {}
+FINISHED_DOWNLOAD_TTL = 30 * 60  # seconds
+
+def finish_download(download_id, success, model_name='', message='', error=None, warning=None):
+    """Record a download's outcome, notify clients, and stop tracking it."""
+    now = time.time()
+    for old_id in [k for k, v in finished_downloads.items() if now - v['finished_ts'] > FINISHED_DOWNLOAD_TTL]:
+        finished_downloads.pop(old_id, None)
+    finished_downloads[download_id] = {
+        'state': 'completed' if success else 'failed',
+        'success': success,
+        'model_name': model_name,
+        'message': message,
+        'error': error,
+        'warning': warning,
+        'finished_at': datetime.now().isoformat(),
+        'finished_ts': now,
+    }
+    if success:
+        socketio.emit('download_complete', {
+            'download_id': download_id, 'success': True,
+            'model_name': model_name, 'message': message, 'warning': warning,
+        })
+    else:
+        socketio.emit('download_error', {
+            'download_id': download_id, 'model_name': model_name, 'error': error,
+        })
+    cleanup_download(download_id)
 
 def get_client_ip():
     """Get the real client IP address, handling proxies and load balancers"""
@@ -166,21 +192,12 @@ websocket_handler.setLevel(logging.INFO)
 websocket_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 websocket_handler.setFormatter(websocket_formatter)
 
-# Add handler to specific loggers instead of root logger
-model_loggers = [
-    'ai_inference',
-    'ultralytics',
-    'torch',
-    'tensorrt',
-    'onnxruntime'
-]
+# Make sure model-related loggers emit INFO. They propagate to the root logger,
+# which carries the WebSocket handler - attaching it to them as well would send
+# every line to the dashboard twice.
+for logger_name in ['ai_inference', 'ultralytics', 'torch', 'tensorrt', 'onnxruntime']:
+    logging.getLogger(logger_name).setLevel(logging.INFO)
 
-for logger_name in model_loggers:
-    specific_logger = logging.getLogger(logger_name)
-    specific_logger.addHandler(websocket_handler)
-    specific_logger.setLevel(logging.INFO)
-
-# Also add to root logger but with stricter filtering
 root_logger = logging.getLogger()
 root_logger.addHandler(websocket_handler)
 
@@ -433,9 +450,8 @@ def upload_model():
     model_type = request.form.get('model_type', 'vision')
     download_id = request.form.get('download_id', str(uuid.uuid4()))
     
-    # Check for optional custom script or use_yolo11_script flag
+    # Optional custom inference script; without one the built-in (default) handler is used
     custom_script = request.files.get('custom_script')
-    use_yolo11_script = request.form.get('use_yolo11_script', 'false') == 'true'
     
     if file.filename == '':
         return jsonify({
@@ -444,6 +460,29 @@ def upload_model():
         }), 400
     
     if file and allowed_file(file.filename):
+        # Resolved here, not inside upload_async: assigning model_name in the
+        # thread made it a local there, so every upload crashed on first use.
+        filename = secure_filename(file.filename)
+        if not model_name:
+            model_name = filename.rsplit('.', 1)[0]
+
+        # Save the uploaded files now: Flask closes the request's file streams
+        # once this handler returns, so the background thread can't read them.
+        if custom_script and custom_script.filename and not custom_script.filename.endswith('.py'):
+            return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
+        try:
+            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+            saved_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{filename}")
+            file.save(saved_file_path)
+            saved_file_size = os.path.getsize(saved_file_path)
+            saved_script_path = None
+            if custom_script and custom_script.filename:
+                saved_script_path = os.path.join(app.config['UPLOAD_FOLDER'],
+                                                 f"{uuid.uuid4().hex}_{secure_filename(custom_script.filename)}")
+                custom_script.save(saved_script_path)
+        except Exception as e:
+            logger.error(f"Error saving uploaded model {model_name}: {e}")
+            return jsonify({'success': False, 'error': f'Could not save uploaded file: {e}'}), 500
         try:
             def progress_callback(progress, status):
                 # Update persistent state
@@ -459,8 +498,18 @@ def upload_model():
                 })
             
             # Start async upload process
+            def discard_saved_files():
+                for path in (saved_file_path, saved_script_path):
+                    try:
+                        if path and os.path.exists(path):
+                            os.remove(path)
+                    except OSError:
+                        pass
+
             def upload_async():
-                custom_script_path = None
+                # Files were saved by the request handler (see above)
+                file_path = saved_file_path
+                custom_script_path = saved_script_path
                 try:
                     # Track this download with persistent information
                     active_downloads[download_id] = {
@@ -470,56 +519,28 @@ def upload_model():
                         'started_at': datetime.now().isoformat(),
                         'progress': 0,
                         'status': 'Preparing upload...',
-                        'file_size': file.content_length if hasattr(file, 'content_length') else 0
+                        'file_size': saved_file_size
                     }
                     
                     progress_callback(10, 'Preparing upload...')
                     
                     # Check for cancellation
                     if is_download_cancelled(download_id):
+                        discard_saved_files()
                         cleanup_download(download_id)
                         return
-                    
-                    filename = secure_filename(file.filename)
-                    if not model_name:
-                        model_name = filename.rsplit('.', 1)[0]
                     
                     progress_callback(30, 'Saving file...')
                     
                     # Check for cancellation
                     if is_download_cancelled(download_id):
+                        discard_saved_files()
                         cleanup_download(download_id)
                         return
                     
-                    # Create unique filename to avoid conflicts
-                    unique_filename = f"{uuid.uuid4().hex}_{filename}"
-                    file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-                    
-                    file.save(file_path)
-                    
-                    # Handle custom script
-                    if use_yolo11_script:
-                        # Use the built-in YOLO11 script
-                        yolo11_script_path = os.path.join(os.path.dirname(__file__), '../models/yolo11_custom_inference.py')
-                        if os.path.exists(yolo11_script_path):
-                            custom_script_path = os.path.abspath(yolo11_script_path)
-                            progress_callback(50, 'Using YOLO11 inference template...')
-                            logger.info(f"Using built-in YOLO11 custom inference script")
-                        else:
-                            logger.warning(f"YOLO11 script not found at {yolo11_script_path}, proceeding without custom script")
-                    elif custom_script and custom_script.filename != '':
-                        # Save uploaded custom script
-                        if not custom_script.filename.endswith('.py'):
-                            raise ValueError("Custom script must be a Python (.py) file")
-                        
-                        progress_callback(50, 'Saving custom inference script...')
-                        
-                        script_filename = secure_filename(custom_script.filename)
-                        unique_script_name = f"{uuid.uuid4().hex}_{script_filename}"
-                        custom_script_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_script_name)
-                        custom_script.save(custom_script_path)
-                        
-                        logger.info(f"Custom script saved: {script_filename}")
+                    if custom_script_path:
+                        progress_callback(50, 'Custom inference script received...')
+                        logger.info(f"Custom script saved: {os.path.basename(custom_script_path)}")
                     
                     progress_callback(70, 'Registering model...')
                     
@@ -546,20 +567,17 @@ def upload_model():
                     
                     progress_callback(100, 'Upload complete')
                     
-                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}" + 
-                               (' (with YOLO11 template)' if use_yolo11_script else 
-                                f' (with custom script)' if custom_script_path else ''))
+                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}" +
+                               (' (with custom script)' if custom_script_path else ' (default handler)'))
                     
-                    socketio.emit('download_complete', {
-                        'download_id': download_id,
-                        'success': True,
-                        'model_name': model_name,
-                        'message': f'Model {model_name} uploaded and ready for use!' +
-                                  (' Using YOLO11 inference template.' if use_yolo11_script else
-                                   ' Custom inference script loaded.' if custom_script_path else '')
-                    })
-                    
-                    cleanup_download(download_id)
+                    load_problem = ai_manager.missing_requirement(model_info.get('framework'))
+                    finish_download(
+                        download_id, True, model_name,
+                        message=(f'Model {model_name} uploaded, but it cannot be loaded yet.' if load_problem else
+                                 f'Model {model_name} uploaded and ready for use!' +
+                                 (' Custom inference script loaded.' if custom_script_path else '')),
+                        warning=load_problem,
+                    )
                     
                 except Exception as e:
                     logger.error(f"Error uploading model: {str(e)}")
@@ -571,11 +589,7 @@ def upload_model():
                             os.remove(custom_script_path)
                     except:
                         pass
-                    socketio.emit('download_error', {
-                        'download_id': download_id,
-                        'error': str(e)
-                    })
-                    cleanup_download(download_id)
+                    finish_download(download_id, False, model_name, error=str(e))
             
             # Start upload in background thread
             threading.Thread(target=upload_async, daemon=True).start()
@@ -837,7 +851,7 @@ def download_custom_script_template():
     )
     
     try:
-        template_path = os.path.join(os.path.dirname(__file__), '../models/custom_model_template.py')
+        template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates', 'custom_model_template.py')
         
         if not os.path.exists(template_path):
             return jsonify({
@@ -934,12 +948,10 @@ def download_yolo_model():
     if request.is_json:
         data = request.get_json()
         custom_script = None
-        use_yolo11_script = False
     else:
         # FormData
         data = request.form.to_dict()
         custom_script = request.files.get('custom_script')
-        use_yolo11_script = request.form.get('use_yolo11_script', 'false') == 'true'
     
     if not data:
         return jsonify({
@@ -965,6 +977,22 @@ def download_yolo_model():
             'success': False,
             'error': 'model_url and model_name are required'
         }), 400
+
+    missing = ai_manager.missing_requirement(yolo=True, target_format=target_format if target_format != 'PyTorch' else None)
+    if missing:
+        logger.error(f"YOLO download of {model_name} rejected: {missing}")
+        return jsonify({'success': False, 'error': missing}), 400
+
+    # Save an uploaded custom script now; the request's file stream is closed
+    # by the time the background thread runs.
+    saved_script_path = None
+    if custom_script and getattr(custom_script, 'filename', ''):
+        if not custom_script.filename.endswith('.py'):
+            return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        saved_script_path = os.path.abspath(os.path.join(
+            app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{secure_filename(custom_script.filename)}"))
+        custom_script.save(saved_script_path)
     
     try:
         def progress_callback(progress, status):
@@ -996,27 +1024,10 @@ def download_yolo_model():
                     'status': 'Starting download...'
                 }
                 
-                # Handle custom script
-                if use_yolo11_script:
-                    # Use the built-in YOLO11 script
-                    yolo11_script_path = os.path.join(os.path.dirname(__file__), '../models/yolo11_custom_inference.py')
-                    if os.path.exists(yolo11_script_path):
-                        custom_script_path = os.path.abspath(yolo11_script_path)
-                        logger.info(f"Using built-in YOLO11 custom inference script for download")
-                    else:
-                        logger.warning(f"YOLO11 script not found at {yolo11_script_path}")
-                elif custom_script and hasattr(custom_script, 'filename') and custom_script.filename != '':
-                    # Save uploaded custom script
-                    if not custom_script.filename.endswith('.py'):
-                        raise ValueError("Custom script must be a Python (.py) file")
-                    
-                    script_filename = secure_filename(custom_script.filename)
-                    unique_script_name = f"{uuid.uuid4().hex}_{script_filename}"
-                    custom_script_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_script_name)
-                    custom_script.save(custom_script_path)
-                    custom_script_path = os.path.abspath(custom_script_path)
-                    
-                    logger.info(f"Custom script saved for YOLO download: {script_filename}")
+                # Custom script (optional; default handler otherwise) - saved by the request handler
+                custom_script_path = saved_script_path
+                if custom_script_path:
+                    logger.info(f"Custom script saved for YOLO download: {os.path.basename(custom_script_path)}")
                 
                 result = ai_manager.download_yolo_model(
                     model_url=model_url,
@@ -1032,35 +1043,27 @@ def download_yolo_model():
                     cleanup_download(download_id)
                     return
                 
-                logger.info(f"YOLO model {model_name} downloaded and converted by {client_ip}" +
-                           (' (with YOLO11 template)' if use_yolo11_script else
-                            ' (with custom script)' if custom_script_path else ''))
+                logger.info(f"YOLO model {model_name} downloaded" +
+                           (f" and converted to {target_format}" if target_format != 'PyTorch' else '') +
+                           f" by {client_ip}" +
+                           (' (with custom script)' if custom_script_path else ' (default handler)'))
                 
-                socketio.emit('download_complete', {
-                    'download_id': download_id,
-                    'success': True,
-                    'model_name': model_name,
-                    'message': f'YOLO model {model_name} is ready for inference!' +
-                              (' Using YOLO11 inference template.' if use_yolo11_script else
-                               ' Custom inference script loaded.' if custom_script_path else '')
-                })
-                
-                cleanup_download(download_id)
+                finish_download(
+                    download_id, True, model_name,
+                    message=f'YOLO model {model_name} is ready for inference!' +
+                            (' Custom inference script loaded.' if custom_script_path else '')
+                )
                 
             except Exception as e:
                 logger.error(f"Error downloading YOLO model: {str(e)}")
-                # Clean up custom script on error if it was uploaded (not YOLO11 template)
-                if custom_script_path and not use_yolo11_script:
+                # Clean up the uploaded custom script on error
+                if custom_script_path:
                     try:
                         if os.path.exists(custom_script_path):
                             os.remove(custom_script_path)
                     except:
                         pass
-                socketio.emit('download_error', {
-                    'download_id': download_id,
-                    'error': str(e)
-                })
-                cleanup_download(download_id)
+                finish_download(download_id, False, model_name, error=str(e))
         
         # Start download in background thread and track it
         download_thread = threading.Thread(target=download_async, daemon=True)
@@ -1112,6 +1115,15 @@ def cancel_download():
     try:
         # Check if download exists
         if download_id not in active_downloads:
+            result = finished_downloads.get(download_id)
+            if result:
+                return jsonify({
+                    'success': False,
+                    'already_finished': True,
+                    'result': {k: v for k, v in result.items() if k != 'finished_ts'},
+                    'error': ('Download already failed: ' + (result.get('error') or 'unknown error'))
+                             if not result['success'] else 'Download already completed'
+                }), 409
             return jsonify({
                 'success': False,
                 'error': 'Download not found or already completed'
@@ -1165,6 +1177,19 @@ def cancel_download():
             'success': False,
             'error': str(e)
         }), 500
+
+@app.route('/models/downloads/<download_id>/status', methods=['GET'])
+def get_download_status(download_id):
+    """State of one download: active (with progress), completed, failed, or unknown"""
+    if download_id in active_downloads:
+        info = active_downloads[download_id]
+        return jsonify({'success': True, 'state': 'active',
+                        'progress': info.get('progress', 0), 'status': info.get('status', ''),
+                        'model_name': info.get('model_name', '')})
+    result = finished_downloads.get(download_id)
+    if result:
+        return jsonify({'success': True, **{k: v for k, v in result.items() if k not in ('finished_ts', 'success')}})
+    return jsonify({'success': True, 'state': 'unknown'})
 
 @app.route('/models/active-downloads', methods=['GET'])
 def get_active_downloads():
@@ -1838,433 +1863,107 @@ def get_system_info():
     """Get comprehensive system information"""
     try:
         system_data = system_monitor.get_system_status()
-        
-        # Get jtop board information
-        board_info = get_jtop_board_info()
-        
-        # Add additional system info
-        system_info = {
+        return jsonify({
             **system_data,
-            'board_info': board_info,
-            'jetpack_version': get_jetpack_version(),
-            'kernel_version': get_kernel_version(),
+            'board_info': system_monitor.get_board_info(),
             'timestamp': datetime.now().isoformat()
-        }
-        
-        # Override jetson_model with jtop board model if available
-        if board_info and 'Model' in board_info:
-            system_info['jetson_model'] = board_info['Model']
-            system_info['jetson_module'] = board_info['Module']
-        
-        return jsonify(system_info)
+        })
     except Exception as e:
         logger.error(f"Error getting system info: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'settings.json')
 
 @app.route('/settings', methods=['GET'])
 def get_settings():
-    """Get current dashboard settings"""
+    """Get dashboard settings, with hardware settings read live from jtop"""
     try:
-        settings_file = '../config/settings.json'
-        if os.path.exists(settings_file):
-            with open(settings_file, 'r') as f:
-                settings = json.load(f)
-        else:
-            # Default settings
-            settings = {
-                'theme': 'nvidia',
-                'refreshInterval': 2000,
-                'notifications': True,
-                'autoUpdate': True,
-                'debugMode': False,
-                'jetsonClocks': False,
-                'powerMode': 'MAXN',
-                'fanMode': 'quiet'
-            }
-        
-        # Override jetsonClocks, powerMode, and fanMode with real system status from system monitor
-        try:
-            system_data = system_monitor.get_system_data()
-            if 'jetson_clocks' in system_data:
-                settings['jetsonClocks'] = system_data['jetson_clocks']
-            if 'nvp_model' in system_data:
-                settings['powerMode'] = system_data['nvp_model']
-                
-            # Get current fan mode from nvfancontrol
-            try:
-                result = subprocess.run(['sudo', 'nvfancontrol', '--query'], 
-                                      capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    for line in result.stdout.strip().split('\n'):
-                        if 'FAN_PROFILE:' in line:
-                            profile = line.split(':')[-1].strip()
-                            settings['fanMode'] = profile  # Return actual profile (quiet or cool)
-                            break
-            except:
-                pass  # Keep default fanMode if query fails
-                
-        except Exception as monitor_e:
-            logger.debug(f"Could not get system status from monitor: {monitor_e}")
-        
+        settings = {
+            'theme': 'nvidia',
+            'refreshInterval': 2000,
+            'notifications': True,
+            'autoUpdate': True,
+            'debugMode': False,
+        }
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                settings.update(json.load(f))
+
+        system_data = system_monitor.get_system_status()
+        settings['jetsonClocks'] = bool(system_data.get('jetson_clocks', False))
+        settings['powerMode'] = system_data.get('nvp_model', 'Unknown')
+        settings['fanMode'] = (system_data.get('fan') or {}).get('profile') or 'quiet'
         return jsonify(settings)
     except Exception as e:
         logger.error(f"Error getting settings: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/settings', methods=['POST'])
 def save_settings():
-    """Save dashboard settings"""
+    """Save dashboard settings (hardware settings are applied via their own endpoints)"""
     try:
-        settings = request.json
-        
-        # Ensure config directory exists
-        os.makedirs('../config', exist_ok=True)
-        
-        # Save settings to file
-        settings_file = '../config/settings.json'
-        with open(settings_file, 'w') as f:
+        settings = {k: v for k, v in (request.json or {}).items()
+                    if k not in ('jetsonClocks', 'powerMode', 'fanMode')}
+        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+        with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
-        
         logger.info(f"Settings saved: {settings}")
         return jsonify({'success': True})
     except Exception as e:
         logger.error(f"Error saving settings: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def _control_error(action, e):
+    """Uniform error response for jtop control endpoints"""
+    status = 400 if isinstance(e, (ValueError, JtopException)) else 503
+    logger.error(f"Error {action}: {e}")
+    return jsonify({'success': False, 'error': str(e)}), status
 
 @app.route('/system/jetson-clocks', methods=['POST'])
 def toggle_jetson_clocks():
-    """Toggle Jetson Clocks on/off"""
+    """Turn jetson_clocks on/off through jtop.service (no sudo required)"""
     try:
-        data = request.json
-        enabled = data.get('enabled', False)
-        sudo_password = data.get('sudo_password', '')
-        
-        if not sudo_password:
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
-        
-        if enabled:
-            # Store current configuration before enabling (if not already stored)
-            store_file = f'{os.path.expanduser("~")}/l4t_dfs.conf'
-            if not os.path.exists(store_file):
-                # Store current configuration first
-                store_result = subprocess.run(
-                    ['sudo', '-S', 'jetson_clocks', '--store', store_file],
-                    input=sudo_password + '\n',
-                    capture_output=True,
-                    text=True,
-                    timeout=15
-                )
-                if store_result.returncode == 0:
-                    logger.info(f"Current configuration stored to {store_file}")
-            
-            # Enable Jetson Clocks
-            result = subprocess.run(
-                ['sudo', '-S', 'jetson_clocks'],
-                input=sudo_password + '\n',
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                logger.info("Jetson Clocks enabled")
-                return jsonify({'success': True, 'status': 'enabled'})
-            else:
-                error_msg = result.stderr.strip() if result.stderr else 'Failed to enable Jetson Clocks'
-                return jsonify({'success': False, 'error': error_msg}), 500
-        else:
-            # Disable Jetson Clocks (restore normal governors)
-            # First try to use the system default config file, fallback to user home
-            restore_configs = [
-                '/usr/local/jtop/l4t_dfs.conf',  # System default from jtop
-                f'{os.path.expanduser("~")}/l4t_dfs.conf'  # User home directory
-            ]
-            
-            restore_file = None
-            for config_file in restore_configs:
-                if os.path.exists(config_file):
-                    restore_file = config_file
-                    break
-            
-            if restore_file:
-                result = subprocess.run(
-                    ['sudo', '-S', 'jetson_clocks', '--restore', restore_file],
-                    input=sudo_password + '\n',
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-            else:
-                # Fallback: try restore without specifying file (uses default)
-                result = subprocess.run(
-                    ['sudo', '-S', 'jetson_clocks', '--restore'],
-                    input=sudo_password + '\n',
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-            
-            if result.returncode == 0:
-                logger.info("Jetson Clocks disabled")
-                return jsonify({'success': True, 'status': 'disabled'})
-            else:
-                error_msg = result.stderr.strip() if result.stderr else 'Failed to disable Jetson Clocks'
-                return jsonify({'success': False, 'error': error_msg}), 500
-                
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            'success': False,
-            'error': 'Command timeout'
-        }), 408
+        enabled = system_monitor.set_jetson_clocks((request.json or {}).get('enabled', False))
+        logger.info(f"Jetson Clocks {'enabled' if enabled else 'disabled'}")
+        return jsonify({'success': True, 'status': 'enabled' if enabled else 'disabled'})
     except Exception as e:
-        logger.error(f"Error toggling Jetson Clocks: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return _control_error('toggling Jetson Clocks', e)
 
 @app.route('/system/power-modes', methods=['GET'])
 def get_power_modes():
-    """Get available power modes from jtop singleton"""
+    """Get available NV power modes from jtop"""
     try:
-        # Use system_monitor's singleton jtop connection
-        jetson = system_monitor._get_jtop()
-        
-        if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
-            # Get available power modes
-            available_modes = jetson.nvpmodel.models if hasattr(jetson.nvpmodel, 'models') else []
-            current_mode = jetson.nvpmodel.name if hasattr(jetson.nvpmodel, 'name') else 'Unknown'
-            
-            return jsonify({
-                'success': True,
-                'available_modes': available_modes,
-                'current_mode': current_mode
-            })
-        else:
-            # Fallback to default modes if jtop is not available
-            return jsonify({
-                'success': True,
-                'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
-                'current_mode': 'MAXN_SUPER'
-            })
-                
+        return jsonify({'success': True, **system_monitor.get_power_modes()})
     except Exception as e:
-        logger.error(f"Error getting power modes: {str(e)}")
-        # Fallback to default modes
-        return jsonify({
-            'success': True,
-            'available_modes': ['15W', '25W', 'MAXN_SUPER', '7W'],
-            'current_mode': 'MAXN_SUPER'
-        })
+        return _control_error('getting power modes', e)
 
 @app.route('/system/power-mode', methods=['POST'])
 def set_power_mode():
-    """Set system power mode"""
+    """Set NV power mode through jtop.service (no sudo required)"""
     try:
-        data = request.json
-        mode = data.get('mode', 'MAXN_SUPER')
-        sudo_password = data.get('sudo_password', '')
-        
-        if not sudo_password:
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
-        
-        # Get available modes from jtop singleton to create dynamic mapping
-        try:
-            # Use system_monitor's singleton jtop connection
-            jetson = system_monitor._get_jtop()
-            
-            if hasattr(jetson, 'nvpmodel') and jetson.nvpmodel is not None:
-                available_modes = jetson.nvpmodel.models
-                # Create mode to ID mapping based on array index
-                mode_map = {mode_name: idx for idx, mode_name in enumerate(available_modes)}
-            else:
-                # Fallback mapping
-                mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
-        except:
-            # Fallback mapping if jtop fails
-            mode_map = {'15W': 0, '25W': 1, 'MAXN_SUPER': 2, '7W': 3}
-        
-        if mode in mode_map:
-            result = subprocess.run(
-                ['sudo', '-S', 'nvpmodel', '-m', str(mode_map[mode])],
-                input=sudo_password + '\n',
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
-            if result.returncode == 0:
-                logger.info(f"Power mode set to {mode}")
-                return jsonify({'success': True, 'mode': mode})
-            else:
-                error_msg = result.stderr.strip() if result.stderr else f'Failed to set power mode to {mode}'
-                return jsonify({'success': False, 'error': error_msg}), 500
-        else:
-            return jsonify({'success': False, 'error': f'Invalid power mode: {mode}. Available modes: {list(mode_map.keys())}'}), 400
-            
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            'success': False,
-            'error': 'Command timeout'
-        }), 408
+        mode = system_monitor.set_power_mode((request.json or {}).get('mode', ''))
+        logger.info(f"Power mode set to {mode}")
+        return jsonify({'success': True, 'mode': mode})
     except Exception as e:
-        logger.error(f"Error setting power mode: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return _control_error('setting power mode', e)
 
 @app.route('/system/fan-mode', methods=['GET'])
 def get_fan_mode():
-    """Get current fan profile"""
+    """Get current and available fan profiles from jtop"""
     try:
-        # Query nvfancontrol for current profile
-        result = subprocess.run(
-            ['sudo', 'nvfancontrol', '--query'],
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result.returncode == 0:
-            # Parse output: "FAN1:FAN_PROFILE:quiet"
-            lines = result.stdout.strip().split('\n')
-            current_profile = 'quiet'  # default
-            
-            for line in lines:
-                if 'FAN_PROFILE:' in line:
-                    profile = line.split(':')[-1].strip()
-                    current_profile = profile  # Return actual profile (quiet or cool)
-                    break
-            
-            return jsonify({
-                'success': True,
-                'current_mode': current_profile,
-                'available_modes': ['quiet', 'cool']
-            })
-        else:
-            # Fallback if query fails
-            return jsonify({
-                'success': True,
-                'current_mode': 'quiet',
-                'available_modes': ['quiet', 'cool']
-            })
-            
+        return jsonify({'success': True, **system_monitor.get_fan_modes()})
     except Exception as e:
-        logger.error(f"Error getting fan mode: {str(e)}")
-        return jsonify({
-            'success': True,
-            'current_mode': 'quiet',
-            'available_modes': ['quiet', 'cool']
-        })
+        return _control_error('getting fan mode', e)
 
 @app.route('/system/fan-mode', methods=['POST'])
 def set_fan_mode():
-    """Set fan control mode according to NVIDIA documentation"""
+    """Set fan profile through jtop.service (no sudo required)"""
     try:
-        data = request.json
-        fan_mode = data.get('mode', 'auto')
-        sudo_password = data.get('sudo_password', '')
-        
-        if not sudo_password:
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
-        
-        if fan_mode in ['auto', 'quiet']:
-            # Set to quiet profile (auto mode uses quiet profile)
-            profile = 'quiet'
-        elif fan_mode == 'cool':
-            # Set to cool profile
-            profile = 'cool'
-        else:
-            return jsonify({'success': False, 'error': 'Invalid fan mode. Use auto, quiet, or cool'}), 400
-        
-        # Change fan profile according to NVIDIA documentation
-        # Step 1: Stop nvfancontrol service
-        result1 = subprocess.run(
-            ['sudo', '-S', 'systemctl', 'stop', 'nvfancontrol'],
-            input=sudo_password + '\n',
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result1.returncode != 0:
-            error_msg = result1.stderr.strip() if result1.stderr else 'Failed to stop nvfancontrol'
-            return jsonify({'success': False, 'error': f'Stop service failed: {error_msg}'}), 500
-        
-        # Step 2: Update FAN_DEFAULT_PROFILE in config file
-        config_update_cmd = f"sed -i 's/FAN_DEFAULT_PROFILE .*/FAN_DEFAULT_PROFILE {profile}/' /etc/nvfancontrol.conf"
-        result2 = subprocess.run(
-            ['sudo', '-S', 'sh', '-c', config_update_cmd],
-            input=sudo_password + '\n',
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
-        
-        if result2.returncode != 0:
-            # Try to restart service even if config update fails
-            subprocess.run(['sudo', '-S', 'systemctl', 'start', 'nvfancontrol'], 
-                         input=sudo_password + '\n', capture_output=True, text=True)
-            error_msg = result2.stderr.strip() if result2.stderr else 'Failed to update config'
-            return jsonify({'success': False, 'error': f'Config update failed: {error_msg}'}), 500
-        
-        # Step 3: Remove status file
-        result3 = subprocess.run(
-            ['sudo', '-S', 'rm', '-f', '/var/lib/nvfancontrol/status'],
-            input=sudo_password + '\n',
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        # Don't fail if status file removal fails - it might not exist
-        
-        # Step 4: Start nvfancontrol service
-        result4 = subprocess.run(
-            ['sudo', '-S', 'systemctl', 'start', 'nvfancontrol'],
-            input=sudo_password + '\n',
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
-        
-        if result4.returncode != 0:
-            error_msg = result4.stderr.strip() if result4.stderr else 'Failed to start nvfancontrol'
-            return jsonify({'success': False, 'error': f'Start service failed: {error_msg}'}), 500
-        
-        logger.info(f"Fan profile changed to {profile} (mode: {fan_mode})")
-        return jsonify({'success': True, 'mode': fan_mode, 'profile': profile})
-        
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            'success': False,
-            'error': 'Command timeout'
-        }), 408
+        mode = system_monitor.set_fan_mode((request.json or {}).get('mode', ''))
+        logger.info(f"Fan profile changed to {mode}")
+        return jsonify({'success': True, 'mode': mode, 'profile': mode})
     except Exception as e:
-        logger.error(f"Error setting fan mode: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-            
-    except subprocess.TimeoutExpired:
-        return jsonify({
-            'success': False,
-            'error': 'Command timeout'
-        }), 408
-    except Exception as e:
-        logger.error(f"Error setting fan mode: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        return _control_error('setting fan mode', e)
 
 @app.route('/system/reboot', methods=['POST'])
 def reboot_system():
@@ -3204,47 +2903,6 @@ def get_terminal_user_info():
             'hostname': 'jetsonboard',
             'home_dir': '/home/user'
         }), 500
-
-def get_jetpack_version():
-    """Get JetPack version from singleton"""
-    try:
-        # Use system_monitor's singleton jtop connection
-        jt = system_monitor._get_jtop()
-        jetpack_version = jt.board['hardware'].get('Jetpack', 'Unknown')
-        return jetpack_version
-    except Exception:
-        return 'Unknown'
-
-def get_kernel_version():
-    """Get kernel version"""
-    try:
-        result = os.popen("uname -r").read().strip()
-        return result if result else 'Unknown'
-    except Exception:
-        return 'Unknown'
-
-def get_jtop_board_info():
-    """Get jtop board information from singleton"""
-    try:
-        # Use system_monitor's singleton jtop connection
-        jt = system_monitor._get_jtop()
-        # Wait for data to be available
-        time.sleep(0.1)
-        
-        board_info = {}
-        
-        # Get board information
-        if hasattr(jt, 'board') and jt.board:
-            if 'hardware' in jt.board:
-                board_info['Model'] = jt.board['hardware']['Model']
-                board_info['Module'] = jt.board['hardware']['Module']
-            
-        
-        return board_info
-            
-    except Exception as e:
-        logger.error(f"Error getting jtop board info: {str(e)}")
-        return {}
 
 # Background task to emit system data periodically
 def background_system_updates():

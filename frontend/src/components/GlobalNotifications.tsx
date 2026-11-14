@@ -494,151 +494,12 @@ const GlobalNotifications: React.FC = () => {
   const [sudoPassword, setSudoPassword] = useState('');
   const [sudoError, setSudoError] = useState('');
   const [isSubmittingSudo, setIsSubmittingSudo] = useState(false);
-  const [isMonitoringLogs, setIsMonitoringLogs] = useState(false);
-  const [brokenPipeCount, setBrokenPipeCount] = useState(0);
   const [pendingAction, setPendingAction] = useState<{
     actionText: string;
     endpoint: string;
     isRestart: boolean;
   } | null>(null);
 
-  // Log monitoring for broken pipe errors (using WebSocket)
-  useEffect(() => {
-    const lastLogCheckRef = { current: Date.now() };
-
-    const startAutomaticRecovery = async () => {
-      let recoveryAttempts = 0;
-      const maxRecoveryAttempts = 15;
-      const recoveryInterval = 3000; // 3 seconds
-
-      const attemptRecovery = async (): Promise<boolean> => {
-        recoveryAttempts++;
-        console.log(`Auto-recovery attempt ${recoveryAttempts}/${maxRecoveryAttempts} for broken pipe errors`);
-
-        try {
-          const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
-            method: 'POST'
-          });
-
-          if (reconnectResponse.ok) {
-            const result = await reconnectResponse.json();
-            if (result.success) {
-              // Check if broken pipe errors have stopped for a few seconds
-              await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-              
-              // Use WebSocket to check for recent broken pipe errors
-              return new Promise<boolean>((resolve) => {
-                const checkHandler = (checkData: any) => {
-                  const recentBrokenPipes = checkData.logs?.filter((log: any) => 
-                    log.message?.toLowerCase().includes('broken pipe') || 
-                    log.message?.toLowerCase().includes('errno 32')
-                  ) || [];
-
-                  if (recentBrokenPipes.length === 0) {
-                    console.log('Auto-recovery successful: No more broken pipe errors detected');
-                    setIsMonitoringLogs(false);
-                    setBrokenPipeCount(0);
-                    addNotification({
-                      type: 'success',
-                      title: 'Auto-Recovery Successful',
-                      message: `jtop connection automatically restored after ${recoveryAttempts} attempts!`
-                    });
-                    resolve(true);
-                  } else {
-                    resolve(false);
-                  }
-                  
-                  // Clean up the handler
-                  if (socket) {
-                    socket.off('logs_update', checkHandler);
-                  }
-                };
-
-                if (socket) {
-                  socket.once('logs_update', checkHandler);
-                  socket.emit('subscribe_logs', {
-                    since: Date.now() - 10000,
-                    filter: 'broken_pipe'
-                  });
-                } else {
-                  resolve(false);
-                }
-              });
-            }
-          }
-        } catch (error) {
-          console.error(`Auto-recovery attempt ${recoveryAttempts} failed:`, error);
-        }
-
-        return false;
-      };
-
-      const runRecoveryLoop = async () => {
-        if (await attemptRecovery()) {
-          return; // Success, stop the loop
-        }
-
-        if (recoveryAttempts < maxRecoveryAttempts) {
-          setTimeout(runRecoveryLoop, recoveryInterval);
-        } else {
-          console.log('Auto-recovery failed after maximum attempts');
-          setIsMonitoringLogs(false);
-          addNotification({
-            type: 'warning',
-            title: 'Auto-Recovery Failed',
-            message: 'Automatic recovery attempts exhausted. Manual intervention may be required.'
-          });
-        }
-      };
-
-      runRecoveryLoop();
-    };
-
-    const monitorLogsForBrokenPipes = (logData: any) => {
-      try {
-        if (logData.logs && logData.logs.length > 0) {
-          const brokenPipeEntries = logData.logs.filter((log: any) => 
-            log.message?.toLowerCase().includes('broken pipe') || 
-            log.message?.toLowerCase().includes('errno 32')
-          );
-
-          if (brokenPipeEntries.length > 0 && !isMonitoringLogs) {
-            console.log(`Detected ${brokenPipeEntries.length} broken pipe errors, starting auto-recovery...`);
-            setBrokenPipeCount(prev => prev + brokenPipeEntries.length);
-            setIsMonitoringLogs(true);
-            startAutomaticRecovery();
-          }
-        }
-        lastLogCheckRef.current = Date.now();
-      } catch (error) {
-        console.error('Error processing logs:', error);
-      }
-    };
-
-    // Set up WebSocket listener for log updates
-    if (socket) {
-      socket.on('logs_update', monitorLogsForBrokenPipes);
-      
-      // Request log updates every 2 seconds
-      const logMonitorInterval = setInterval(() => {
-        if (socket?.connected) {
-          socket.emit('subscribe_logs', {
-            since: lastLogCheckRef.current,
-            filter: 'broken_pipe'
-          });
-        }
-      }, 2000);
-
-      return () => {
-        if (socket) {
-          socket.off('logs_update', monitorLogsForBrokenPipes);
-        }
-        clearInterval(logMonitorInterval);
-      };
-    }
-    
-    return () => {}; // Cleanup function when socket is not available
-  }, [socket, addNotification, isMonitoringLogs]);
 
   const handleResolveJtopError = async () => {
     if (!systemError || systemError.errorType !== 'jtop_service_inactive') return;
@@ -646,55 +507,25 @@ const GlobalNotifications: React.FC = () => {
     setIsResolving(true);
     
     try {
-      // For broken pipe errors, try multiple force reconnects first (no sudo needed)
-      if (systemError.message?.toLowerCase().includes('broken pipe')) {
-        console.log('Attempting aggressive force reconnect for broken pipe error...');
-        
-        let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
-        
-        const attemptReconnect = async (): Promise<boolean> => {
-          reconnectAttempts++;
-          console.log(`Force reconnect attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
-          
-          try {
-            const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              }
-            });
-
-            const reconnectResult = await reconnectResponse.json();
-            
-            if (reconnectResult.success) {
-              setSystemError(null);
-              addNotification({
-                type: 'success',
-                title: 'Connection Restored',
-                message: `jtop connection restored successfully after ${reconnectAttempts} attempts!`
-              });
-              return true;
-            }
-          } catch (error) {
-            console.log(`Reconnect attempt ${reconnectAttempts} failed:`, error);
-          }
-          
-          return false;
-        };
-
-        // Try multiple reconnect attempts with delays
-        for (let i = 0; i < maxReconnectAttempts; i++) {
-          if (await attemptReconnect()) {
-            return; // Success, exit early
-          }
-          
-          if (i < maxReconnectAttempts - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds between attempts
-          }
+      // The backend reconnects to jtop.service automatically; try one immediate
+      // reconnect first (no sudo needed) before asking to restart/install the service.
+      try {
+        const reconnectResponse = await fetch(`${getBackendUrl()}/system/jtop-force-reconnect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const reconnectResult = await reconnectResponse.json();
+        if (reconnectResult.success) {
+          setSystemError(null);
+          addNotification({
+            type: 'success',
+            title: 'Connection Restored',
+            message: 'jtop connection restored successfully!'
+          });
+          return;
         }
-        
-        console.log('All force reconnect attempts failed, falling back to service restart...');
+      } catch (error) {
+        console.log('Reconnect attempt failed:', error);
       }
 
       // Determine which service action to take
@@ -909,29 +740,6 @@ const GlobalNotifications: React.FC = () => {
           </NotificationCard>
         ))}
       </NotificationContainer>
-
-      {/* Auto-Recovery Status Indicator */}
-      {isMonitoringLogs && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          background: 'rgba(118, 185, 0, 0.1)',
-          border: '1px solid rgba(118, 185, 0, 0.3)',
-          borderRadius: '8px',
-          padding: '12px 16px',
-          color: '#76b900',
-          fontSize: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          zIndex: 10000,
-          backdropFilter: 'blur(10px)'
-        }}>
-          <i className="fas fa-cog fa-spin"></i>
-          Auto-recovering from broken pipes... ({brokenPipeCount} detected)
-        </div>
-      )}
 
       {/* Sudo Password Modal */}
       {showSudoModal && pendingAction && createPortal(

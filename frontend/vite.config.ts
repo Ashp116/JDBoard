@@ -14,7 +14,22 @@ export default defineConfig({
     // Examples: ['localhost', '192.168.1.100', 'jetson.local', 'your-domain.com']
     // true allows any host - I use it for development/testing
     allowedHosts: true,
-    // Remove proxy - let frontend connect directly to backend
+    // Serve the backend under /api on the same origin (same layout as
+    // nginx_proxy_TEMPLATE). The browser never talks to :5000 directly, which
+    // avoids CORS and Chrome's Private Network Access blocks.
+    proxy: {
+      '/api/socket.io': {
+        target: 'http://localhost:5000',
+        ws: true,
+        xfwd: true,
+        rewrite: (p) => p.replace(/^\/api/, ''),
+      },
+      '/api': {
+        target: 'http://localhost:5000',
+        xfwd: true,
+        rewrite: (p) => p.replace(/^\/api/, ''),
+      },
+    },
   },
   build: {
     outDir: 'dist',
