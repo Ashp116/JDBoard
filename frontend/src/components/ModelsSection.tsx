@@ -1946,6 +1946,15 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             notificationId: `restored-${downloadId}` // Generate a notification ID for consistency
           });
           
+          // Progress toast with the id we track, so it updates and is removed on completion
+          addNotification({
+            id: `restored-${downloadId}`,
+            type: 'info',
+            title: 'Downloading Model',
+            message: downloadInfo.status || `${downloadInfo.model_name || 'Model'} - In Progress...`,
+            persistent: true
+          });
+
           // Auto-open logs for active downloads to show progress
           restoredLogsState.set(downloadId, true);
         });
