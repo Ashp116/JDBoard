@@ -27,6 +27,7 @@ import atexit
 import signal
 from request_logger import RequestLogger
 from jtop import JtopException
+import web_frontend
 
 # Check if running as root/sudo
 def is_running_as_root():
@@ -3209,6 +3210,11 @@ if __name__ == '__main__':
     # Start background WebSocket updates
     socketio.start_background_task(background_system_updates)
     
-    logger.info("Starting Jetson Edge AI Dashboard with WebSocket support on port 5000...")
+    # Serve the built frontend + /api on one port, behind a password if configured
+    web_frontend.install(app)
+
+    host = os.environ.get('JDBOARD_HOST', '0.0.0.0')
+    port = int(os.environ.get('JDBOARD_PORT', '5000'))
+    logger.info(f"Starting Jetson Edge AI Dashboard with WebSocket support on port {port}...")
     # Use app.config['DEBUG'] instead of hardcoded debug=True
-    socketio.run(app, host='0.0.0.0', port=5000, debug=app.config['DEBUG'], allow_unsafe_werkzeug=True)
+    socketio.run(app, host=host, port=port, debug=app.config['DEBUG'], allow_unsafe_werkzeug=True)
