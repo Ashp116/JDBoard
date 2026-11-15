@@ -17,11 +17,12 @@ import uuid
 import threading
 from pathlib import Path
 import psutil
+import shutil
 from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 from system_monitor import SystemMonitor
-from ai_inference import AIModelManager, terminate_active_exports, log_failure
+from ai_inference import AIModelManager, terminate_active_exports, log_failure, normalize_export_options
 import atexit
 import signal
 from request_logger import RequestLogger
@@ -71,6 +72,44 @@ def cleanup_download(download_id):
     active_downloads.pop(download_id, None)
     download_cancel_flags.pop(download_id, None)
     download_threads.pop(download_id, None)
+
+CALIBRATION_IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+CALIBRATION_MAX_ZIP_MB = 500
+
+def extract_calibration_zip(upload):
+    """Unpack an uploaded .zip of INT8 calibration images into a temp folder.
+
+    Returns (folder, None) or (None, error message). Only image files are
+    extracted (flattened, no paths from the archive are used).
+    """
+    import zipfile, tempfile
+    if not upload.filename.lower().endswith('.zip'):
+        return None, 'Calibration images must be uploaded as a .zip file'
+    folder = tempfile.mkdtemp(prefix='jdboard_calib_', dir=os.path.join(UPLOAD_FOLDER, 'downloads'))
+    zip_path = os.path.join(folder, 'upload.zip')
+    try:
+        upload.save(zip_path)
+        if os.path.getsize(zip_path) > CALIBRATION_MAX_ZIP_MB * 1024 ** 2:
+            raise ValueError(f'Calibration .zip is larger than {CALIBRATION_MAX_ZIP_MB} MB')
+        images_dir = os.path.join(folder, 'images')
+        os.makedirs(images_dir)
+        count = 0
+        with zipfile.ZipFile(zip_path) as archive:
+            for i, member in enumerate(archive.infolist()):
+                ext = os.path.splitext(member.filename)[1].lower()
+                if member.is_dir() or ext not in CALIBRATION_IMAGE_EXTS:
+                    continue
+                with archive.open(member) as src, open(os.path.join(images_dir, f'{i:06d}{ext}'), 'wb') as dst:
+                    shutil.copyfileobj(src, dst)
+                count += 1
+        os.remove(zip_path)
+        if count < 10:
+            raise ValueError(f'The .zip has {count} images; INT8 calibration needs at least 10 (100-500 recommended)')
+        logger.info(f"Extracted {count} calibration images")
+        return images_dir, None
+    except (ValueError, zipfile.BadZipFile, OSError) as e:
+        shutil.rmtree(folder, ignore_errors=True)
+        return None, f'Invalid calibration .zip: {e}' if isinstance(e, zipfile.BadZipFile) else str(e)
 
 # Minimum total RAM to attempt a TensorRT build of large (l/x) YOLO models
 TENSORRT_LARGE_MODEL_MIN_RAM_GB = 12
@@ -988,6 +1027,24 @@ def download_yolo_model():
         logger.error(f"YOLO download of {model_name} rejected: {missing}")
         return jsonify({'success': False, 'error': missing}), 400
 
+    # Export settings chosen in the dialog (precision, image size, TensorRT
+    # workspace, INT8 calibration source)
+    calibration_zip = None if request.is_json else request.files.get('calibration_zip')
+    calibration = data.get('calibration') or None   # 'coco' | 'upload'
+    try:
+        if calibration == 'upload' and not (calibration_zip and calibration_zip.filename):
+            raise ValueError("Choose a .zip of calibration images to upload")
+        export_options = normalize_export_options(
+            target_format,
+            precision=data.get('precision'),
+            imgsz=data.get('imgsz'),
+            workspace=data.get('workspace'),
+            calibration=calibration,
+        )
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
     # Building a TensorRT engine for the large YOLO sizes needs more memory than
     # 8 GB boards have (YOLOv11x was OOM-killed after minutes on an Orin Nano 8GB),
     # so refuse up front instead of failing partway through.
@@ -1015,6 +1072,16 @@ def download_yolo_model():
         saved_script_path = os.path.abspath(os.path.join(
             app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{secure_filename(custom_script.filename)}"))
         custom_script.save(saved_script_path)
+
+    # Unpack calibration images last, after every other check has passed
+    calibration_dir = None
+    if export_options.get('calibration') == 'upload':
+        calibration_dir, error = extract_calibration_zip(calibration_zip)
+        if error:
+            if saved_script_path and os.path.exists(saved_script_path):
+                os.remove(saved_script_path)
+            return jsonify({'success': False, 'error': error}), 400
+        export_options['calibration'] = calibration_dir
     
     try:
         def progress_callback(progress, status):
@@ -1057,7 +1124,8 @@ def download_yolo_model():
                     target_format=target_format,
                     custom_script_path=custom_script_path,
                     progress_callback=progress_callback,
-                    cancel_check_callback=lambda: is_download_cancelled(download_id)
+                    cancel_check_callback=lambda: is_download_cancelled(download_id),
+                    export_options=export_options
                 )
                 
                 # Cancelled just as it finished: the model is already registered,
@@ -1097,6 +1165,10 @@ def download_yolo_model():
                     cleanup_download(download_id)
                 else:
                     finish_download(download_id, False, model_name, error=str(e))
+            finally:
+                # Uploaded calibration images are only needed for the build
+                if calibration_dir:
+                    shutil.rmtree(os.path.dirname(calibration_dir), ignore_errors=True)
         
         # Start download in background thread and track it
         download_thread = threading.Thread(target=download_async, daemon=True)

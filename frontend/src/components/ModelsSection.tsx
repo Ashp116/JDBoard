@@ -24,6 +24,9 @@ interface ModelInfo {
   script_status?: 'none' | 'pending' | 'active' | 'failed';
   script_error?: string | null;
   load_problem?: string | null;   // set when the backend can't load this model (missing framework)
+  precision?: Precision;          // export / inference precision chosen at download
+  imgsz?: number;
+  calibration?: 'coco' | 'custom';
 }
 
 // Progress toasts live in the app-wide notification list and outlive this page
@@ -32,6 +35,28 @@ interface ModelInfo {
 // second, orphaned toast.
 const DOWNLOAD_TOAST_PREFIX = 'download-';
 const downloadToastId = (downloadId: string) => `${DOWNLOAD_TOAST_PREFIX}${downloadId}`;
+
+// Export precision choices per target format (must match the backend's
+// PRECISIONS_BY_FORMAT / DEFAULT_PRECISION in ai_inference.py)
+type Precision = 'fp32' | 'fp16' | 'int8';
+const PRECISION_OPTIONS: Record<string, { value: Precision; label: string; hint: string }[]> = {
+  PyTorch: [
+    { value: 'fp32', label: 'FP32', hint: 'Full precision' },
+    { value: 'fp16', label: 'FP16', hint: 'Faster on GPU, same accuracy in practice' },
+  ],
+  ONNX: [
+    { value: 'fp32', label: 'FP32', hint: 'Full precision, most compatible' },
+    { value: 'fp16', label: 'FP16', hint: 'Half the size' },
+    { value: 'int8', label: 'INT8', hint: 'Smallest; needs calibration images' },
+  ],
+  TensorRT: [
+    { value: 'fp32', label: 'FP32', hint: 'Most accurate, slowest, most memory to build' },
+    { value: 'fp16', label: 'FP16', hint: 'Recommended: fast, accuracy ≈ FP32' },
+    { value: 'int8', label: 'INT8', hint: 'Fastest; some accuracy loss; needs calibration images' },
+  ],
+};
+const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', ONNX: 'fp32', TensorRT: 'fp16' };
+const IMAGE_SIZES = [320, 416, 480, 640, 800, 960, 1280];
 
 interface YOLOModelOption {
   name: string;
@@ -1866,6 +1891,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [selectedVersion, setSelectedVersion] = useState<YOLOVersion | null>(null);
   const [selectedYOLO, setSelectedYOLO] = useState<YOLOModelOption | null>(null);
   const [selectedFormat, setSelectedFormat] = useState('PyTorch');
+  const [precision, setPrecision] = useState<Precision>('fp32');
+  const [imageSize, setImageSize] = useState(640);
+  const [trtWorkspace, setTrtWorkspace] = useState(2);
+  const [calibrationSource, setCalibrationSource] = useState<'coco' | 'upload'>('coco');
+  const [calibrationZip, setCalibrationZip] = useState<File | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const chooseFormat = (format: string) => {
+    setSelectedFormat(format);
+    setPrecision(DEFAULT_PRECISION[format] || 'fp32');
+  };
   const [yoloModelName, setYoloModelName] = useState('');
   
   // Validation states
@@ -2563,6 +2599,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       formData.append('model_url', selectedYOLO.url);
       formData.append('model_name', yoloModelName.trim());
       formData.append('target_format', selectedFormat);
+      formData.append('precision', precision);
+      formData.append('imgsz', String(imageSize));
+      if (selectedFormat === 'TensorRT') {
+        formData.append('workspace', String(trtWorkspace));
+      }
+      if (precision === 'int8') {
+        formData.append('calibration', calibrationSource);
+        if (calibrationSource === 'upload' && calibrationZip) {
+          formData.append('calibration_zip', calibrationZip);
+        }
+      }
       formData.append('original_format', 'PyTorch');
       formData.append('download_id', downloadId);
       
@@ -2600,6 +2647,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const resetYOLOForm = () => {
     setSelectedYOLO(null);
     setSelectedFormat('PyTorch');
+    setPrecision('fp32');
+    setImageSize(640);
+    setTrtWorkspace(2);
+    setCalibrationSource('coco');
+    setCalibrationZip(null);
+    setShowAdvanced(false);
     setYoloModelName('');
     setYoloNameError('');
   };
@@ -3228,6 +3281,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <span className="label">Type:</span>
                   <span className="value">{model.type}</span>
                 </div>
+                {model.precision && (
+                  <div className="info-row">
+                    <span className="label">Precision:</span>
+                    <span className="value">
+                      {model.precision.toUpperCase()}
+                      {model.imgsz ? ` · ${model.imgsz}px` : ''}
+                      {model.calibration ? ` · ${model.calibration === 'coco' ? 'COCO' : 'custom'} calibration` : ''}
+                    </span>
+                  </div>
+                )}
                 <div className="info-row">
                   <span className="label">Size:</span>
                   <span className="value">{formatFileSize(model.file_size)}</span>
@@ -3607,11 +3670,107 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                         <div
                           key={format}
                           className={`format-option ${selectedFormat === format ? 'selected' : ''}`}
-                          onClick={() => setSelectedFormat(format)}
+                          onClick={() => chooseFormat(format)}
                         >
                           {format}
                         </div>
                       ))}
+                    </div>
+                  </FormatSelector>
+
+                  <FormatSelector>
+                    <label>Precision</label>
+                    <div className="format-grid">
+                      {(PRECISION_OPTIONS[selectedFormat] || []).map(option => (
+                        <div
+                          key={option.value}
+                          className={`format-option ${precision === option.value ? 'selected' : ''}`}
+                          onClick={() => setPrecision(option.value)}
+                          title={option.hint}
+                        >
+                          {option.label}
+                        </div>
+                      ))}
+                    </div>
+                    <ScriptInfo style={{ marginTop: '8px' }}>
+                      <i className="fas fa-info-circle"></i>
+                      {(PRECISION_OPTIONS[selectedFormat] || []).find(o => o.value === precision)?.hint}
+                      {selectedFormat === 'PyTorch' && ' (applied when the model runs; no conversion)'}
+                      {selectedFormat === 'ONNX' && '. Note: JDBoard can\'t run ONNX models on Jetson (ONNX Runtime is disabled), so use this to take the model to another machine.'}
+                    </ScriptInfo>
+
+                    {precision === 'int8' && (
+                      <div style={{ marginTop: '10px' }}>
+                        <label>Calibration images</label>
+                        <div className="format-grid">
+                          <div
+                            className={`format-option ${calibrationSource === 'coco' ? 'selected' : ''}`}
+                            onClick={() => { setCalibrationSource('coco'); setCalibrationZip(null); }}
+                            title="Ultralytics' COCO sample - fine for the stock COCO-trained YOLO models"
+                          >
+                            Built-in COCO sample
+                          </div>
+                          <div
+                            className={`format-option ${calibrationSource === 'upload' ? 'selected' : ''}`}
+                            onClick={() => setCalibrationSource('upload')}
+                            title="A .zip of 100-500 images like the ones the model will see"
+                          >
+                            Upload .zip
+                          </div>
+                        </div>
+                        {calibrationSource === 'upload' && (
+                          <CustomScriptUpload style={{ marginTop: '8px' }}>
+                            <input
+                              type="file"
+                              accept=".zip"
+                              id="calibration-zip-upload"
+                              style={{ display: 'none' }}
+                              onChange={(e) => setCalibrationZip(e.target.files?.[0] || null)}
+                            />
+                            <label htmlFor="calibration-zip-upload" className="upload-button">
+                              <i className="fas fa-file-archive"></i>
+                              {calibrationZip ? calibrationZip.name : 'Choose .zip of images (100-500 recommended)'}
+                            </label>
+                            {calibrationZip && (
+                              <button onClick={() => setCalibrationZip(null)} className="remove-button">
+                                <i className="fas fa-times"></i>
+                              </button>
+                            )}
+                          </CustomScriptUpload>
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvanced(v => !v)}
+                        style={{ background: 'transparent', border: 'none', color: '#76b900', cursor: 'pointer', padding: 0, fontSize: '13px' }}
+                      >
+                        <i className={`fas fa-chevron-${showAdvanced ? 'down' : 'right'}`}></i> Advanced
+                      </button>
+                      {showAdvanced && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '8px' }}>
+                          <div>
+                            <label>Image size</label>
+                            <select value={imageSize} onChange={(e) => setImageSize(Number(e.target.value))}>
+                              {IMAGE_SIZES.map(size => (
+                                <option key={size} value={size}>{size}px{size === 640 ? ' (default)' : ''}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {selectedFormat === 'TensorRT' && (
+                            <div>
+                              <label>TensorRT workspace</label>
+                              <select value={trtWorkspace} onChange={(e) => setTrtWorkspace(Number(e.target.value))}>
+                                {[0.5, 1, 2, 3, 4].map(gb => (
+                                  <option key={gb} value={gb}>{gb} GB{gb === 2 ? ' (default)' : ''}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </FormatSelector>
 
@@ -3743,7 +3902,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <Button 
                     variant="primary" 
                     onClick={handleYOLODownload}
-                    disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError || (scriptOption === 'custom' && !customScript)}
+                    disabled={loading || !selectedYOLO || !yoloModelName.trim() || !!yoloNameError || (scriptOption === 'custom' && !customScript)
+                              || (precision === 'int8' && calibrationSource === 'upload' && !calibrationZip)}
                   >
                     {loading ? <LoadingSpinner /> : 'Download & Convert'}
                   </Button>
