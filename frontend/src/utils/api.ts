@@ -3,19 +3,9 @@
  * Automatically detects the correct backend URL for both local and LAN access
  */
 
-// Get the backend URL based on current location
-export const getBackendUrl = () => {
-  const protocol = window.location.protocol;
-  const host = window.location.hostname;
-  const port = 5000; // Backend port
-  
-  // Use the same host but different port for backend
-  const isProxied = (window as any).isProxied
-  const backendUrl = isProxied ? `${protocol}//${host}/api` : `${protocol}//${host}:${port}`;
-  
-  console.log(`Backend URL: ${backendUrl}`);
-  return backendUrl;
-};
+// The backend is always reached on the same origin under /api: the Vite dev
+// server proxies it in development and nginx_proxy_TEMPLATE does in production.
+export const getBackendUrl = () => `${window.location.origin}/api`;
 
 // Create a configured axios instance if needed
 export const createApiClient = () => {

@@ -409,7 +409,9 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     kernelVersion: 'Unknown'
   });
 
-  const [availablePowerModes, setAvailablePowerModes] = useState(['MAXN_SUPER', '15W', '25W', '7W']);
+  // Populated from jtop via the backend (/system/power-modes, /system/fan-mode)
+  const [availablePowerModes, setAvailablePowerModes] = useState<string[]>([]);
+  const [availableFanModes, setAvailableFanModes] = useState<string[]>([]);
 
   const [loading, setLoading] = useState({
     jetsonClocks: false,
@@ -447,7 +449,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         setSettings(prev => ({
           ...prev,
           jetsonClocks: settingsData.jetsonClocks || false,
-          powerMode: settingsData.powerMode || 'MAXN',
+          powerMode: settingsData.powerMode || prev.powerMode,
           fanMode: settingsData.fanMode || 'quiet'
         }));
         console.log('Settings loaded from backend:', settingsData);
@@ -463,12 +465,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       const response = await fetch(`${getBackendUrl()}/system/fan-mode`);
       if (response.ok) {
         const data = await response.json();
-        if (data.success && data.current_mode) {
-          setSettings(prev => ({
-            ...prev,
-            fanMode: data.current_mode
-          }));
-          console.log('Current fan mode:', data.current_mode);
+        if (data.success) {
+          setAvailableFanModes(data.available_modes || []);
+          if (data.current_mode) {
+            setSettings(prev => ({
+              ...prev,
+              fanMode: data.current_mode
+            }));
+          }
         }
       }
     } catch (error) {
@@ -495,13 +499,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         uptime: systemData?.uptime || '00:00:00'
       }));
       
-      // Update Jetson Clocks status from system data
-      if (systemData?.jetson_clocks !== undefined) {
-        setSettings(prev => ({
-          ...prev,
-          jetsonClocks: Boolean(systemData.jetson_clocks)
-        }));
-      }
+      // Keep hardware settings in sync with the live jtop data
+      setSettings(prev => ({
+        ...prev,
+        ...(systemData?.jetson_clocks !== undefined ? { jetsonClocks: Boolean(systemData.jetson_clocks) } : {}),
+        ...(systemData?.nvp_model && systemData.nvp_model !== 'Unknown' ? { powerMode: systemData.nvp_model } : {}),
+        ...(systemData?.fan?.profile ? { fanMode: systemData.fan.profile } : {})
+      }));
     }
   }, [systemData]);
 
@@ -652,6 +656,17 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     }
   };
 
+  // jetson_clocks / nvpmodel / fan are applied by jtop.service (runs as root),
+  // so they don't need a sudo password.
+  const postJtopControl = async (endpoint: string, data: Record<string, unknown>) => {
+    const response = await fetch(`${getBackendUrl()}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return await response.json();
+  };
+
   const handleToggle = (setting) => {
     setSettings(prev => ({
       ...prev,
@@ -672,11 +687,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     try {
       const newState = !settings.jetsonClocks;
       
-      const result = await executeSudoCommand(
-        '/system/jetson-clocks',
-        { enabled: newState },
-        'Toggle Jetson Clocks'
-      );
+      const result = await postJtopControl('/system/jetson-clocks', { enabled: newState });
       
       if (result.success) {
         setSettings(prev => ({
@@ -689,10 +700,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         alert(`Failed to toggle Jetson Clocks: ${result.error}`);
       }
     } catch (error) {
-      if (error.message !== 'User cancelled sudo authentication') {
-        console.error('Error toggling Jetson Clocks:', error);
-        alert(`Error toggling Jetson Clocks: ${error.message}`);
-      }
+      console.error('Error toggling Jetson Clocks:', error);
+      alert(`Error toggling Jetson Clocks: ${error.message}`);
     } finally {
       setLoading(prev => ({ ...prev, jetsonClocks: false }));
     }
@@ -702,11 +711,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     setLoading(prev => ({ ...prev, powerMode: true }));
     
     try {
-      const result = await executeSudoCommand(
-        '/system/power-mode',
-        { mode },
-        'Change Power Mode'
-      );
+      const result = await postJtopControl('/system/power-mode', { mode });
       
       if (result.success) {
         setSettings(prev => ({
@@ -719,10 +724,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         alert(`Failed to set power mode: ${result.error}`);
       }
     } catch (error) {
-      if (error.message !== 'User cancelled sudo authentication') {
-        console.error('Error setting power mode:', error);
-        alert(`Error setting power mode: ${error.message}`);
-      }
+      console.error('Error setting power mode:', error);
+      alert(`Error setting power mode: ${error.message}`);
     } finally {
       setLoading(prev => ({ ...prev, powerMode: false }));
     }
@@ -732,11 +735,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     setLoading(prev => ({ ...prev, fanMode: true }));
     
     try {
-      const result = await executeSudoCommand(
-        '/system/fan-mode',
-        { mode },
-        'Change Fan Mode'
-      );
+      const result = await postJtopControl('/system/fan-mode', { mode });
       
       if (result.success) {
         setSettings(prev => ({
@@ -744,17 +743,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           fanMode: mode
         }));
         console.log(`Fan mode set to ${mode} successfully`);
-        // Refresh the current fan mode to ensure accuracy
-        setTimeout(() => fetchCurrentFanMode(), 1000);
       } else {
         console.error('Failed to set fan mode:', result.error);
         alert(`Failed to set fan mode: ${result.error}`);
       }
     } catch (error) {
-      if (error.message !== 'User cancelled sudo authentication') {
-        console.error('Error setting fan mode:', error);
-        alert(`Error setting fan mode: ${error.message}`);
-      }
+      console.error('Error setting fan mode:', error);
+      alert(`Error setting fan mode: ${error.message}`);
     } finally {
       setLoading(prev => ({ ...prev, fanMode: false }));
     }
@@ -978,7 +973,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
               disabled={loading.powerMode}
               style={{ opacity: loading.powerMode ? 0.6 : 1 }}
             >
-              {availablePowerModes.map(mode => (
+              {(availablePowerModes.includes(settings.powerMode) ? availablePowerModes : [settings.powerMode, ...availablePowerModes]).map(mode => (
                 <option key={mode} value={mode}>{mode}</option>
               ))}
             </Select>
@@ -995,8 +990,9 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
               disabled={loading.fanMode}
               style={{ opacity: loading.fanMode ? 0.6 : 1 }}
             >
-              <option value="quiet">Quiet</option>
-              <option value="cool">Cool</option>
+              {(availableFanModes.includes(settings.fanMode) ? availableFanModes : [settings.fanMode, ...availableFanModes]).map(mode => (
+                <option key={mode} value={mode}>{mode.charAt(0).toUpperCase() + mode.slice(1)}</option>
+              ))}
             </Select>
           </SettingItem>
         </SettingsCard>

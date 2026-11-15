@@ -15,9 +15,13 @@ export interface Notification {
   };
 }
 
+type NewNotification = Omit<Notification, 'id' | 'timestamp'> & { id?: string };
+
 interface NotificationContextType {
   notifications: Notification[];
-  addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void;
+  // Returns the notification's id. Pass `id` to choose it yourself (needed to
+  // update/remove the notification later).
+  addNotification: (notification: NewNotification) => string;
   removeNotification: (id: string) => void;
   updateNotification: (id: string, updates: Partial<Notification>) => void;
   clearNotifications: () => void;
@@ -39,14 +43,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [systemError, setSystemError] = useState<Notification | null>(null);
 
-  const addNotification = useCallback((notification: Omit<Notification, 'id' | 'timestamp'>) => {
+  const addNotification = useCallback((notification: NewNotification) => {
     const newNotification: Notification = {
       ...notification,
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      id: notification.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString()
     };
 
-    setNotifications(prev => [...prev, newNotification]);
+    // Replace an existing notification with the same id instead of duplicating it
+    setNotifications(prev => [...prev.filter(n => n.id !== newNotification.id), newNotification]);
 
     // Auto-remove non-persistent notifications after 5 seconds
     if (!notification.persistent) {
@@ -54,6 +59,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         removeNotification(newNotification.id);
       }, 5000);
     }
+    return newNotification.id;
   }, []);
 
   const removeNotification = useCallback((id: string) => {

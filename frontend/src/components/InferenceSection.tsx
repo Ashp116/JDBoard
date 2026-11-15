@@ -4310,6 +4310,18 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           title: 'Inference Complete',
           message: `Processed in ${inferenceTime?.toFixed(3)}s with ${predictionsCount} detection${predictionsCount !== 1 ? 's' : ''}`
         });
+
+        // The backend ran, but not the way the user expects (custom script failed
+        // and the default handler was used, or it fell back to CPU) - say so.
+        const warning = data.data?.result?.warning || data.data?.warning;
+        if (warning) {
+          addNotification({
+            type: 'warning',
+            title: 'Inference Warning',
+            message: warning,
+            persistent: true
+          });
+        }
       } else {
         addNotification({
           type: 'error',

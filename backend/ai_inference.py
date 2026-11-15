@@ -12,6 +12,9 @@ import logging
 import cv2
 import numpy as np
 import shutil
+import uuid
+import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -189,6 +192,86 @@ class CUDAMemoryManager:
             return self.get_gpu_memory_info()
         
         return mem_info
+
+
+# Export settings users can choose per download (see normalize_export_options).
+# FP16 engines need much less memory to build (and run faster on Jetson) than
+# FP32; the workspace cap (GB) limits TensorRT's scratch memory.
+PRECISIONS_BY_FORMAT = {
+    'PyTorch': ('fp32', 'fp16'),          # applied at inference time, no conversion
+    'ONNX': ('fp32', 'fp16', 'int8'),
+    'TensorRT': ('fp32', 'fp16', 'int8'),
+}
+DEFAULT_PRECISION = {'PyTorch': 'fp32', 'ONNX': 'fp32', 'TensorRT': 'fp16'}
+QUANTIZE_ARG = {'fp32': 32, 'fp16': 16, 'int8': 8}
+DEFAULT_IMGSZ = 640
+TRT_WORKSPACE_GB = 2
+
+
+def normalize_export_options(target_format, precision=None, imgsz=None, workspace=None, calibration=None):
+    """Validate user-chosen export settings; returns a clean dict or raises ValueError."""
+    if target_format not in PRECISIONS_BY_FORMAT:
+        raise ValueError(f"Unsupported target format: {target_format}")
+    precision = (precision or DEFAULT_PRECISION[target_format]).lower()
+    if precision not in PRECISIONS_BY_FORMAT[target_format]:
+        raise ValueError(f"{target_format} supports precision {', '.join(PRECISIONS_BY_FORMAT[target_format]).upper()}, not {precision.upper()}")
+    try:
+        imgsz = int(imgsz) if imgsz not in (None, '') else DEFAULT_IMGSZ
+    except (TypeError, ValueError):
+        raise ValueError("Image size must be a number")
+    if imgsz % 32 or not 160 <= imgsz <= 1280:
+        raise ValueError("Image size must be a multiple of 32 between 160 and 1280")
+    options = {'precision': precision, 'imgsz': imgsz}
+    if target_format == 'TensorRT':
+        try:
+            workspace = float(workspace) if workspace not in (None, '') else TRT_WORKSPACE_GB
+        except (TypeError, ValueError):
+            raise ValueError("Workspace must be a number of GB")
+        if not 0.5 <= workspace <= 8:
+            raise ValueError("TensorRT workspace must be between 0.5 and 8 GB")
+        options['workspace'] = workspace
+    if precision == 'int8':
+        # 'coco' = Ultralytics' built-in COCO sample (stock models); else a folder of images
+        if not calibration:
+            raise ValueError("INT8 needs calibration images: choose the built-in COCO sample or upload a .zip of images")
+        options['calibration'] = calibration
+    return options
+
+# `yolo export` subprocesses currently running, so they can be stopped on
+# cancel and when the backend shuts down (otherwise they keep running orphaned).
+_ACTIVE_EXPORTS = set()
+_ACTIVE_EXPORTS_LOCK = threading.Lock()
+
+
+def log_failure(context, error):
+    """Log an exception as an error - or as info when it is a user cancel."""
+    if 'cancelled by user' in str(error).lower():
+        logger.info(f"{context}: cancelled by user")
+    else:
+        logger.error(f"{context}: {error}")
+
+
+def stop_process(process, grace_seconds=10):
+    """Ask a subprocess to stop, and force-kill it if it doesn't within the grace period."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    except OSError:
+        pass
+
+
+def terminate_active_exports():
+    """Stop every running TensorRT export (called on backend shutdown)."""
+    with _ACTIVE_EXPORTS_LOCK:
+        processes = list(_ACTIVE_EXPORTS)
+    for process in processes:
+        logger.info(f"Stopping TensorRT export process {process.pid}")
+        stop_process(process, grace_seconds=5)
 
 
 class CustomScriptLoader:
@@ -383,7 +466,7 @@ class AIModelManager:
         
         return model_name
     
-    def register_model(self, model_name, file_path, model_type='vision', original_filename='', custom_script_path=None):
+    def register_model(self, model_name, file_path, model_type='vision', original_filename='', custom_script_path=None, model_meta=None):
         """Register a new model in the system with optional custom inference script"""
         # Validate and clean the model name
         model_name = self._validate_model_name(model_name)
@@ -431,7 +514,9 @@ class AIModelManager:
             'last_used': None,
             'inference_count': 0,
             'loaded': False,
-            'custom_script_path': str(custom_script_path) if custom_script_path else None
+            'custom_script_path': str(custom_script_path) if custom_script_path else None,
+            # Export settings (precision, imgsz, workspace, calibration) when known
+            **(model_meta or {})
         }
         
         self.models_registry[model_id] = model_info
@@ -440,6 +525,38 @@ class AIModelManager:
         logger.info(f"Registered model: {model_name}")
         return model_info
     
+    # pip commands shown to the user when a framework is missing
+    TORCH_INSTALL_HINT = ("pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132 "
+                          "(inside JDBoard's .venv)")
+    ULTRALYTICS_INSTALL_HINT = "pip install ultralytics --no-deps (inside JDBoard's .venv, after PyTorch)"
+
+    def missing_requirement(self, framework=None, yolo=False, target_format=None):
+        """Return a user-facing message if the backend can't handle this model, else None.
+
+        framework:     registry framework ('pytorch', 'onnx', 'tensorrt', 'tensorflow', ...)
+        yolo:          the model is an Ultralytics YOLO model (download-yolo flow)
+        target_format: requested conversion target in the download-yolo flow
+        """
+        if yolo or target_format:
+            if not TORCH_AVAILABLE:
+                return f"PyTorch is not installed on the backend, so YOLO models can't be loaded. Install it: {self.TORCH_INSTALL_HINT}"
+            if not ULTRALYTICS_AVAILABLE:
+                return f"Ultralytics is not installed on the backend, so YOLO models can't be loaded or converted. Install it: {self.ULTRALYTICS_INSTALL_HINT}"
+            if target_format == 'TensorRT' and not TENSORRT_AVAILABLE:
+                return "TensorRT Python bindings are not available on the backend, so the model can't be converted to TensorRT."
+            return None
+        if framework == 'pytorch' and not TORCH_AVAILABLE:
+            return f"PyTorch is not installed on the backend, so .pt/.pth models can't be loaded. Install it: {self.TORCH_INSTALL_HINT}"
+        if framework == 'onnx' and not ONNX_AVAILABLE:
+            return "ONNX Runtime support is disabled on the backend (it caused bus errors on Jetson). Use a .pt or TensorRT .engine model instead."
+        if framework == 'tensorrt' and not TENSORRT_AVAILABLE:
+            return "TensorRT Python bindings are not available on the backend, so .engine/.trt models can't be loaded."
+        if framework == 'tensorflow' and not TF_AVAILABLE:
+            return "TensorFlow is not installed on the backend, so .pb models can't be loaded."
+        if framework in ('keras', 'unknown'):
+            return f"'{framework}' models are not supported for inference."
+        return None
+
     def _detect_framework(self, file_extension):
         """Detect the ML framework based on file extension"""
         framework_map = {
@@ -454,6 +571,96 @@ class AIModelManager:
         }
         return framework_map.get(file_extension, 'unknown')
     
+    def _remove_custom_script(self, script_path):
+        """Delete an uploaded custom script, its compiled cache and loader cache entry."""
+        script = Path(script_path)
+        # Only scripts JDBoard stored itself - never the bundled template or arbitrary paths
+        if script.resolve().parent != self.models_dir.resolve():
+            return
+        try:
+            if script.exists():
+                script.unlink()
+                logger.info(f"Deleted custom script: {script.name}")
+            for pyc in (script.parent / '__pycache__').glob(script.stem + '.*.pyc'):
+                pyc.unlink()
+        except OSError as e:
+            logger.warning(f"Could not delete custom script {script}: {e}")
+        self.script_loader.loaded_scripts.pop(str(script.absolute()), None)
+
+    def cleanup_orphaned_files(self):
+        """Remove files left behind by downloads/uploads that never finished
+        (backend stopped or crashed mid-way) and that no registered model uses.
+
+        Only touches files with the names JDBoard itself generates:
+          models/downloads/*.pt|.pth|.onnx|.engine|.trt  (downloads + conversion outputs)
+          models/<32 hex>_*                              (uploaded models and scripts)
+          models/__pycache__/<32 hex>_*.pyc              (compiled custom scripts)
+        """
+        import re
+        referenced = set()
+        for info in self.models_registry.values():
+            for key in ('file_path', 'custom_script_path'):
+                if info.get(key):
+                    referenced.add(Path(info[key]).resolve())
+        candidates = []
+        downloads = self.models_dir / 'downloads'
+        if downloads.is_dir():
+            candidates += [f for f in downloads.iterdir()
+                           if f.is_file() and f.suffix in ('.pt', '.pth', '.onnx', '.engine', '.trt')]
+        upload_name = re.compile(r'^[0-9a-f]{32}_')
+        candidates += [f for f in self.models_dir.iterdir() if f.is_file() and upload_name.match(f.name)]
+        removed = 0
+        for f in candidates:
+            if f.resolve() not in referenced:
+                try:
+                    f.unlink()
+                    removed += 1
+                    logger.info(f"Removed orphaned file: {f.relative_to(self.models_dir)}")
+                except OSError as e:
+                    logger.warning(f"Could not remove orphaned file {f}: {e}")
+        # Calibration image folders from INT8 builds interrupted by a crash
+        if downloads.is_dir():
+            for leftover_dir in downloads.glob('jdboard_calib_*'):
+                if leftover_dir.is_dir():
+                    shutil.rmtree(leftover_dir, ignore_errors=True)
+                    removed += 1
+                    logger.info(f"Removed orphaned calibration folder: {leftover_dir.name}")
+        pycache = self.models_dir / '__pycache__'
+        if pycache.is_dir():
+            live_scripts = {p.stem for p in referenced}
+            for pyc in pycache.glob('*.pyc'):
+                if upload_name.match(pyc.name) and pyc.name.split('.')[0] not in live_scripts:
+                    pyc.unlink()
+                    removed += 1
+        if removed:
+            logger.info(f"Startup cleanup removed {removed} orphaned file(s)")
+        return removed
+
+    def _warn_missing_file(self, model_id, model_info):
+        """Log a registered model whose file is gone - once, not on every listing."""
+        warned = self.__dict__.setdefault('_missing_file_warned', set())
+        if model_id not in warned:
+            warned.add(model_id)
+            logger.warning(f"Model '{model_id}' is registered but its file is missing "
+                           f"({model_info['file_path']}); it is hidden from the model list. "
+                           f"Re-download it, or remove it from models_registry.json.")
+
+    def _handler_status(self, model_id, model_info):
+        """Which inference handler a model uses: 'custom' or 'default'.
+
+        script_status: 'none' (no script), 'pending' (not loaded yet),
+        'active', or 'failed' (script error -> default handler is used).
+        """
+        if not model_info.get('custom_script_path'):
+            return {'inference_handler': 'default', 'script_status': 'none', 'script_error': None}
+        loaded = self.loaded_models.get(model_id)
+        if loaded is None:
+            return {'inference_handler': 'custom', 'script_status': 'pending', 'script_error': None}
+        error = loaded.get('script_error')
+        if error:
+            return {'inference_handler': 'default', 'script_status': 'failed', 'script_error': error}
+        return {'inference_handler': 'custom', 'script_status': 'active', 'script_error': None}
+
     def list_models(self):
         """List all registered models"""
         models = []
@@ -463,6 +670,7 @@ class AIModelManager:
                 model_copy = model_info.copy()
                 # Check actual loaded state (not just registry flag)
                 model_copy['loaded'] = model_id in self.loaded_models
+                model_copy.update(self._handler_status(model_id, model_info))
                 
                 # Update registry if it's out of sync
                 if self.models_registry[model_id]['loaded'] != model_copy['loaded']:
@@ -472,7 +680,7 @@ class AIModelManager:
                 
                 models.append(model_copy)
             else:
-                logger.warning(f"Model file missing: {model_info['file_path']}")
+                self._warn_missing_file(model_id, model_info)
         
         return models
     
@@ -529,12 +737,13 @@ class AIModelManager:
             elif framework == 'tensorflow' and TF_AVAILABLE:
                 model = self._load_tensorflow_model(file_path)
             else:
-                raise ValueError(f"Unsupported framework: {framework} or framework not available")
+                raise ValueError(self.missing_requirement(framework) or f"Unsupported framework: {framework}")
             
             load_time = time.time() - start_time
             
             # Load custom script if provided
             custom_handler = None
+            script_error = None
             if model_info.get('custom_script_path'):
                 try:
                     custom_script_path = model_info['custom_script_path']
@@ -545,13 +754,15 @@ class AIModelManager:
                 except Exception as e:
                     logger.warning(f"Failed to load custom script, using default inference: {e}")
                     custom_handler = None
+                    script_error = f"Failed to load script: {e}"
             
             self.loaded_models[model_id] = {
                 'model': model,
                 'info': model_info,
                 'loaded_at': datetime.now().isoformat(),
                 'load_time': load_time,
-                'custom_handler': custom_handler
+                'custom_handler': custom_handler,
+                'script_error': script_error
             }
             
             # Update registry
@@ -868,6 +1079,7 @@ class AIModelManager:
         
         # Store the processed image
         processed_image = image
+        script_fallback_error = model_data.get('script_error')
         
         start_time = time.time()
         
@@ -899,13 +1111,17 @@ class AIModelManager:
                     
                     # Custom postprocess now returns a list of predictions
                     num_detections = len(result) if isinstance(result, list) else result.get('total_detections', 0)
+                    model_data['script_error'] = None
+                    script_fallback_error = None
                     logger.info(f"Custom inference completed: {num_detections} detections")
                     
                 except Exception as custom_error:
                     logger.error(f"Error in custom inference handler: {custom_error}")
                     logger.warning("Falling back to default inference method")
-                    # Fall back to default inference
+                    # Fall back to default inference, and surface the failure
                     custom_handler = None
+                    script_fallback_error = f"Script error during inference: {custom_error}"
+                    model_data['script_error'] = script_fallback_error
             
             # Use default inference if no custom handler or custom handler failed
             if not custom_handler:
@@ -913,7 +1129,12 @@ class AIModelManager:
                 # YOLO models handle TensorRT, ONNX, PyTorch internally - no need to route by framework
                 if hasattr(model, 'predict'):  # YOLO model from ultralytics
                     logger.info(f"Using default YOLO inference for {framework} model")
-                    result = self._run_yolo_inference(model, processed_image, original_width, original_height)
+                    # Precision/imgsz chosen at download time apply to PyTorch models;
+                    # TensorRT/ONNX models carry their own (baked in at export)
+                    result = self._run_yolo_inference(
+                        model, processed_image, original_width, original_height,
+                        half=(framework == 'pytorch' and model_info.get('precision') == 'fp16'),
+                        imgsz=model_info.get('imgsz') if framework == 'pytorch' else None)
                 elif framework == 'onnx':
                     result = self._run_onnx_inference(model, processed_image)
                 elif framework == 'pytorch':
@@ -935,17 +1156,21 @@ class AIModelManager:
             
             logger.info(f"Inference completed for {model_id} in {inference_time:.3f}s - Memory: {post_mem.get('free_gb', 0):.1f}GB free")
             
-            return {
+            response = {
                 'predictions': result,
                 'inference_time': inference_time,
                 'model_id': model_id,
                 'framework': framework,
+                'inference_handler': 'custom' if custom_handler else 'default',
                 'memory_info': {
                     'pre_inference_free_gb': pre_mem.get('free_gb', 0),
                     'post_inference_free_gb': post_mem.get('free_gb', 0),
                     'usage_percent': post_mem.get('usage_percent', 0)
                 }
             }
+            if model_info.get('custom_script_path') and script_fallback_error:
+                response['warning'] = f"Custom script failed, default handler used. {script_fallback_error}"
+            return response
             
         except RuntimeError as e:
             error_msg = str(e)
@@ -1006,7 +1231,7 @@ class AIModelManager:
         
         return image
     
-    def _run_yolo_inference(self, model, image, original_width, original_height):
+    def _run_yolo_inference(self, model, image, original_width, original_height, half=False, imgsz=None):
         """Run YOLO model inference using ultralytics with memory optimization"""
         try:
             # Set device to CPU if GPU memory is critical
@@ -1023,7 +1248,10 @@ class AIModelManager:
                 results = model(image, device='cpu', verbose=False, half=False)
             else:
                 # GPU inference with optimizations - don't force imgsz to let YOLO handle it
-                results = model(image, verbose=False, half=False)
+                predict_kwargs = {'verbose': False, 'half': half}
+                if imgsz:
+                    predict_kwargs['imgsz'] = imgsz
+                results = model(image, **predict_kwargs)
             
             # Extract predictions
             predictions = []
@@ -1280,6 +1508,11 @@ class AIModelManager:
         # Remove from registry
         del self.models_registry[model_id]
         self._save_registry()
+
+        # Remove its custom script too, unless another model still uses it
+        script = model_info.get('custom_script_path')
+        if script and not any(m.get('custom_script_path') == script for m in self.models_registry.values()):
+            self._remove_custom_script(script)
         
         logger.info(f"Model {model_id} deleted from registry")
         return True
@@ -1353,6 +1586,9 @@ class AIModelManager:
                 detailed_info = model_info.copy()
                 detailed_info['id'] = model_id
                 detailed_info['loaded'] = model_id in self.loaded_models
+                detailed_info.update(self._handler_status(model_id, model_info))
+                # Why this model can't be loaded on this backend, if it can't (shown on the card)
+                detailed_info['load_problem'] = self.missing_requirement(model_info.get('framework'))
                 
                 if model_id in self.loaded_models:
                     load_info = self.loaded_models[model_id]
@@ -1363,11 +1599,11 @@ class AIModelManager:
                 
                 detailed_models.append(detailed_info)
             else:
-                logger.warning(f"Model file missing: {model_info['file_path']}")
+                self._warn_missing_file(model_id, model_info)
         
         return detailed_models
 
-    def download_yolo_model(self, model_url, model_name, target_format='PyTorch', custom_script_path=None, progress_callback=None, cancel_check_callback=None):
+    def download_yolo_model(self, model_url, model_name, target_format='PyTorch', custom_script_path=None, progress_callback=None, cancel_check_callback=None, export_options=None):
         """Download a YOLO model and optionally convert it to different format with progress tracking, custom script support, and cancellation support"""
         import urllib.request
         import shutil
@@ -1389,9 +1625,13 @@ class AIModelManager:
             update_progress(5, 'Initializing download...')
             check_cancelled()
             
-            # Generate filename
+            # Unique filename per download. Ultralytics names its .onnx/.engine
+            # outputs after the source file, so a shared name (e.g. two models
+            # both using yolo11x.pt) let one download overwrite - and its failure
+            # cleanup delete - another model's files.
             url_filename = model_url.split('/')[-1]
-            download_path = download_dir / url_filename
+            safe_name = ''.join(c if c.isalnum() or c in '-_' else '_' for c in model_name)[:40] or 'model'
+            download_path = download_dir / f"{safe_name}_{uuid.uuid4().hex[:8]}_{url_filename}"
             
             logger.info(f"Downloading YOLO model from {model_url}")
             logger.info(f"Target file: {download_path}")
@@ -1526,7 +1766,7 @@ class AIModelManager:
                 logger.info(f"Converting model to {target_format}")
                 update_progress(80, f'Converting to {target_format} format...')
                 check_cancelled()
-                final_path, final_format = self._convert_yolo_model(download_path, target_format, progress_callback, cancel_check_callback)
+                final_path, final_format = self._convert_yolo_model(download_path, target_format, progress_callback, cancel_check_callback, export_options)
             
             update_progress(90, 'Registering model...')
             check_cancelled()
@@ -1537,7 +1777,10 @@ class AIModelManager:
                 file_path=final_path.resolve(),  # Use absolute path
                 model_type='vision',
                 original_filename=url_filename,
-                custom_script_path=custom_script_path
+                custom_script_path=custom_script_path,
+                model_meta={k: v for k, v in (export_options or {}).items() if k in ('precision', 'imgsz', 'workspace')}
+                           | ({'calibration': 'coco' if (export_options or {}).get('calibration') == 'coco' else 'custom'}
+                              if (export_options or {}).get('precision') == 'int8' else {})
             )
             
             update_progress(100, 'Model ready for use!')
@@ -1553,12 +1796,44 @@ class AIModelManager:
             }
             
         except Exception as e:
-            logger.error(f"Error downloading YOLO model: {str(e)}")
-            # Clean up partial download
-            if download_path.exists():
-                download_path.unlink()
+            log_failure(f"Error downloading YOLO model", e)
+            # Clean up this download's files: the source and anything converted
+            # from it (.onnx, partial .engine, ...) - they all share its unique stem.
+            if 'download_path' in locals():  # not set if it failed very early
+                for leftover in download_path.parent.glob(download_path.stem + '*'):
+                    try:
+                        if leftover.is_file():
+                            leftover.unlink()
+                            logger.info(f"Removed leftover file: {leftover.name}")
+                        elif leftover.is_dir():
+                            shutil.rmtree(leftover, ignore_errors=True)
+                    except OSError as cleanup_error:
+                        logger.warning(f"Could not remove {leftover}: {cleanup_error}")
             raise
     
+    def _prepare_calibration_data(self, source_path, opts, model=None):
+        """Return the `data=` argument for INT8 calibration.
+
+        'coco' -> Ultralytics' built-in COCO sample (downloaded on first use).
+        A folder of images -> a dataset yaml written next to the download (same
+        unique name prefix, so it is removed with the other byproducts).
+        """
+        calibration = opts.get('calibration')
+        if calibration == 'coco':
+            return 'coco8.yaml'
+        images_dir = Path(calibration)
+        if not images_dir.is_dir():
+            raise ValueError("Calibration images folder not found")
+        if model is None:
+            from ultralytics import YOLO
+            model = YOLO(str(source_path))
+        names = dict(getattr(model, 'names', {}) or {0: 'object'})
+        yaml_path = source_path.parent / f"{source_path.stem}_calibration.yaml"
+        lines = [f"path: {images_dir}", "train: .", "val: .", "names:"]
+        lines += [f"  {int(k)}: {json.dumps(str(v))}" for k, v in sorted(names.items())]
+        yaml_path.write_text("\n".join(lines) + "\n")
+        return str(yaml_path)
+
     def _cleanup_intermediate_files(self, source_path, target_format, final_path):
         """Clean up intermediate files created during model conversion"""
         base_path = source_path.with_suffix('')
@@ -1634,7 +1909,7 @@ class AIModelManager:
         
         # Never clean up .onnx files for ONNX target format or other scenarios
     
-    def _convert_yolo_model(self, source_path, target_format, progress_callback=None, cancel_check_callback=None):
+    def _convert_yolo_model(self, source_path, target_format, progress_callback=None, cancel_check_callback=None, export_options=None):
         """Convert YOLO model to different format with progress tracking and cancellation support"""
         import shutil
         from pathlib import Path
@@ -1671,9 +1946,9 @@ class AIModelManager:
             
             # Attempt real conversion using ultralytics
             if target_format == 'ONNX':
-                converted_path = self._convert_to_onnx(source_path, progress_callback, cancel_check_callback)
+                converted_path = self._convert_to_onnx(source_path, progress_callback, cancel_check_callback, export_options)
             elif target_format == 'TensorRT':
-                converted_path = self._convert_to_tensorrt(source_path, progress_callback, cancel_check_callback)
+                converted_path = self._convert_to_tensorrt(source_path, progress_callback, cancel_check_callback, export_options)
 
             else:
                 # Fallback: copy with new extension (placeholder)
@@ -1687,6 +1962,16 @@ class AIModelManager:
             
             # Clean up any intermediate files created during conversion BEFORE deleting source
             self._cleanup_intermediate_files(source_path, target_format, converted_path)
+            # Downloads have unique names, so anything else sharing the source's
+            # name (.onnx step, INT8 calibration .cache, calibration folder) is a byproduct
+            for byproduct in source_path.parent.glob(source_path.stem + '*'):
+                if byproduct in (converted_path, source_path):
+                    continue
+                if byproduct.is_dir():
+                    shutil.rmtree(byproduct, ignore_errors=True)
+                else:
+                    byproduct.unlink(missing_ok=True)
+                logger.info(f"Removed conversion byproduct: {byproduct.name}")
             
             # Delete the original PyTorch file after successful conversion
             if converted_path != source_path and source_path.exists():
@@ -1698,11 +1983,11 @@ class AIModelManager:
             return converted_path, framework
             
         except Exception as e:
-            logger.error(f"Conversion to {target_format} failed: {str(e)}")
+            log_failure(f"Conversion to {target_format} failed", e)
             # If conversion fails, keep original file and raise error
             raise RuntimeError(f"Failed to convert model to {target_format}: {str(e)}")
     
-    def _convert_to_onnx(self, source_path, progress_callback=None, cancel_check_callback=None):
+    def _convert_to_onnx(self, source_path, progress_callback=None, cancel_check_callback=None, export_options=None):
         """Convert YOLO model to ONNX format - fast and simple"""
         
         def update_progress(progress, status):
@@ -1737,12 +2022,15 @@ class AIModelManager:
             logger.info("Starting ONNX export...")
             start_time = time.time()
             
-            result = model.export(
-                format='onnx',
-                verbose=False,  # Reduce verbosity for speed
-                simplify=True,  # Simplify the model
-                half=False      # Use FP32 for better compatibility
-            )
+            opts = export_options or normalize_export_options('ONNX')
+            export_kwargs = dict(format='onnx', verbose=False, simplify=True,
+                                 imgsz=opts['imgsz'], quantize=QUANTIZE_ARG[opts['precision']])
+            if opts['precision'] == 'fp16':
+                export_kwargs['device'] = 0  # FP16 ONNX export runs on the GPU
+            if opts['precision'] == 'int8':
+                export_kwargs['data'] = self._prepare_calibration_data(source_path, opts, model)
+            logger.info(f"ONNX export settings: {opts['precision'].upper()}, imgsz {opts['imgsz']}")
+            result = model.export(**export_kwargs)
             
             conversion_time = time.time() - start_time
             logger.info(f"ONNX conversion completed in {conversion_time:.1f}s")
@@ -1768,14 +2056,9 @@ class AIModelManager:
             raise RuntimeError("ONNX conversion completed but file not found")
                 
         except ImportError:
-            logger.warning("ultralytics not available, using fallback conversion")
-            # Fallback: copy file with .onnx extension
-            update_progress(85, 'ONNX: Creating ONNX placeholder (ultralytics not available)...')
-            check_cancelled()
-            onnx_path = source_path.with_suffix('.onnx')
-            shutil.copy2(source_path, onnx_path)
-            update_progress(88, f'ONNX: Fallback conversion completed')
-            return onnx_path
+            # Used to copy the .pt and call it .onnx - a fake model. Fail clearly instead.
+            raise RuntimeError(f"Ultralytics is not installed, so the model can't be converted to ONNX. "
+                               f"Install it: {self.ULTRALYTICS_INSTALL_HINT}")
         except Exception as e:
             if "cancelled" in str(e).lower():
                 # Clean up partial conversion on cancellation
@@ -1788,10 +2071,10 @@ class AIModelManager:
                 update_progress(85, f'ONNX: Conversion cancelled')
             else:
                 update_progress(85, f'ONNX: Conversion failed - {str(e)}')
-            logger.error(f"ONNX conversion failed: {str(e)}")
+            log_failure(f"ONNX conversion failed", e)
             raise
     
-    def _convert_to_tensorrt(self, source_path, progress_callback=None, cancel_check_callback=None):
+    def _convert_to_tensorrt(self, source_path, progress_callback=None, cancel_check_callback=None, export_options=None):
         """Convert YOLO model to TensorRT format with verbose output capture"""
         import subprocess
         import threading
@@ -1819,22 +2102,37 @@ class AIModelManager:
             update_progress(83, 'Loading model for TensorRT conversion...')
             check_cancelled()
             
-            update_progress(85, 'Converting to TensorRT format...')
+            update_progress(85, 'Building TensorRT engine - this takes several minutes (longer for larger models)...')
             check_cancelled()
             
             # Use subprocess to run yolo export with verbose output capture
             logger.info("Starting TensorRT export - this may take a few minutes...")
             start_time = time.time()
             
-            # Build command for YOLO export
+            # Build command for YOLO export. Use the `yolo` CLI that belongs to
+            # this interpreter (.venv/bin/yolo) - it isn't on PATH when the
+            # backend is started as `.venv/bin/python app.py`.
+            yolo_cli = os.path.join(os.path.dirname(sys.executable), 'yolo')
+            if not os.path.exists(yolo_cli):
+                yolo_cli = shutil.which('yolo')
+            if not yolo_cli:
+                raise RuntimeError("The Ultralytics 'yolo' command was not found next to the backend's Python. "
+                                   f"Reinstall it: {self.ULTRALYTICS_INSTALL_HINT}")
+            opts = export_options or normalize_export_options('TensorRT')
             cmd = [
-                'yolo', 'export',
+                yolo_cli, 'export',
                 f'model={source_path}',
                 'format=engine',
                 'device=0',
                 'verbose=True',
-                'half=False'
+                f"quantize={QUANTIZE_ARG[opts['precision']]}",  # FP32 / FP16 / INT8 engine
+                f"imgsz={opts['imgsz']}",
+                f"workspace={opts.get('workspace', TRT_WORKSPACE_GB)}",
             ]
+            if opts['precision'] == 'int8':
+                cmd.append(f"data={self._prepare_calibration_data(source_path, opts)}")
+            logger.info(f"TensorRT build settings: {opts['precision'].upper()}, imgsz {opts['imgsz']}, "
+                        f"workspace {opts.get('workspace', TRT_WORKSPACE_GB)} GB")
             
             # Start subprocess with real-time output capture
             process = subprocess.Popen(
@@ -1882,15 +2180,40 @@ class AIModelManager:
             output_thread = threading.Thread(target=monitor_output, daemon=True)
             output_thread.start()
             
-            # Wait for process to complete
-            return_code = process.wait()
+            # Wait for the build, checking for cancel every second: the engine
+            # build can run for minutes without printing anything, so checking
+            # only on output lines (monitor_output) is not enough.
+            with _ACTIVE_EXPORTS_LOCK:
+                _ACTIVE_EXPORTS.add(process)
+            cancelled = False
+            try:
+                while True:
+                    try:
+                        return_code = process.wait(timeout=1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if cancel_check_callback and cancel_check_callback():
+                            cancelled = True
+                            logger.info("Stopping TensorRT export (download cancelled)")
+                            stop_process(process)
+            finally:
+                with _ACTIVE_EXPORTS_LOCK:
+                    _ACTIVE_EXPORTS.discard(process)
             
             # Wait for output thread to finish
             output_thread.join(timeout=2.0)
+
+            if cancelled or (cancel_check_callback and cancel_check_callback()):
+                raise Exception("Download cancelled by user")
             
             conversion_time = time.time() - start_time
             
             if return_code != 0:
+                if return_code == -9:
+                    raise RuntimeError(
+                        "TensorRT export was killed by the system because it ran out of memory. "
+                        "This model is too large to build a TensorRT engine on this device; "
+                        "use a smaller size (n/s/m) or the PyTorch format.")
                 raise RuntimeError(f"TensorRT export failed with return code {return_code}")
             
             logger.info(f"TensorRT conversion completed in {conversion_time:.1f}s")
@@ -1923,7 +2246,7 @@ class AIModelManager:
                 update_progress(85, 'TensorRT conversion cancelled')
                 raise e
             
-            logger.error(f"TensorRT conversion failed: {str(e)}")
+            log_failure(f"TensorRT conversion failed", e)
             raise RuntimeError(f"TensorRT conversion failed: {str(e)}")
 
                 
@@ -1943,5 +2266,5 @@ class AIModelManager:
                 update_progress(85, 'TensorRT conversion cancelled')
                 raise e
             
-            logger.error(f"TensorRT conversion failed: {str(e)}")
+            log_failure(f"TensorRT conversion failed", e)
             raise RuntimeError(f"TensorRT conversion failed: {str(e)}")

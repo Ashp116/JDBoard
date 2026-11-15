@@ -1,793 +1,491 @@
 #!/usr/bin/env python3
 """
-System Monitor for Jetson Edge AI Dashboard
-Monitors CPU, GPU, memory, temperature, fan, and system information using jetson-stats
+System Monitor for the JDBoard Jetson dashboard.
+
+All Jetson telemetry and hardware controls go through jetson-stats (jtop >= 4.x,
+tested on 7.2.x) using its structured API:
+
+    jt.cpu, jt.memory, jt.gpu, jt.temperature, jt.power, jt.fan, jt.disk,
+    jt.board, jt.uptime, jt.nvpmodel, jt.jetson_clocks
+
+We intentionally do NOT use ``jt.stats``: on recent L4T releases jtop 7.2.x
+raises ``KeyError: 'online'`` from that convenience property because some
+engine entries do not carry an ``online`` flag.
+
+A single background thread owns the jtop client. It follows the canonical
+``while jt.ok()`` loop (which blocks until fresh data is available) and
+automatically reconnects with back-off when the jtop.service goes away, so no
+manual "force reconnect" dance is needed on the frontend.
+
+Controls (jetson_clocks, nvpmodel, fan profile) are sent through jtop's
+setters. The jtop.service runs as root, so these do not require sudo; the user
+only needs to be in the ``jtop`` group.
 """
 
-import signal
+import logging
+import math
+import os
+import platform
+import subprocess
 import threading
 import time
-import json
-import math
 from datetime import datetime
-import logging
 
-# Import the JtopManager singleton
-from jtop_manager import JtopManager, get_jtop
+import psutil
 
-# Ignore SIGPIPE signal to handle broken pipe errors gracefully
-signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-
-# Check for jetson-stats availability
 try:
-    from jtop import jtop
+    from jtop import jtop, JtopException
     JTOP_AVAILABLE = True
-except Exception:
+except Exception:  # pragma: no cover - only on non-Jetson hosts
+    jtop = None
+    JtopException = Exception
     JTOP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
-def safe_float(value, default=0, decimal_places=1):
-    """Safely convert to float, handling inf/nan values and rounding"""
+JTOP_INTERVAL = 0.5          # seconds between jtop samples
+RECONNECT_MIN_DELAY = 1.0     # seconds
+RECONNECT_MAX_DELAY = 10.0    # seconds
+LOG_REFRESH_INTERVAL = 5.0    # seconds between journalctl reads
+CONTROL_TIMEOUT = 15.0        # seconds to wait for a control change to apply
+FAN_HIDDEN_PROFILES = {'manual'}  # needs an explicit speed, not exposed in the UI
+
+
+def _num(value, default=0.0, ndigits=1):
+    """Convert to a finite rounded float, falling back to ``default``."""
     try:
         result = float(value)
-        if math.isnan(result) or math.isinf(result):
-            return default
-        return round(result, decimal_places)
-    except (ValueError, TypeError):
+    except (TypeError, ValueError):
         return default
+    if math.isnan(result) or math.isinf(result):
+        return default
+    return round(result, ndigits)
 
-def sanitize_data(data):
-    """Recursively sanitize data to ensure JSON serialization compatibility"""
+
+def _sanitize(data):
+    """Recursively make data JSON-safe (no NaN/inf)."""
     if isinstance(data, dict):
-        return {k: sanitize_data(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [sanitize_data(item) for item in data]
-    elif isinstance(data, float):
-        if math.isnan(data) or math.isinf(data):
-            return 0
-        return round(data, 1)
-    else:
-        return data
+        return {k: _sanitize(v) for k, v in data.items()}
+    if isinstance(data, (list, tuple)):
+        return [_sanitize(v) for v in data]
+    if isinstance(data, float):
+        return 0 if (math.isnan(data) or math.isinf(data)) else round(data, 3)
+    return data
+
+
+def _format_uptime(delta):
+    total = int(delta.total_seconds()) if hasattr(delta, 'total_seconds') else 0
+    return f"{total // 3600}:{(total % 3600) // 60:02d}:{total % 60:02d}"
+
+
+def _classify_error(exc):
+    """Map a jtop failure to the error payload the frontend understands."""
+    text = str(exc)
+    lower = text.lower()
+    now = datetime.now().isoformat()
+    if "can't access jtop.service" in lower or 'permission' in lower:
+        return {
+            'type': 'permission_error',
+            'message': 'Cannot access jtop.service. Make sure your user is in the "jtop" group, then log out and back in.',
+            'command': f'sudo usermod -aG jtop {os.environ.get("USER", "$USER")}',
+            'timestamp': now,
+        }
+    if 'not active' in lower or 'install-service' in lower:
+        return {
+            'type': 'jtop_service_inactive',
+            'message': 'The jtop.service is not active.',
+            'command': 'sudo jtop --install-service',
+            'timestamp': now,
+        }
+    return {
+        'type': 'jtop_service_inactive',
+        'message': f'Lost connection to jtop.service ({text or type(exc).__name__}). Reconnecting automatically...',
+        'command': 'sudo systemctl restart jtop.service',
+        'timestamp': now,
+    }
+
 
 class SystemMonitor:
     def __init__(self):
-        # Check if jetson-stats is available
         if not JTOP_AVAILABLE:
-            error_msg = """
-ERROR: jetson-stats (jtop) is not available!
+            raise RuntimeError(
+                "jetson-stats (jtop) is required. Install it with: sudo pip3 install -U jetson-stats"
+            )
 
-This system monitor requires jetson-stats to function properly.
-Please install it using:
+        self._jt = None
+        self._jt_lock = threading.RLock()     # guards self._jt and control calls
+        self._data_lock = threading.Lock()    # guards self.system_data
+        self._running = False
+        self._thread = None
+        self._connected = threading.Event()
+        self._reconnect_requested = threading.Event()
+        self._last_log_refresh = 0.0
 
-    sudo apt update
-    sudo apt install python3-pip
-    sudo pip3 install jetson-stats
-
-After installation, you may need to reboot your system.
-            """
-            print(error_msg)
-            logger.error("jetson-stats is not available - system monitor cannot function")
-            raise RuntimeError("jetson-stats is required but not available")
-        
-        self.monitoring = False
-        self.monitor_thread = None
-        self.jtop_manager = JtopManager.get_instance()  # Use the singleton manager
         self.system_data = {
-            'cpu': {'usage': 0, 'frequency': 0, 'temperature': 0, 'cores': 0},
+            'cpu': {'usage': 0, 'frequency': 0, 'temperature': 0, 'cores': [], 'core_count': 0},
             'memory': {'total': 0, 'used': 0, 'available': 0, 'percent': 0},
-            'gpu': {'usage': 0, 'memory_used': 0, 'memory_total': 0, 'temperature': 0, 'name': 'Jetson GPU'},
+            'gpu': {'usage': 0, 'memory_used': 0, 'memory_total': 0, 'temperature': 0,
+                    'frequency': 0, 'power': 0, 'name': 'Jetson GPU'},
             'disk': {'total': 0, 'used': 0, 'free': 0, 'percent': 0},
             'network': {'bytes_sent': 0, 'bytes_recv': 0},
-            'fan': {'speed': 0, 'rpm': 0, 'cpu_temp': 0, 'gpu_temp': 0, 'total_power': 0},
+            'fan': {'speed': 0, 'rpm': 0, 'cpu_temp': 0, 'gpu_temp': 0, 'total_power': 0, 'profile': None},
             'processes': 0,
-            'uptime': '00:00:00',
+            'uptime': '0:00:00',
             'nvp_model': 'Unknown',
             'jetson_model': 'Unknown',
             'jetson_module': 'Unknown',
             'jetpack_version': 'Unknown',
-            'kernel_version': 'Unknown',
+            'kernel_version': platform.release() or 'Unknown',
             'jetson_clocks': False,
             'system_logs': {'recent_logs': [], 'log_count': 0, 'last_updated': None},
-            'error': None,  # Add error field to track jtop service issues
-            'last_updated': None
+            'error': None,
+            'last_updated': None,
         }
-        
-        # Initialize with real data immediately
-        self._update_system_data()
-    
+
+    # ------------------------------------------------------------------ lifecycle
+
     def start_monitoring(self):
-        """Start the background monitoring thread"""
-        if not self.monitoring:
-            self.monitoring = True
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            self.monitor_thread.start()
-            logger.info("System monitoring started (jetson-stats only mode)")
-    
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run, name='jtop-monitor', daemon=True)
+        self._thread.start()
+        logger.info("System monitoring started (jtop)")
+
     def stop_monitoring(self):
-        """Stop the background monitoring"""
-        self.monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join()
+        self._running = False
+        self._reconnect_requested.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+        self._close()
         logger.info("System monitoring stopped")
-    
-    def _monitor_loop(self):
-        """Main monitoring loop"""
-        while self.monitoring:
-            try:
-                self._update_system_data()
-                time.sleep(0.5)  # Update every 0.5 seconds for more responsive monitoring
-            except Exception as e:
-                logger.error(f"Error in monitoring loop: {str(e)}")
-                time.sleep(0.5)
-    
-    def _update_system_data(self):
-        """Update all system metrics using jetson-stats singleton"""
-        try:
-            jt = self.jtop_manager.get_jtop()
-            stats = jt.stats
-            
-            # CPU metrics
-            self._update_cpu_data(stats)
-            
-            # Memory metrics
-            self._update_memory_data(stats)
-            
-            # GPU metrics
-            self._update_gpu_data(stats)
-            
-            # Disk metrics
-            self._update_disk_data(stats)
-            
-            # Network metrics
-            self._update_network_data(stats)
-            
-            # Fan metrics
-            self._update_fan_data(stats)
-            
-            # Process count
-            self._update_process_data()
-            
-            # System logs
-            self._update_system_logs()
-            
-            # System info with jtop object for board access
-            self._update_system_info(stats, jt)
-            
-            # Update timestamp
-            self.system_data['last_updated'] = datetime.now().isoformat()
-            
-            # Clear any previous errors on successful update
-            self.system_data['error'] = None
-                
-        except BrokenPipeError:
-            # Handle broken pipe specifically - this is usually a temporary connection issue
-            # logger.warning("Broken pipe error detected - jtop connection lost")
-            self.system_data['error'] = {
-                'type': 'jtop_service_inactive',
-                'message': 'Connection to jtop service lost (broken pipe). Service needs to be restarted.',
-                'command': 'sudo systemctl restart jtop.service',
-                'timestamp': datetime.now().isoformat()
-            }
-        except ConnectionResetError:
-            # Handle connection reset
-            # logger.warning("Connection reset by peer - jtop connection lost")
-            self.system_data['error'] = {
-                'type': 'jtop_service_inactive',
-                'message': 'Connection to jtop service reset. Service needs to be restarted.',
-                'command': 'sudo systemctl restart jtop.service',
-                'timestamp': datetime.now().isoformat()
-            }
-        except Exception as e:
-            error_str = str(e)
-            logger.error(f"Failed to update system data from jetson-stats: {e}")
-            print(f"ERROR: Failed to read from jetson-stats: {e}")
-            
-            # Check for specific jtop service error
-            if "jtop.service is not active" in error_str or "jtop service" in error_str.lower():
-                self.system_data['error'] = {
-                    'type': 'jtop_service_inactive',
-                    'message': 'The jtop.service is not active. Please run: sudo jtop --install-service',
-                    'command': 'sudo jtop --install-service',
-                    'timestamp': datetime.now().isoformat()
-                }
-            elif "broken pipe" in error_str.lower() or "errno 32" in error_str.lower():
-                self.system_data['error'] = {
-                    'type': 'jtop_service_inactive',
-                    'message': 'Connection to jtop service lost (broken pipe). Service needs to be restarted.',
-                    'command': 'sudo systemctl restart jtop.service',
-                    'timestamp': datetime.now().isoformat()
-                }
-            elif "permission" in error_str.lower() or "access" in error_str.lower():
-                self.system_data['error'] = {
-                    'type': 'permission_error',
-                    'message': f'Permission error accessing jetson-stats: {error_str}',
-                    'command': 'sudo jtop --install-service',
-                    'timestamp': datetime.now().isoformat()
-                }
-            else:
-                self.system_data['error'] = {
-                    'type': 'jetson_stats_error',
-                    'message': f'Error reading from jetson-stats: {error_str}',
-                    'command': 'sudo jtop --install-service',
-                    'timestamp': datetime.now().isoformat()
-                }
-    
-    def _update_cpu_data(self, stats):
-        """Update CPU data from jetson-stats"""
-        try:
-            # CPU usage - look for individual CPU cores (CPU1, CPU2, etc.)
-            cpu_cores = []
-            cpu_total = 0
-            core_count = 0
-            
-            for key, value in stats.items():
-                if key.startswith('CPU') and key[3:].isdigit():  # CPU1, CPU2, etc.
-                    if isinstance(value, (int, float)):
-                        cpu_cores.append(safe_float(value))
-                        cpu_total += safe_float(value)
-                        core_count += 1
-            
-            if core_count > 0:
-                self.system_data['cpu']['usage'] = round(cpu_total / core_count, 1)
-                self.system_data['cpu']['cores'] = cpu_cores  # Store array of core usage values
-                self.system_data['cpu']['core_count'] = core_count  # Store count separately
-            else:
-                # Fallback when no core data is available
-                self.system_data['cpu']['usage'] = 0.0
-                self.system_data['cpu']['cores'] = []
-                self.system_data['cpu']['core_count'] = 0
-            
-            # CPU frequency - look for frequency data if available
-            # Note: frequency might not be directly available in this format
-            
-            # CPU temperature - look for temperature data
-            if 'Temp cpu' in stats:
-                temp_val = safe_float(stats['Temp cpu'])
-                if 20 < temp_val < 100:  # Reasonable temperature range
-                    self.system_data['cpu']['temperature'] = temp_val
-            elif 'Temp tj' in stats:  # Alternative CPU temperature
-                temp_val = safe_float(stats['Temp tj'])
-                if 20 < temp_val < 100:
-                    self.system_data['cpu']['temperature'] = temp_val
-                                
-        except Exception as e:
-            logger.debug(f"Error updating CPU data: {e}")
-    
-    def _update_memory_data(self, stats):
-        """Update memory data from jetson-stats"""
-        try:
-            if 'RAM' in stats:
-                ram_percentage = safe_float(stats['RAM'], decimal_places=3)
-                
-                # Get total system memory (we need to estimate this)
-                # For Jetson devices, we can make reasonable estimates or get from system
-                # Let's try to get actual memory values if available, otherwise estimate
-                
-                # Try to get total memory from system (fallback approach)
-                try:
-                    import psutil
-                    # Force fresh memory reading
-                    memory_info = psutil.virtual_memory()
-                    total_bytes = memory_info.total
-                    used_bytes = int(total_bytes * ram_percentage)
-                    available_bytes = total_bytes - used_bytes
-                    
-                    # Get detailed memory breakdown with fresh readings
-                    self.system_data['memory'] = {
-                        'total': int(total_bytes),
-                        'used': int(used_bytes),
-                        'available': int(available_bytes),
-                        'percent': round(ram_percentage * 100, 2),  # More precision
-                        'detailed': {
-                            'total_gb': round(total_bytes / (1024**3), 3),  # More precision
-                            'used_gb': round(used_bytes / (1024**3), 3),
-                            'available_gb': round(available_bytes / (1024**3), 3),
-                            'cached': int(memory_info.cached) if hasattr(memory_info, 'cached') else 0,
-                            'cached_gb': round(getattr(memory_info, 'cached', 0) / (1024**3), 3),
-                            'buffers': int(memory_info.buffers) if hasattr(memory_info, 'buffers') else 0,
-                            'buffers_gb': round(getattr(memory_info, 'buffers', 0) / (1024**3), 3),
-                            'shared': int(memory_info.shared) if hasattr(memory_info, 'shared') else 0,
-                            'shared_gb': round(getattr(memory_info, 'shared', 0) / (1024**3), 3),
-                            'free': int(memory_info.free) if hasattr(memory_info, 'free') else available_bytes,
-                            'free_gb': round(getattr(memory_info, 'free', available_bytes) / (1024**3), 3),
-                            'timestamp': time.time()  # Add timestamp for debugging
-                        }
-                    }
-                    
-                    # Debug logging for memory values (only log occasionally to avoid spam)
-                    if hasattr(self, '_last_memory_debug') and time.time() - self._last_memory_debug > 10:
-                        logger.debug(f"Memory update: RAM%={ram_percentage:.1%}, Used={used_bytes/1024**3:.2f}GB, Free={memory_info.free/1024**3:.2f}GB")
-                        self._last_memory_debug = time.time()
-                    elif not hasattr(self, '_last_memory_debug'):
-                        self._last_memory_debug = time.time()
-                        
-                except ImportError:
-                    # If psutil is not available, make reasonable estimates
-                    # Assume 8GB for most Jetson devices
-                    estimated_total = 8 * 1024 * 1024 * 1024  # 8GB in bytes
-                    used_bytes = int(estimated_total * ram_percentage)
-                    available_bytes = estimated_total - used_bytes
-                    
-                    self.system_data['memory'] = {
-                        'total': int(estimated_total),
-                        'used': int(used_bytes),
-                        'available': int(available_bytes),
-                        'percent': round(ram_percentage * 100, 1)
-                    }
-                        
-        except Exception as e:
-            logger.debug(f"Error updating memory data: {e}")
-    
-    def _update_gpu_data(self, stats):
-        """Update GPU data from jetson-stats"""
-        try:
-            # GPU usage
-            if 'GPU' in stats:
-                gpu_usage = safe_float(stats['GPU'])
-                self.system_data['gpu']['usage'] = gpu_usage
-            
-            # GPU temperature - directly available
-            if 'Temp gpu' in stats:
-                temp_val = safe_float(stats['Temp gpu'])
-                if 20 < temp_val < 120:  # Reasonable GPU temperature range
-                    self.system_data['gpu']['temperature'] = temp_val
-                                
-        except Exception as e:
-            logger.debug(f"Error updating GPU data: {e}")
-    
-    def _update_disk_data(self, stats):
-        """Update disk data from jetson-stats"""
-        try:
-            # DISK data not available in the stats format provided
-            # Use fallback method with psutil if available
-            try:
-                import psutil
-                disk = psutil.disk_usage('/')
-                self.system_data['disk'] = {
-                    'total': disk.total,
-                    'used': disk.used,
-                    'free': disk.free,
-                    'percent': round((disk.used / disk.total) * 100, 1)
-                }
-            except ImportError:
-                logger.debug("psutil not available for disk stats")
-                                
-        except Exception as e:
-            logger.debug(f"Error updating disk data: {e}")
-    
-    def _update_network_data(self, stats):
-        """Update network data from jetson-stats"""
-        try:
-            # NET data not available in the stats format provided
-            # Use fallback method with psutil if available
-            try:
-                import psutil
-                net_io = psutil.net_io_counters()
-                self.system_data['network'] = {
-                    'bytes_sent': net_io.bytes_sent,
-                    'bytes_recv': net_io.bytes_recv
-                }
-            except ImportError:
-                logger.debug("psutil not available for network stats")
-                    
-        except Exception as e:
-            logger.debug(f"Error updating network data: {e}")
-    
-    def _update_fan_data(self, stats):
-        """Update fan data from jetson-stats"""
-        try:
-            fan_data = {}
-            
-            # Look for fan speed data
-            if 'Fan pwmfan0' in stats:
-                fan_data['speed'] = safe_float(stats['Fan pwmfan0'], 0, 1)  # Fan speed percentage
-            
-            # Calculate RPM estimate (this is approximate - actual RPM depends on fan specs)
-            # Most Jetson fans run at ~5000 RPM at 100% speed
-            if 'speed' in fan_data:
-                estimated_rpm = int((fan_data['speed'] / 100.0) * 5000)
-                fan_data['rpm'] = estimated_rpm
-            
-            # Get temperature data that might be related to fan control
-            if 'Temp cpu' in stats:
-                fan_data['cpu_temp'] = safe_float(stats['Temp cpu'], 0, 1)
-            if 'Temp gpu' in stats:
-                fan_data['gpu_temp'] = safe_float(stats['Temp gpu'], 0, 1)
-            
-            # Get power data (fan control is often tied to power consumption)
-            if 'Power TOT' in stats:
-                fan_data['total_power'] = safe_float(stats['Power TOT'], 0, 1)
-            
-            # Set default values if no data available
-            if not fan_data:
-                fan_data = {
-                    'speed': 0,
-                    'rpm': 0,
-                    'cpu_temp': 0,
-                    'gpu_temp': 0,
-                    'total_power': 0
-                }
-            
-            self.system_data['fan'] = fan_data
-            
-        except Exception as e:
-            logger.debug(f"Error updating fan data: {e}")
-            # Set fallback values
-            self.system_data['fan'] = {
-                'speed': 0,
-                'rpm': 0,
-                'cpu_temp': 0,
-                'gpu_temp': 0,
-                'total_power': 0
-            }
 
-    def _update_process_data(self):
-        """Update process count data"""
-        try:
-            # Try to get process count using psutil first
+    def _close(self):
+        with self._jt_lock:
+            jt, self._jt = self._jt, None
+        self._connected.clear()
+        if jt is not None:
             try:
-                import psutil
-                # Get total number of running processes
-                process_count = len(psutil.pids())
-                self.system_data['processes'] = process_count
-            except ImportError:
-                # Fallback to reading from /proc if psutil is not available
-                try:
-                    import os
-                    # Count directories in /proc that represent PIDs
-                    proc_dirs = [d for d in os.listdir('/proc') if d.isdigit()]
-                    self.system_data['processes'] = len(proc_dirs)
-                except Exception:
-                    # Final fallback - set a reasonable default
-                    self.system_data['processes'] = 0
-                    logger.debug("Could not determine process count")
-                                
-        except Exception as e:
-            logger.debug(f"Error updating process data: {e}")
-            self.system_data['processes'] = 0
-    
-    def _update_system_info(self, stats, jt=None):
-        """Update system information from jetson-stats"""
-        try:
-            # Uptime - handle datetime.timedelta object
-            if 'uptime' in stats:
-                uptime_obj = stats['uptime']
-                if hasattr(uptime_obj, 'total_seconds'):  # timedelta object
-                    total_seconds = int(uptime_obj.total_seconds())
-                    hours = total_seconds // 3600
-                    minutes = (total_seconds % 3600) // 60
-                    seconds = total_seconds % 60
-                    self.system_data['uptime'] = f"{hours}:{minutes:02d}:{seconds:02d}"
-                else:
-                    # Fallback to string conversion
-                    uptime_str = str(uptime_obj)
-                    if '.' in uptime_str:
-                        uptime_str = uptime_str.split('.')[0]
-                    self.system_data['uptime'] = uptime_str
-            
-            # NVP Model
-            if 'nvp model' in stats:
-                self.system_data['nvp_model'] = str(stats['nvp model'])
-            
-            # Jetson model - try to get from jtop board information
-            jetson_model = 'Jetson Device'  # Default
-            jetson_module = 'Unknown Module'  # Default for module
-            jetpack_version = 'Unknown'  # Default for JetPack version
-            
-            if jt and hasattr(jt, 'board') and jt.board:
-                try:
-                    # Get model from jtop.board['hardware']['Model']
-                    if 'hardware' in jt.board and 'Model' in jt.board['hardware']:
-                        jetson_model = jt.board['hardware']['Model']
-                        logger.debug(f"Got Jetson model from jtop: {jetson_model}")
-                    
-                    # Get module from jtop.board['hardware']['Module'] separately
-                    if 'hardware' in jt.board and 'Module' in jt.board['hardware']:
-                        jetson_module = jt.board['hardware']['Module']
-                        logger.debug(f"Got Jetson module from jtop: {jetson_module}")
-                    
-                    # Get JetPack version from jtop.board['hardware']['Jetpack']
-                    if 'hardware' in jt.board and 'Jetpack' in jt.board['hardware']:
-                        jetpack_version = jt.board['hardware']['Jetpack']
-                        logger.debug(f"Got JetPack version from jtop: {jetpack_version}")
-                        
-                except Exception as board_e:
-                    logger.debug(f"Error accessing jtop board info: {board_e}")
-            
-            self.system_data['jetson_model'] = jetson_model
-            self.system_data['jetson_module'] = jetson_module
-            self.system_data['jetpack_version'] = jetpack_version
-            
-            # Get kernel version
-            kernel_version = 'Unknown'
-            try:
-                # Try to get from jtop board platform info first
-                if jt and hasattr(jt, 'board') and jt.board:
-                    if 'platform' in jt.board and 'Release' in jt.board['platform']:
-                        kernel_version = jt.board['platform']['Release']
-                        logger.debug(f"Got kernel version from jtop platform: {kernel_version}")
-                    else:
-                        # Fallback to system uname
-                        import platform
-                        kernel_version = platform.release()
-                        logger.debug(f"Got kernel version from platform.release(): {kernel_version}")
-                else:
-                    # Fallback to system uname
-                    import platform
-                    kernel_version = platform.release()
-                    logger.debug(f"Got kernel version from platform.release(): {kernel_version}")
-            except Exception as kernel_e:
-                logger.debug(f"Error getting kernel version: {kernel_e}")
-                # Final fallback - try reading from /proc/version
-                try:
-                    with open('/proc/version', 'r') as f:
-                        version_line = f.read().strip()
-                        # Extract kernel version (usually the third word)
-                        parts = version_line.split()
-                        if len(parts) >= 3:
-                            kernel_version = parts[2]
-                except Exception:
-                    kernel_version = 'Unknown'
-            
-            self.system_data['kernel_version'] = kernel_version
-            
-            # Get jetson_clocks status
-            jetson_clocks_status = False
-            try:
-                if jt and hasattr(jt, 'jetson_clocks'):
-                    jetson_clocks_status = bool(jt.jetson_clocks)
-                    logger.debug(f"Got jetson_clocks status from jtop: {jetson_clocks_status}")
-            except Exception as clocks_e:
-                logger.debug(f"Error getting jetson_clocks status: {clocks_e}")
-            
-            self.system_data['jetson_clocks'] = jetson_clocks_status
-                    
-        except Exception as e:
-            logger.debug(f"Error updating system info: {e}")
-    
-    def _update_system_logs(self):
-        """Update system logs data"""
-        try:
-            import subprocess
-            from datetime import datetime
-            
-            logs = []
-            
-            # Try to get recent system logs from journalctl first
-            try:
-                result = subprocess.run(
-                    ['journalctl', '--no-pager', '-n', '20', '--since', '1 hour ago'],
-                    capture_output=True, text=True, timeout=5
-                )
-                if result.returncode == 0:
-                    log_lines = result.stdout.strip().split('\n')
-                    for line in log_lines:
-                        if line.strip():
-                            logs.append(line.strip())
-            except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-                # Fallback to reading syslog directly
-                try:
-                    with open('/var/log/syslog', 'r') as f:
-                        # Read last 20 lines
-                        lines = f.readlines()
-                        for line in lines[-20:]:
-                            if line.strip():
-                                logs.append(line.strip())
-                except (FileNotFoundError, PermissionError):
-                    # Fallback to dmesg
-                    try:
-                        result = subprocess.run(
-                            ['dmesg', '-T', '--level=err,warn,info'], 
-                            capture_output=True, text=True, timeout=5
-                        )
-                        if result.returncode == 0:
-                            log_lines = result.stdout.strip().split('\n')
-                            for line in log_lines[-10:]:  # Last 10 dmesg entries
-                                if line.strip():
-                                    logs.append(line.strip())
-                    except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-                        logs.append("System logs unavailable")
-            
-            # Update system logs data
-            self.system_data['system_logs'].update({
-                'recent_logs': logs[-20:],  # Keep last 20 logs
-                'log_count': len(logs),
-                'last_updated': datetime.now().isoformat()
-            })
-                    
-        except Exception as e:
-            logger.debug(f"Error updating system logs: {e}")
-            self.system_data['system_logs'].update({
-                'recent_logs': [f"Error reading logs: {str(e)}"],
-                'log_count': 1,
-                'last_updated': datetime.now().isoformat()
-            })
-    
-    def get_system_status(self):
-        """Get current system status with sanitized data"""
-        return sanitize_data(dict(self.system_data))
-    
-    def get_gpu_status(self):
-        """Get detailed GPU status"""
-        return self.system_data['gpu']
-    
-    def get_cpu_cores_usage(self):
-        """Get per-core CPU usage from jetson-stats singleton"""
-        try:
-            jt = self.jtop_manager.get_jtop()
-            stats = jt.stats
-            cores_usage = []
-            
-            # Look for individual CPU cores (CPU1, CPU2, etc.)
-            cpu_keys = [key for key in stats.keys() if key.startswith('CPU') and key[3:].isdigit()]
-            cpu_keys.sort()  # Sort to get consistent order
-            
-            for key in cpu_keys:
-                if isinstance(stats[key], (int, float)):
-                    cores_usage.append(safe_float(stats[key]))
-            
-            return cores_usage if cores_usage else [self.system_data['cpu']['usage']]
-                
-        except Exception as e:
-            logger.debug(f"Error getting CPU cores usage: {e}")
-            return [self.system_data['cpu']['usage']]
-    
-    def get_process_list(self, limit=10):
-        """Get top processes - not available from jetson-stats, return empty list"""
-        logger.warning("Process list not available in jetson-stats only mode")
-        return []
-    
-    def get_network_connections(self):
-        """Get network connections - not available from jetson-stats, return empty list"""
-        logger.warning("Network connections not available in jetson-stats only mode")
-        return []
-    
-    def get_jetson_info(self):
-        """Get Jetson-specific information from jetson-stats singleton"""
-        info = {
-            'nvp_model': self.system_data.get('nvp_model', 'Unknown'),
-            'jetson_model': self.system_data.get('jetson_model', 'Unknown'),
-            'jetson_module': self.system_data.get('jetson_module', 'Unknown'),
-            'jetpack_version': self.system_data.get('jetpack_version', 'Unknown'),
-            'kernel_version': self.system_data.get('kernel_version', 'Unknown'),
-            'board_name': 'Unknown'
-        }
-        
-        # Try to get additional info from jetson-stats singleton
-        try:
-            jt = self.jtop_manager.get_jtop()
-            stats = jt.stats
-            
-            # Board information
-            if 'board' in stats:
-                board_info = stats['board']
-                if isinstance(board_info, dict):
-                    info['board_name'] = str(board_info.get('model', board_info.get('name', 'Unknown')))
-                
-        except Exception as e:
-            logger.debug(f"Error getting Jetson info: {e}")
-        
-        return info
-    
-    def restart_jtop_connection(self):
-        """Restart the jtop singleton connection after service installation"""
-        logger.info("Restarting jtop connection...")
-        
-        # Clear any existing error state
-        self.system_data['error'] = None
-        
-        # Use the manager's restart method
-        try:
-            self.jtop_manager.restart()
-            logger.info("jtop connection restarted successfully")
-            
-            # Test the connection
-            self._force_jtop_reconnection()
-        except Exception as e:
-            logger.error(f"Failed to restart jtop connection: {e}")
+                jt.close()
+            except Exception:
+                pass
 
-    def _force_jtop_reconnection(self):
-        """Test and update system data using the singleton jtop connection"""
-        try:
-            # Set up signal handling for this specific operation
-            old_handler = signal.signal(signal.SIGPIPE, signal.SIG_IGN)
-            
+    def _run(self):
+        delay = RECONNECT_MIN_DELAY
+        while self._running:
             try:
-                # Use the singleton jtop connection
-                jt = self.jtop_manager.get_jtop()
-                
-                # Test the connection by reading some basic stats
-                stats = jt.stats
-                
-                # If we can read stats, the connection is working
-                if stats:
-                    # Update our system data with the fresh connection
-                    self._update_cpu_data(stats)
-                    self._update_memory_data(stats)
-                    self._update_gpu_data(stats)
-                    self._update_disk_data(stats)
-                    self._update_network_data(stats)
-                    self._update_fan_data(stats)
-                    self._update_process_data()
-                    self._update_system_logs()
-                    self._update_system_info(stats, jt)
-                    self.system_data['last_updated'] = datetime.now().isoformat()
-                    self.system_data['error'] = None
-                    
-                    logger.info("Successfully tested jtop singleton connection")
-                    return True
-                else:
-                    logger.warning("jtop connection established but no stats available")
-                    return False
+                jt = jtop(interval=JTOP_INTERVAL)
+                jt.start()
+                with self._jt_lock:
+                    self._jt = jt
+                self._reconnect_requested.clear()
+                logger.info("Connected to jtop.service")
+                delay = RECONNECT_MIN_DELAY
+
+                while self._running and not self._reconnect_requested.is_set() and jt.ok():
+                    self._update(jt)
+                    self._connected.set()
+            except Exception as exc:
+                error = _classify_error(exc)
+                with self._data_lock:
+                    self.system_data['error'] = error
+                logger.warning(f"jtop connection problem: {exc}")
             finally:
-                # Restore the original signal handler
-                signal.signal(signal.SIGPIPE, old_handler)
-                        
-        except (BrokenPipeError, ConnectionResetError) as e:
-            logger.warning(f"Socket error during force reconnection: {e}")
-            return False
-        except Exception as e:
-            logger.warning(f"Force reconnection failed: {e}")
-            return False
+                self._close()
 
-    def force_restart_monitoring(self):
-        """Completely restart the monitoring process to recover from persistent errors"""
-        logger.info("Force restarting monitoring process...")
-        
-        # Stop current monitoring
-        was_monitoring = self.monitoring
-        self.stop_monitoring()  # This also closes the jtop connection
-        
-        # Wait for thread to fully stop
-        time.sleep(3)
-        
-        # Clear error state
-        self.system_data['error'] = None
-        
-        # Wait additional time for jtop service to be fully ready
-        time.sleep(5)
-        
-        # Restart the jtop connection through the manager
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                # Use the manager's restart functionality
-                if self.jtop_manager.restart():
-                    logger.info(f"jtop connection verified on attempt {attempt + 1}")
+            if not self._running:
+                break
+            # Back off before reconnecting (a reconnect request skips the wait)
+            self._reconnect_requested.wait(delay)
+            self._reconnect_requested.clear()
+            delay = min(delay * 2, RECONNECT_MAX_DELAY)
+
+    # ------------------------------------------------------------------ sampling
+
+    def _update(self, jt):
+        snapshot = {
+            'cpu': self._read_cpu(jt),
+            'memory': self._read_memory(jt),
+            'gpu': self._read_gpu(jt),
+            'disk': self._read_disk(jt),
+            'network': self._read_network(),
+            'fan': self._read_fan(jt),
+            'processes': len(psutil.pids()),
+            'uptime': _format_uptime(jt.uptime),
+            'nvp_model': jt.nvpmodel.name if jt.nvpmodel is not None else 'N/A',
+            'jetson_clocks': bool(jt.jetson_clocks) if jt.jetson_clocks is not None else False,
+            'error': None,
+            'last_updated': datetime.now().isoformat(),
+        }
+
+        hardware = jt.board.get('hardware', {}) if jt.board else {}
+        plat = jt.board.get('platform', {}) if jt.board else {}
+        snapshot['jetson_model'] = hardware.get('Model', 'Jetson Device')
+        snapshot['jetson_module'] = hardware.get('Module', 'Unknown Module')
+        snapshot['jetpack_version'] = hardware.get('Jetpack', 'Unknown')
+        snapshot['kernel_version'] = plat.get('Release') or platform.release() or 'Unknown'
+
+        if time.monotonic() - self._last_log_refresh > LOG_REFRESH_INTERVAL:
+            self._last_log_refresh = time.monotonic()
+            snapshot['system_logs'] = self._read_system_logs()
+
+        with self._data_lock:
+            self.system_data.update(snapshot)
+
+    @staticmethod
+    def _temp(jt, *names):
+        for name in names:
+            sensor = jt.temperature.get(name)
+            if sensor and sensor.get('online', True) and sensor.get('temp', -256) > -100:
+                return _num(sensor['temp'])
+        return 0
+
+    def _read_cpu(self, jt):
+        cores = []
+        freqs = []
+        for core in jt.cpu.get('cpu', []):
+            if core.get('online'):
+                cores.append(_num(100 - core.get('idle', 100)))
+                cur = core.get('freq', {}).get('cur')
+                if cur:
+                    freqs.append(cur)
+            else:
+                cores.append(0)
+        total = jt.cpu.get('total', {})
+        usage = _num(100 - total['idle']) if 'idle' in total else (_num(sum(cores) / len(cores)) if cores else 0)
+        return {
+            'usage': usage,
+            'frequency': _num(max(freqs) / 1000, ndigits=0) if freqs else 0,   # kHz -> MHz
+            'temperature': self._temp(jt, 'cpu', 'tj'),
+            'cores': cores,
+            'core_count': len(cores),
+        }
+
+    @staticmethod
+    def _read_memory(jt):
+        ram = jt.memory.get('RAM', {})
+        kb = 1024
+        total = int(ram.get('tot', 0)) * kb
+        used = int(ram.get('used', 0)) * kb
+        free = int(ram.get('free', 0)) * kb
+        cached = int(ram.get('cached', 0)) * kb
+        buffers = int(ram.get('buffers', 0)) * kb
+        shared = int(ram.get('shared', 0)) * kb
+        available = max(total - used, 0)
+        gb = 1024 ** 3
+        swap = jt.memory.get('SWAP', {})
+        return {
+            'total': total,
+            'used': used,
+            'available': available,
+            'free': free,
+            'percent': _num(used / total * 100, ndigits=2) if total else 0,
+            'swap_total': int(swap.get('tot', 0)) * kb,
+            'swap_used': int(swap.get('used', 0)) * kb,
+            'detailed': {
+                'total_gb': round(total / gb, 3),
+                'used_gb': round(used / gb, 3),
+                'available_gb': round(available / gb, 3),
+                'cached': cached,
+                'cached_gb': round(cached / gb, 3),
+                'buffers': buffers,
+                'buffers_gb': round(buffers / gb, 3),
+                'shared': shared,
+                'shared_gb': round(shared / gb, 3),
+                'free': free,
+                'free_gb': round(free / gb, 3),
+                'timestamp': time.time(),
+            },
+        }
+
+    def _read_gpu(self, jt):
+        gpu = next(iter(jt.gpu.values()), None) if jt.gpu else None
+        ram = jt.memory.get('RAM', {})
+        data = {
+            'usage': 0,
+            'temperature': self._temp(jt, 'gpu'),
+            'frequency': 0,
+            # Jetson GPUs share system RAM; jtop reports GPU-shared memory as RAM['shared']
+            'memory_used': int(ram.get('shared', 0)) * 1024,
+            'memory_total': int(ram.get('tot', 0)) * 1024,
+            'power': 0,
+            'name': 'Jetson GPU',
+        }
+        if gpu:
+            data['usage'] = _num(gpu.get('status', {}).get('load', 0))
+            data['frequency'] = _num(gpu.get('freq', {}).get('cur', 0) / 1000, ndigits=0)  # kHz -> MHz
+        if jt.power:
+            for name, rail in jt.power.get('rail', {}).items():
+                if 'GPU' in name.upper():
+                    data['power'] = _num(rail.get('power', 0) / 1000, ndigits=2)  # mW -> W
                     break
-                else:
-                    raise Exception("Manager restart returned False")
-            except Exception as e:
-                logger.warning(f"jtop connection test failed (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2)
-                else:
-                    logger.error("Failed to establish jtop connection after all retries")
-                    return False
-        
-        # Restart monitoring if it was running before
-        if was_monitoring:
-            self.start_monitoring()
-            logger.info("Monitoring process restarted successfully")
-            
-            # Give monitoring time to stabilize
-            time.sleep(2)
-            
-            # Test the connection one more time
-            try:
-                self._update_system_data()
-                logger.info("Force restart completed successfully")
-                return True
-            except Exception as e:
-                logger.error(f"Force restart test failed: {e}")
-                return False
-        else:
-            logger.info("Monitoring was not running, just cleared error state")
-            return True
+        return data
+
+    @staticmethod
+    def _read_disk(jt):
+        disk = jt.disk or {}
+        scale = {'k': 1024, 'M': 1024 ** 2, 'G': 1024 ** 3, 'T': 1024 ** 4}.get(disk.get('unit', 'G'), 1024 ** 3)
+        total = int(disk.get('total', 0) * scale)
+        used = int(disk.get('used', 0) * scale)
+        free = int(disk.get('available', 0) * scale)
+        return {
+            'total': total,
+            'used': used,
+            'free': free,
+            'percent': _num(used / total * 100) if total else 0,
+        }
+
+    @staticmethod
+    def _read_network():
+        # jtop exposes interface addresses but not byte counters
+        io = psutil.net_io_counters()
+        return {'bytes_sent': io.bytes_sent, 'bytes_recv': io.bytes_recv}
+
+    def _read_fan(self, jt):
+        fan = {'speed': 0, 'rpm': 0, 'profile': None}
+        if jt.fan:
+            first = next(iter(jt.fan.values()))
+            if first.get('speed'):
+                fan['speed'] = _num(first['speed'][0])
+            if first.get('rpm'):
+                fan['rpm'] = int(first['rpm'][0])
+            fan['profile'] = first.get('profile')
+        fan['cpu_temp'] = self._temp(jt, 'cpu', 'tj')
+        fan['gpu_temp'] = self._temp(jt, 'gpu')
+        fan['total_power'] = _num(jt.power['tot'].get('power', 0) / 1000, ndigits=2) if jt.power else 0  # mW -> W
+        return fan
+
+    @staticmethod
+    def _read_system_logs():
+        logs = []
+        try:
+            result = subprocess.run(
+                ['journalctl', '--no-pager', '-n', '20', '--since', '1 hour ago'],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                logs = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        except (subprocess.SubprocessError, FileNotFoundError):
+            logs = ['System logs unavailable']
+        return {'recent_logs': logs[-20:], 'log_count': len(logs), 'last_updated': datetime.now().isoformat()}
+
+    # ------------------------------------------------------------------ read API
+
+    def get_system_status(self):
+        with self._data_lock:
+            return _sanitize(dict(self.system_data))
+
     def get_system_data(self):
-        return self.system_data
-    
+        return self.get_system_status()
+
+    def get_gpu_status(self):
+        with self._data_lock:
+            return dict(self.system_data['gpu'])
+
     def get_system_logs(self):
-        """Get current system logs data"""
-        return sanitize_data(self.system_data['system_logs'])
+        with self._data_lock:
+            if not self.system_data['system_logs']['last_updated']:
+                self.system_data['system_logs'] = self._read_system_logs()
+            return _sanitize(self.system_data['system_logs'])
+
+    def is_connected(self):
+        return self._connected.is_set()
+
+    def get_board_info(self):
+        with self._data_lock:
+            return {
+                'Model': self.system_data['jetson_model'],
+                'Module': self.system_data['jetson_module'],
+                'Jetpack': self.system_data['jetpack_version'],
+            }
+
+    def reconnect(self, timeout=15.0):
+        """Drop the current jtop client and wait for a fresh connection."""
+        logger.info("Reconnecting to jtop.service")
+        self._connected.clear()
+        with self._data_lock:
+            self.system_data['error'] = None
+        if not self._running:
+            self.start_monitoring()
+        self._reconnect_requested.set()
+        return self._connected.wait(timeout)
+
+    # Backwards-compatible alias used by the service install/restart endpoints
+    def force_restart_monitoring(self):
+        return self.reconnect()
+
+    # ------------------------------------------------------------------ controls
+
+    def _require_jtop(self):
+        jt = self._jt
+        if jt is None or not self._connected.is_set():
+            raise RuntimeError('jtop.service is not connected')
+        return jt
+
+    @staticmethod
+    def _wait_for(predicate, timeout=CONTROL_TIMEOUT):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.25)
+        return predicate()
+
+    def get_power_modes(self):
+        with self._jt_lock:
+            jt = self._require_jtop()
+            if jt.nvpmodel is None:
+                return {'available_modes': [], 'current_mode': 'N/A', 'default_mode': None}
+            default = jt.nvpmodel.get_default() or {}
+            return {
+                'available_modes': list(jt.nvpmodel.models),
+                'current_mode': jt.nvpmodel.name,
+                'default_mode': default.get('name'),
+            }
+
+    def set_power_mode(self, mode):
+        with self._jt_lock:
+            jt = self._require_jtop()
+            if jt.nvpmodel is None:
+                raise RuntimeError('nvpmodel is not available on this board')
+            if mode not in jt.nvpmodel.models:
+                raise ValueError(f"Invalid power mode '{mode}'. Available: {', '.join(jt.nvpmodel.models)}")
+            jt.nvpmodel = mode
+        if not self._wait_for(lambda: self._jt is not None and self._jt.nvpmodel.name == mode):
+            raise RuntimeError(f'Power mode did not switch to {mode} (it may require a reboot)')
+        with self._data_lock:
+            self.system_data['nvp_model'] = mode
+        return mode
+
+    def set_jetson_clocks(self, enabled):
+        enabled = bool(enabled)
+        with self._jt_lock:
+            jt = self._require_jtop()
+            if jt.jetson_clocks is None:
+                raise RuntimeError('jetson_clocks is not available on this board')
+            jt.jetson_clocks = enabled
+        if not self._wait_for(lambda: self._jt is not None and bool(self._jt.jetson_clocks) == enabled):
+            raise RuntimeError(f"jetson_clocks did not turn {'on' if enabled else 'off'}")
+        with self._data_lock:
+            self.system_data['jetson_clocks'] = enabled
+        return enabled
+
+    def get_fan_modes(self):
+        with self._jt_lock:
+            jt = self._require_jtop()
+            if not jt.fan:
+                return {'available_modes': [], 'current_mode': None}
+            name = next(iter(jt.fan.keys()))
+            profiles = [p for p in jt.fan.all_profiles(name) if p not in FAN_HIDDEN_PROFILES]
+            return {'available_modes': profiles, 'current_mode': jt.fan.get_profile(name)}
+
+    def set_fan_mode(self, mode):
+        with self._jt_lock:
+            jt = self._require_jtop()
+            if not jt.fan:
+                raise RuntimeError('No controllable fan found on this board')
+            name = next(iter(jt.fan.keys()))
+            jt.fan.set_profile(name, mode)  # raises JtopException on unknown profile
+        if not self._wait_for(lambda: self._jt is not None and self._jt.fan.get_profile(name) == mode):
+            raise RuntimeError(f'Fan profile did not switch to {mode}')
+        return mode

@@ -5,13 +5,17 @@ export interface CPUData {
   frequency: number;
   temperature: number;
   cores: number[];
+  core_count?: number;
   load_avg?: number;
 }
 
 export interface GPUData {
   usage: number;
   temperature: number;
-  power?: number;
+  power?: number;          // W (GPU rail, if the board exposes one)
+  frequency?: number;      // MHz
+  memory_used?: number;    // bytes (shared with system RAM on Jetson)
+  memory_total?: number;   // bytes
   name?: string;
 }
 
@@ -52,7 +56,8 @@ export interface FanData {
   rpm: number;
   cpu_temp: number;
   gpu_temp: number;
-  total_power: number;
+  total_power: number;     // W
+  profile?: string | null; // nvfancontrol profile, e.g. 'quiet' | 'cool'
 }
 
 export interface DiskData {

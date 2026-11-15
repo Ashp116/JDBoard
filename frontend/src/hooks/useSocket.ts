@@ -10,28 +10,10 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
   const [error, setError] = useState<string | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Automatically determine the best server path
-  const getServerPath = () => {
-    if (serverPath) return serverPath;
-    
-    // Get current host from browser location
-    const protocol = window.location.protocol;
-    const host = window.location.hostname;
-    const port = 5000; // Backend port
-    
-    // Use the same host but different port for backend
-    const isProxied = (window as any).isProxied
-    const backendUrl = isProxied ? `${protocol}//${host}` : `${protocol}//${host}:${port}`;
-    
-    console.log(`Auto-detected backend URL: ${backendUrl}`);
-    return backendUrl;
-  };
-
   useEffect(() => {
-    const finalServerPath = getServerPath();
-    const isProxied = (window as any).isProxied;
-    
-    console.log('Connecting to backend:', finalServerPath, 'Proxied:', isProxied);
+    // Same origin; the socket lives under /api/socket.io (Vite dev proxy or nginx)
+    const finalServerPath = serverPath || window.location.origin;
+    console.log('Connecting to backend:', finalServerPath);
     
     // Create socket connection
     const socketOptions: any = {
@@ -39,7 +21,7 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
       reconnection: true,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: Infinity, // keep retrying; the UI shows the disconnected state meanwhile
       timeout: 15000,
       forceNew: false,
       transports: ['polling', 'websocket'],
@@ -47,10 +29,7 @@ export const useSocket = (serverPath?: string): UseSocketReturn => {
       rememberUpgrade: true
     };
     
-    // Set the correct path based on proxy status
-    if (isProxied) {
-      socketOptions.path = '/api/socket.io';
-    }
+    socketOptions.path = '/api/socket.io';
     
     const newSocket = io(finalServerPath, socketOptions);
 
