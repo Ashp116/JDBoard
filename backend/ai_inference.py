@@ -13,6 +13,8 @@ import cv2
 import numpy as np
 import shutil
 import uuid
+import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 import hashlib
@@ -190,6 +192,49 @@ class CUDAMemoryManager:
             return self.get_gpu_memory_info()
         
         return mem_info
+
+
+# TensorRT build settings. FP16 engines need much less memory to build (and run
+# faster on Jetson) than FP32; the workspace cap (GB) limits the builder's scratch
+# memory so large models fit on 8 GB boards.
+TRT_EXPORT_HALF = True
+TRT_WORKSPACE_GB = 2
+
+# `yolo export` subprocesses currently running, so they can be stopped on
+# cancel and when the backend shuts down (otherwise they keep running orphaned).
+_ACTIVE_EXPORTS = set()
+_ACTIVE_EXPORTS_LOCK = threading.Lock()
+
+
+def log_failure(context, error):
+    """Log an exception as an error - or as info when it is a user cancel."""
+    if 'cancelled by user' in str(error).lower():
+        logger.info(f"{context}: cancelled by user")
+    else:
+        logger.error(f"{context}: {error}")
+
+
+def stop_process(process, grace_seconds=10):
+    """Ask a subprocess to stop, and force-kill it if it doesn't within the grace period."""
+    if process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    except OSError:
+        pass
+
+
+def terminate_active_exports():
+    """Stop every running TensorRT export (called on backend shutdown)."""
+    with _ACTIVE_EXPORTS_LOCK:
+        processes = list(_ACTIVE_EXPORTS)
+    for process in processes:
+        logger.info(f"Stopping TensorRT export process {process.pid}")
+        stop_process(process, grace_seconds=5)
 
 
 class CustomScriptLoader:
@@ -487,6 +532,64 @@ class AIModelManager:
         }
         return framework_map.get(file_extension, 'unknown')
     
+    def _remove_custom_script(self, script_path):
+        """Delete an uploaded custom script, its compiled cache and loader cache entry."""
+        script = Path(script_path)
+        # Only scripts JDBoard stored itself - never the bundled template or arbitrary paths
+        if script.resolve().parent != self.models_dir.resolve():
+            return
+        try:
+            if script.exists():
+                script.unlink()
+                logger.info(f"Deleted custom script: {script.name}")
+            for pyc in (script.parent / '__pycache__').glob(script.stem + '.*.pyc'):
+                pyc.unlink()
+        except OSError as e:
+            logger.warning(f"Could not delete custom script {script}: {e}")
+        self.script_loader.loaded_scripts.pop(str(script.absolute()), None)
+
+    def cleanup_orphaned_files(self):
+        """Remove files left behind by downloads/uploads that never finished
+        (backend stopped or crashed mid-way) and that no registered model uses.
+
+        Only touches files with the names JDBoard itself generates:
+          models/downloads/*.pt|.pth|.onnx|.engine|.trt  (downloads + conversion outputs)
+          models/<32 hex>_*                              (uploaded models and scripts)
+          models/__pycache__/<32 hex>_*.pyc              (compiled custom scripts)
+        """
+        import re
+        referenced = set()
+        for info in self.models_registry.values():
+            for key in ('file_path', 'custom_script_path'):
+                if info.get(key):
+                    referenced.add(Path(info[key]).resolve())
+        candidates = []
+        downloads = self.models_dir / 'downloads'
+        if downloads.is_dir():
+            candidates += [f for f in downloads.iterdir()
+                           if f.is_file() and f.suffix in ('.pt', '.pth', '.onnx', '.engine', '.trt')]
+        upload_name = re.compile(r'^[0-9a-f]{32}_')
+        candidates += [f for f in self.models_dir.iterdir() if f.is_file() and upload_name.match(f.name)]
+        removed = 0
+        for f in candidates:
+            if f.resolve() not in referenced:
+                try:
+                    f.unlink()
+                    removed += 1
+                    logger.info(f"Removed orphaned file: {f.relative_to(self.models_dir)}")
+                except OSError as e:
+                    logger.warning(f"Could not remove orphaned file {f}: {e}")
+        pycache = self.models_dir / '__pycache__'
+        if pycache.is_dir():
+            live_scripts = {p.stem for p in referenced}
+            for pyc in pycache.glob('*.pyc'):
+                if upload_name.match(pyc.name) and pyc.name.split('.')[0] not in live_scripts:
+                    pyc.unlink()
+                    removed += 1
+        if removed:
+            logger.info(f"Startup cleanup removed {removed} orphaned file(s)")
+        return removed
+
     def _warn_missing_file(self, model_id, model_info):
         """Log a registered model whose file is gone - once, not on every listing."""
         warned = self.__dict__.setdefault('_missing_file_warned', set())
@@ -1351,6 +1454,11 @@ class AIModelManager:
         # Remove from registry
         del self.models_registry[model_id]
         self._save_registry()
+
+        # Remove its custom script too, unless another model still uses it
+        script = model_info.get('custom_script_path')
+        if script and not any(m.get('custom_script_path') == script for m in self.models_registry.values()):
+            self._remove_custom_script(script)
         
         logger.info(f"Model {model_id} deleted from registry")
         return True
@@ -1631,7 +1739,7 @@ class AIModelManager:
             }
             
         except Exception as e:
-            logger.error(f"Error downloading YOLO model: {str(e)}")
+            log_failure(f"Error downloading YOLO model", e)
             # Clean up this download's files: the source and anything converted
             # from it (.onnx, partial .engine, ...) - they all share its unique stem.
             if 'download_path' in locals():  # not set if it failed very early
@@ -1785,7 +1893,7 @@ class AIModelManager:
             return converted_path, framework
             
         except Exception as e:
-            logger.error(f"Conversion to {target_format} failed: {str(e)}")
+            log_failure(f"Conversion to {target_format} failed", e)
             # If conversion fails, keep original file and raise error
             raise RuntimeError(f"Failed to convert model to {target_format}: {str(e)}")
     
@@ -1875,7 +1983,7 @@ class AIModelManager:
                 update_progress(85, f'ONNX: Conversion cancelled')
             else:
                 update_progress(85, f'ONNX: Conversion failed - {str(e)}')
-            logger.error(f"ONNX conversion failed: {str(e)}")
+            log_failure(f"ONNX conversion failed", e)
             raise
     
     def _convert_to_tensorrt(self, source_path, progress_callback=None, cancel_check_callback=None):
@@ -1928,7 +2036,8 @@ class AIModelManager:
                 'format=engine',
                 'device=0',
                 'verbose=True',
-                'half=False'
+                f'quantize={16 if TRT_EXPORT_HALF else 32}',  # FP16 / FP32 engine
+                f'workspace={TRT_WORKSPACE_GB}'
             ]
             
             # Start subprocess with real-time output capture
@@ -1977,11 +2086,31 @@ class AIModelManager:
             output_thread = threading.Thread(target=monitor_output, daemon=True)
             output_thread.start()
             
-            # Wait for process to complete
-            return_code = process.wait()
+            # Wait for the build, checking for cancel every second: the engine
+            # build can run for minutes without printing anything, so checking
+            # only on output lines (monitor_output) is not enough.
+            with _ACTIVE_EXPORTS_LOCK:
+                _ACTIVE_EXPORTS.add(process)
+            cancelled = False
+            try:
+                while True:
+                    try:
+                        return_code = process.wait(timeout=1)
+                        break
+                    except subprocess.TimeoutExpired:
+                        if cancel_check_callback and cancel_check_callback():
+                            cancelled = True
+                            logger.info("Stopping TensorRT export (download cancelled)")
+                            stop_process(process)
+            finally:
+                with _ACTIVE_EXPORTS_LOCK:
+                    _ACTIVE_EXPORTS.discard(process)
             
             # Wait for output thread to finish
             output_thread.join(timeout=2.0)
+
+            if cancelled or (cancel_check_callback and cancel_check_callback()):
+                raise Exception("Download cancelled by user")
             
             conversion_time = time.time() - start_time
             
@@ -2023,7 +2152,7 @@ class AIModelManager:
                 update_progress(85, 'TensorRT conversion cancelled')
                 raise e
             
-            logger.error(f"TensorRT conversion failed: {str(e)}")
+            log_failure(f"TensorRT conversion failed", e)
             raise RuntimeError(f"TensorRT conversion failed: {str(e)}")
 
                 
@@ -2043,5 +2172,5 @@ class AIModelManager:
                 update_progress(85, 'TensorRT conversion cancelled')
                 raise e
             
-            logger.error(f"TensorRT conversion failed: {str(e)}")
+            log_failure(f"TensorRT conversion failed", e)
             raise RuntimeError(f"TensorRT conversion failed: {str(e)}")

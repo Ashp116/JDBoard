@@ -21,7 +21,9 @@ from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 from system_monitor import SystemMonitor
-from ai_inference import AIModelManager
+from ai_inference import AIModelManager, terminate_active_exports, log_failure
+import atexit
+import signal
 from request_logger import RequestLogger
 from jtop import JtopException
 
@@ -989,6 +991,8 @@ def download_yolo_model():
     # Building a TensorRT engine for the large YOLO sizes needs more memory than
     # 8 GB boards have (YOLOv11x was OOM-killed after minutes on an Orin Nano 8GB),
     # so refuse up front instead of failing partway through.
+    # Measured on an Orin Nano 8GB: YOLOv11x ran out of memory both as FP32 (after
+    # ~2-4 min) and as FP16 with a 2 GB workspace (after ~10 min).
     if target_format == 'TensorRT':
         import re
         size_match = re.search(r'yolo\D*\d*([nsmlx])u?\.pt$', model_url.split('?')[0].lower())
@@ -1056,8 +1060,14 @@ def download_yolo_model():
                     cancel_check_callback=lambda: is_download_cancelled(download_id)
                 )
                 
-                # Check if cancelled before completion
+                # Cancelled just as it finished: the model is already registered,
+                # so remove it (and its files/script) to honor the cancel
                 if is_download_cancelled(download_id):
+                    try:
+                        ai_manager.delete_model(result['model_id'])
+                        logger.info(f"Removed {model_name}: download was cancelled as it completed")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Could not remove cancelled model {model_name}: {cleanup_error}")
                     cleanup_download(download_id)
                     return
                 
@@ -1073,7 +1083,7 @@ def download_yolo_model():
                 )
                 
             except Exception as e:
-                logger.error(f"Error downloading YOLO model: {str(e)}")
+                log_failure("Error downloading YOLO model", e)
                 # Clean up the uploaded custom script on error
                 if custom_script_path:
                     try:
@@ -3098,10 +3108,28 @@ def kill_process(pid):
             'error': str(e)
         }), 500
 
+def _shutdown(*_args):
+    """Stop running TensorRT builds with the backend instead of orphaning them."""
+    terminate_active_exports()
+
+def _handle_sigterm(signum, frame):
+    _shutdown()
+    raise SystemExit(0)
+
 if __name__ == '__main__':
     # Ensure directories exist
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs('../logs', exist_ok=True)
+
+    # Remove files left by downloads/uploads interrupted by a crash or restart
+    try:
+        ai_manager.cleanup_orphaned_files()
+    except Exception as e:
+        logger.warning(f"Startup cleanup failed: {e}")
+
+    # Ctrl+C raises KeyboardInterrupt (atexit runs); SIGTERM needs a handler
+    atexit.register(_shutdown)
+    signal.signal(signal.SIGTERM, _handle_sigterm)
     
     # Start background monitoring
     system_monitor.start_monitoring()
