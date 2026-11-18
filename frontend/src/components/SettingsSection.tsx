@@ -1016,8 +1016,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
           <SettingItem>
             <div>
-              <div className="label">Jetson Clocks</div>
-              <div className="description">{loading.jetsonClocks ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'Maximum performance mode'}</div>
+              <div className="label">Jetson Clocks{loading.jetsonClocks && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Toggle 
               $active={settings.jetsonClocks} 
@@ -1029,8 +1028,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
           <SettingItem>
             <div>
-              <div className="label">Power Mode</div>
-              <div className="description">{loading.powerMode ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'System power profile'}</div>
+              <div className="label">Power Mode{loading.powerMode && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Select 
               value={settings.powerMode}
@@ -1046,8 +1044,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
           <SettingItem>
             <div>
-              <div className="label">Fan Mode</div>
-              <div className="description">{loading.fanMode ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'Cooling fan control'}</div>
+              <div className="label">Fan Mode{loading.fanMode && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Select 
               value={settings.fanMode}
@@ -1071,31 +1068,20 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
           <SettingItem>
             <div>
-              <div className="label">Auto-start JDBoard</div>
-              <div className="description">
-                {loading.autostart
-                  ? <><i className="fas fa-spinner fa-spin"></i> Applying...</>
-                  : autostartInstalled === false
-                    ? 'Only available when installed as a service'
-                    : 'Start JDBoard on boot'}
-              </div>
+              <div className="label">Auto-start JDBoard{loading.autostart && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Toggle 
               $active={!!settings.autoStartDashboard && autostartInstalled !== false} 
               onClick={handleAutostartToggle}
               disabled={!autostartInstalled || loading.autostart}
+              title={autostartInstalled === false ? 'Only available when JDBoard is installed as a service' : undefined}
               style={{ opacity: !autostartInstalled || loading.autostart ? 0.6 : 1 }}
             />
           </SettingItem>
 
           <SettingItem>
             <div>
-              <div className="label">Update Interval</div>
-              <div className="description">
-                {loading.updateInterval
-                  ? <><i className="fas fa-spinner fa-spin"></i> Saving...</>
-                  : 'How often live system data is sent to the dashboard'}
-              </div>
+              <div className="label">Data Refresh Rate{loading.updateInterval && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Select 
               value={settings.updateInterval}
@@ -1110,12 +1096,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
           <SettingItem>
             <div>
-              <div className="label">Enable Notifications</div>
-              <div className="description">
-                {loading.enableNotifications
-                  ? <><i className="fas fa-spinner fa-spin"></i> Saving...</>
-                  : 'Pop-up messages when actions finish (errors always show)'}
-              </div>
+              <div className="label">Enable Notifications{loading.enableNotifications && <i className="fas fa-spinner fa-spin" style={{ marginLeft: '8px' }}></i>}</div>
             </div>
             <Toggle 
               $active={settings.enableNotifications} 
@@ -1135,7 +1116,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Restart System</div>
-              <div className="description">Reboot the Jetson device</div>
             </div>
             <Button 
               $variant="danger"
@@ -1151,7 +1131,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Shutdown System</div>
-              <div className="description">Power off the device</div>
             </div>
             <Button 
               $variant="danger" 
@@ -1175,7 +1154,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Clear Inference Logs</div>
-              <div className="description">Remove stored inference history</div>
             </div>
             <Button 
               $variant="danger"
@@ -1191,7 +1169,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Export Inference Data</div>
-              <div className="description">Download logs</div>
             </div>
             <DropdownContainer className="dropdown-container">
               <DropdownButton 
@@ -1249,7 +1226,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Inference Analytics</div>
-              <div className="description">View charts and performance metrics</div>
             </div>
             <Button 
               $variant="primary"
