@@ -23,6 +23,8 @@ interface ModelInfo {
   inference_handler?: 'default' | 'custom';
   script_status?: 'none' | 'pending' | 'active' | 'failed';
   script_error?: string | null;
+  script_error_line?: number | null;  // line in the script where it failed
+  script_traceback?: string | null;
   load_problem?: string | null;   // set when the backend can't load this model (missing framework)
   precision?: Precision;          // export / inference precision chosen at download
   imgsz?: number;
@@ -1678,22 +1680,149 @@ const CodeContent = styled.pre`
   }
 `;
 
+// The script editor is a transparent textarea over syntax-highlighted code;
+// both must use exactly the same font metrics so the caret lines up.
+const SCRIPT_LINE_HEIGHT = 20;   // px
+const SCRIPT_PAD = 16;           // px
+const SCRIPT_FONT_STYLE: React.CSSProperties = {
+  fontFamily: "'Courier New', monospace",
+  fontSize: '13px',
+  lineHeight: `${SCRIPT_LINE_HEIGHT}px`,
+  tabSize: 4,
+};
+const SCRIPT_HIGHLIGHT_STYLE: React.CSSProperties = {
+  ...SCRIPT_FONT_STYLE,
+  margin: 0,
+  padding: `${SCRIPT_PAD}px`,
+  background: 'transparent',
+  overflow: 'visible',
+  whiteSpace: 'pre',
+};
+
+const ScriptEditorFrame = styled.div`
+  display: flex;
+  height: 440px;
+  background: #1e1e1e;
+  overflow: hidden;
+`;
+
+const ScriptGutter = styled.div`
+  flex: 0 0 auto;
+  min-width: 44px;
+  overflow: hidden;
+  padding: ${SCRIPT_PAD}px 8px ${SCRIPT_PAD}px 0;
+  border-right: 1px solid #333;
+  text-align: right;
+  color: #6e7681;
+  user-select: none;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: ${SCRIPT_LINE_HEIGHT}px;
+
+  .error {
+    color: #fff;
+    background: #b3261e;
+    border-radius: 2px;
+  }
+`;
+
+const ScriptEditorArea = styled.div`
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+
+  .layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .error-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: ${SCRIPT_LINE_HEIGHT}px;
+    background: rgba(255, 82, 82, 0.18);
+  }
+`;
+
 const ScriptEditor = styled.textarea`
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-height: 420px;
+  height: 100%;
   margin: 0;
-  padding: 16px;
+  padding: ${SCRIPT_PAD}px;
   border: none;
   outline: none;
-  resize: vertical;
+  resize: none;
   font-family: 'Courier New', monospace;
   font-size: 13px;
-  line-height: 1.5;
-  color: #d4d4d4;
-  background: #1e1e1e;
+  line-height: ${SCRIPT_LINE_HEIGHT}px;
+  tab-size: 4;
   white-space: pre;
   overflow: auto;
-  tab-size: 4;
+  background: transparent;
+  color: transparent;
+  caret-color: #ffffff;
+
+  &::selection {
+    background: rgba(118, 185, 0, 0.35);
+    color: transparent;
+  }
+`;
+
+const ScriptErrorPanel = styled.div`
+  margin-top: 10px;
+  border: 1px solid rgba(255, 82, 82, 0.5);
+  background: rgba(255, 82, 82, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #ff8a80;
+  font-size: 13px;
+
+  .message {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .message span {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  button {
+    background: #b3261e;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-right: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  summary {
+    margin-top: 8px;
+    cursor: pointer;
+    color: #ffb4ab;
+  }
+
+  pre {
+    margin: 6px 0 0;
+    padding: 8px;
+    max-height: 160px;
+    overflow: auto;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
 `;
 
 const ScriptInfoBanner = styled.div`
@@ -1957,8 +2086,13 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     draft: string;
     isCustom: boolean;
     error: string;
+    errorLine: number | null;
+    traceback: string;
     saving: boolean;
   } | null>(null);
+  const scriptEditorRef = useRef<HTMLTextAreaElement>(null);
+  const scriptLayerRef = useRef<HTMLDivElement>(null);
+  const scriptGutterRef = useRef<HTMLDivElement>(null);
   const [loadingScript, setLoadingScript] = useState(false);
   
   // Template viewing state
@@ -3149,7 +3283,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     });
   };
 
-  const handleEditScript = async (modelId: string, modelName: string, hasCustomScript: boolean) => {
+  const handleEditScript = async (modelId: string, modelName: string, hasCustomScript: boolean,
+                                  lastError?: { error?: string | null; line?: number | null; traceback?: string | null }) => {
     setLoadingScript(true);
     try {
       let content: string;
@@ -3164,7 +3299,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         content = await response.text();
       }
       setViewingScript({ modelId, modelName, scriptContent: content, draft: content,
-                         isCustom: hasCustomScript, error: '', saving: false });
+                         isCustom: hasCustomScript, saving: false,
+                         error: lastError?.error || '', errorLine: lastError?.line ?? null,
+                         traceback: lastError?.traceback || '' });
+      if (lastError?.line) scrollScriptToLine(lastError.line);
     } catch (error) {
       console.error('Error loading inference script:', error);
       addNotification({
@@ -3197,20 +3335,26 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       });
       const data = await response.json();
       if (!data.success) {
-        setViewingScript(prev => prev && { ...prev, saving: false, error: data.error || 'Could not save the script' });
+        setViewingScript(prev => prev && { ...prev, saving: false, error: data.error || 'Could not save the script',
+                                           errorLine: data.error_line ?? null, traceback: data.traceback || '' });
+        if (data.error_line) scrollScriptToLine(data.error_line);
+        return;
+      }
+      await loadModels();
+      if (data.data?.script_status === 'failed') {
+        // Saved, but it failed when the loaded model switched to it: keep the editor open with the error
+        setViewingScript(prev => prev && { ...prev, saving: false, isCustom: true, scriptContent: prev.draft,
+                                           error: `Saved, but the script failed to start (the default handler is used): ${data.data.script_error}`,
+                                           errorLine: data.data.script_error_line ?? null,
+                                           traceback: data.data.script_traceback || '' });
+        if (data.data.script_error_line) scrollScriptToLine(data.data.script_error_line);
         return;
       }
       setViewingScript(null);
-      await loadModels();
-      if (data.data?.script_status === 'failed') {
-        addNotification({ type: 'warning', title: 'Script Saved, But Not Running',
-                          message: `${modelName}: ${data.data.script_error} (using the default handler)` });
-      } else {
-        addNotification({ type: 'success', title: 'Script Saved',
-                          message: `${modelName} now uses your custom inference script.` });
-      }
+      addNotification({ type: 'success', title: 'Script Saved',
+                        message: `${modelName} now uses your custom inference script.` });
     } catch (error) {
-      setViewingScript(prev => prev && { ...prev, saving: false,
+      setViewingScript(prev => prev && { ...prev, saving: false, errorLine: null, traceback: '',
         error: `Could not save: ${error instanceof Error ? error.message : error}` });
     }
   };
@@ -3228,9 +3372,31 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       await loadModels();
       addNotification({ type: 'success', title: 'Script Reset', message: `${modelName} uses the default handler again.` });
     } catch (error) {
-      setViewingScript(prev => prev && { ...prev, saving: false,
+      setViewingScript(prev => prev && { ...prev, saving: false, errorLine: null, traceback: '',
         error: error instanceof Error ? error.message : String(error) });
     }
+  };
+
+  // The highlighted code and line numbers sit under the transparent textarea
+  // and follow its scroll position
+  const syncScriptScroll = () => {
+    const el = scriptEditorRef.current;
+    if (!el) return;
+    if (scriptLayerRef.current) {
+      scriptLayerRef.current.style.transform = `translate(${-el.scrollLeft}px, ${-el.scrollTop}px)`;
+    }
+    if (scriptGutterRef.current) {
+      scriptGutterRef.current.style.transform = `translateY(${-el.scrollTop}px)`;
+    }
+  };
+
+  const scrollScriptToLine = (line: number) => {
+    requestAnimationFrame(() => {
+      const el = scriptEditorRef.current;
+      if (!el) return;
+      el.scrollTop = Math.max(0, SCRIPT_PAD + (line - 1) * SCRIPT_LINE_HEIGHT - el.clientHeight / 3);
+      syncScriptScroll();
+    });
   };
 
   // Tab inserts 4 spaces instead of leaving the editor
@@ -3602,7 +3768,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               
               <div style={{ marginTop: '8px' }}>
                 <button
-                  onClick={() => handleEditScript(model.id, model.id, !!model.custom_script_path)}
+                  onClick={() => handleEditScript(model.id, model.id, !!model.custom_script_path,
+                    model.script_status === 'failed'
+                      ? { error: model.script_error, line: model.script_error_line, traceback: model.script_traceback }
+                      : undefined)}
                   disabled={loadingScript}
                   style={{
                     width: '100%',
@@ -4067,23 +4236,66 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   Copy
                 </CopyButton>
               </CodeViewerHeader>
-              <ScriptEditor
-                value={viewingScript.draft}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setViewingScript(prev => prev && { ...prev, draft: value, error: '' });
-                }}
-                onKeyDown={handleScriptKeyDown}
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-              />
+              <ScriptEditorFrame>
+                <ScriptGutter>
+                  <div ref={scriptGutterRef}>
+                    {viewingScript.draft.split('\n').map((_, i) => (
+                      <div key={i} className={viewingScript.errorLine === i + 1 ? 'error' : ''}>{i + 1}</div>
+                    ))}
+                  </div>
+                </ScriptGutter>
+                <ScriptEditorArea>
+                  <div ref={scriptLayerRef} className="layer" aria-hidden="true">
+                    {viewingScript.errorLine && (
+                      <div className="error-line"
+                           style={{ top: SCRIPT_PAD + (viewingScript.errorLine - 1) * SCRIPT_LINE_HEIGHT }} />
+                    )}
+                    <SyntaxHighlighter
+                      language="python"
+                      style={vscDarkPlus}
+                      customStyle={SCRIPT_HIGHLIGHT_STYLE}
+                      codeTagProps={{ style: SCRIPT_FONT_STYLE }}
+                    >
+                      {viewingScript.draft + '\n'}
+                    </SyntaxHighlighter>
+                  </div>
+                  <ScriptEditor
+                    ref={scriptEditorRef}
+                    value={viewingScript.draft}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setViewingScript(prev => prev && { ...prev, draft: value });
+                    }}
+                    onScroll={syncScriptScroll}
+                    onKeyDown={handleScriptKeyDown}
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    wrap="off"
+                  />
+                </ScriptEditorArea>
+              </ScriptEditorFrame>
             </CodeViewerContainer>
             {viewingScript.error && (
-              <ErrorMessage style={{ marginTop: '10px' }}>
-                <i className="fas fa-exclamation-triangle"></i>
-                {viewingScript.error}
-              </ErrorMessage>
+              <ScriptErrorPanel>
+                <div className="message">
+                  <i className="fas fa-exclamation-triangle"></i>
+                  <span>
+                    {viewingScript.errorLine && (
+                      <button type="button" onClick={() => scrollScriptToLine(viewingScript.errorLine!)}>
+                        Line {viewingScript.errorLine}
+                      </button>
+                    )}
+                    {viewingScript.error}
+                  </span>
+                </div>
+                {viewingScript.traceback && (
+                  <details>
+                    <summary>Traceback</summary>
+                    <pre>{viewingScript.traceback}</pre>
+                  </details>
+                )}
+              </ScriptErrorPanel>
             )}
           </ModalBody>
 

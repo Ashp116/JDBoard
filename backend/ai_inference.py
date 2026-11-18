@@ -259,6 +259,40 @@ def is_ultralytics_checkpoint(path):
         return False
 
 
+class ScriptError(ValueError):
+    """A custom script problem, with the line it happened on (if known)."""
+    def __init__(self, message, line=None, traceback_text=None):
+        super().__init__(message)
+        self.line = line
+        self.traceback_text = traceback_text
+
+
+def script_error_details(error, script_path):
+    """Where a custom script failed: (line number in the script or None,
+    traceback text limited to the script's own frames plus the final error).
+
+    Follows the exception chain, because the loader re-raises import errors
+    wrapped in its own RuntimeError."""
+    import traceback
+    script = os.path.realpath(str(script_path)) if script_path else None
+    line, frames, root = None, [], error
+    seen = set()
+    exc = error
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        root = exc
+        if isinstance(exc, SyntaxError) and exc.filename and script and \
+                os.path.realpath(exc.filename) == script and exc.lineno:
+            line = exc.lineno
+        for fs in traceback.extract_tb(exc.__traceback__):
+            if script and os.path.realpath(fs.filename) == script:
+                frames.append(f'  line {fs.lineno}, in {fs.name}\n    {fs.line or ""}'.rstrip())
+                line = fs.lineno
+        exc = exc.__cause__ or exc.__context__
+    text = '\n'.join(frames + [f"{type(root).__name__}: {root}"])
+    return line, text
+
+
 def log_failure(context, error):
     """Log an exception as an error - or as info when it is a user cancel."""
     if 'cancelled by user' in str(error).lower():
@@ -598,14 +632,18 @@ class AIModelManager:
         try:
             tree = ast.parse(content)
         except SyntaxError as e:
-            raise ValueError(f"Syntax error on line {e.lineno}: {e.msg}")
+            error = ValueError(f"Syntax error on line {e.lineno}: {e.msg}")
+            error.line = e.lineno
+            raise error
         cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'CustomModelInference'), None)
         if cls is None:
             raise ValueError("The script must define a class named CustomModelInference")
         methods = {n.name for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         missing = [m for m in ('preprocess', 'inference', 'postprocess') if m not in methods]
         if missing:
-            raise ValueError(f"CustomModelInference is missing: {', '.join(missing)}")
+            error = ValueError(f"CustomModelInference is missing: {', '.join(missing)}")
+            error.line = cls.lineno
+            raise error
 
     def _refresh_handler(self, model_id):
         """Re-create a loaded model's custom handler after its script changed,
@@ -616,7 +654,7 @@ class AIModelManager:
         info = self.models_registry[model_id]
         loaded['info'] = info
         loaded['custom_handler'] = None
-        loaded['script_error'] = None
+        loaded['script_error'] = loaded['script_error_line'] = loaded['script_traceback'] = None
         script = info.get('custom_script_path')
         if script:
             try:
@@ -626,6 +664,7 @@ class AIModelManager:
             except Exception as e:
                 logger.warning(f"Edited script failed to load for {model_id}, using default inference: {e}")
                 loaded['script_error'] = f"Failed to load script: {e}"
+                loaded['script_error_line'], loaded['script_traceback'] = script_error_details(e, script)
 
     def set_custom_script(self, model_id, content):
         """Save edited script content as the model's custom inference script.
@@ -637,7 +676,10 @@ class AIModelManager:
             raise KeyError(model_id)
         if len(content.encode('utf-8')) > self.MAX_SCRIPT_BYTES:
             raise ValueError("Script is too large (max 512 KB)")
-        self.check_script_source(content)
+        try:
+            self.check_script_source(content)
+        except ValueError as e:
+            raise ScriptError(str(e), line=getattr(e, 'line', None))
 
         info = self.models_registry[model_id]
         safe = ''.join(c if c.isalnum() or c in '-_' else '_' for c in info.get('name', model_id))[:40] or 'model'
@@ -646,11 +688,12 @@ class AIModelManager:
         try:
             self.script_loader.validate_script(new_path)
         except Exception as e:
+            line, trace = script_error_details(e, new_path)
             self._remove_custom_script(new_path)
             message = str(e).replace('Invalid custom script: Failed to load custom inference script: ', '')
-            if isinstance(getattr(e, '__cause__', None), ModuleNotFoundError) or 'No module named' in message:
+            if 'No module named' in message:
                 message += " - install the library into JDBoard's .venv, then save again"
-            raise ValueError(message)
+            raise ScriptError(message, line=line, traceback_text=trace)
 
         old_path = info.get('custom_script_path')
         info['custom_script_path'] = str(new_path.resolve())
@@ -762,7 +805,9 @@ class AIModelManager:
             return {'inference_handler': 'custom', 'script_status': 'pending', 'script_error': None}
         error = loaded.get('script_error')
         if error:
-            return {'inference_handler': 'default', 'script_status': 'failed', 'script_error': error}
+            return {'inference_handler': 'default', 'script_status': 'failed', 'script_error': error,
+                    'script_error_line': loaded.get('script_error_line'),
+                    'script_traceback': loaded.get('script_traceback')}
         return {'inference_handler': 'custom', 'script_status': 'active', 'script_error': None}
 
     def list_models(self):
@@ -848,6 +893,7 @@ class AIModelManager:
             # Load custom script if provided
             custom_handler = None
             script_error = None
+            script_error_line = script_traceback = None
             if model_info.get('custom_script_path'):
                 try:
                     custom_script_path = model_info['custom_script_path']
@@ -859,6 +905,7 @@ class AIModelManager:
                     logger.warning(f"Failed to load custom script, using default inference: {e}")
                     custom_handler = None
                     script_error = f"Failed to load script: {e}"
+                    script_error_line, script_traceback = script_error_details(e, model_info.get('custom_script_path'))
             
             self.loaded_models[model_id] = {
                 'model': model,
@@ -866,7 +913,9 @@ class AIModelManager:
                 'loaded_at': datetime.now().isoformat(),
                 'load_time': load_time,
                 'custom_handler': custom_handler,
-                'script_error': script_error
+                'script_error': script_error,
+                'script_error_line': script_error_line,
+                'script_traceback': script_traceback,
             }
             
             # Update registry
@@ -1216,6 +1265,7 @@ class AIModelManager:
                     # Custom postprocess now returns a list of predictions
                     num_detections = len(result) if isinstance(result, list) else result.get('total_detections', 0)
                     model_data['script_error'] = None
+                    model_data['script_error_line'] = model_data['script_traceback'] = None
                     script_fallback_error = None
                     logger.info(f"Custom inference completed: {num_detections} detections")
                     
@@ -1226,6 +1276,8 @@ class AIModelManager:
                     custom_handler = None
                     script_fallback_error = f"Script error during inference: {custom_error}"
                     model_data['script_error'] = script_fallback_error
+                    model_data['script_error_line'], model_data['script_traceback'] = script_error_details(
+                        custom_error, model_info.get('custom_script_path'))
             
             # Use default inference if no custom handler or custom handler failed
             if not custom_handler:

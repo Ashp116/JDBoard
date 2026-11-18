@@ -1087,7 +1087,10 @@ def update_model_custom_script(model_id):
     except KeyError:
         return jsonify({'success': False, 'error': 'Model not found'}), 404
     except ValueError as e:
-        return jsonify({'success': False, 'error': str(e)}), 400
+        # ScriptError carries the line in the script and a short traceback
+        return jsonify({'success': False, 'error': str(e),
+                        'error_line': getattr(e, 'line', None),
+                        'traceback': getattr(e, 'traceback_text', None)}), 400
     except Exception as e:
         logger.error(f"Error saving custom script for {model_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
