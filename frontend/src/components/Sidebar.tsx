@@ -464,7 +464,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
     { id: 'processes', icon: 'fas fa-tasks', label: 'Processes', shortcut: 'Ctrl+5' },
     { id: 'terminal', icon: 'fas fa-terminal', label: 'Terminal', shortcut: 'Ctrl+6' },
     { id: 'logs', icon: 'fas fa-file-alt', label: 'Logs', shortcut: 'Ctrl+7' },
-    { id: 'settings', icon: 'fas fa-cog', label: 'Settings', shortcut: 'Ctrl+8' }
+    { id: 'settings', icon: 'fas fa-cog', label: 'Settings', shortcut: 'Ctrl+8' },
+    { id: 'apidocs', icon: 'fas fa-plug', label: 'API', shortcut: '' }
   ];
 
   const handleNavClick = (itemId: string) => {
@@ -523,7 +524,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection, onSectionChange, isCon
               key={item.id}
               $active={activeSection === item.id}
               onClick={() => handleNavClick(item.id)}
-              title={`${item.label} (${item.shortcut})`}
+              title={item.shortcut ? `${item.label} (${item.shortcut})` : item.label}
               role="button"
               tabIndex={0}
               onKeyDown={(e) => {
