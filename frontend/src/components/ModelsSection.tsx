@@ -23,6 +23,9 @@ interface ModelInfo {
   last_used?: string | null;
   inference_count?: number;
   original_filename?: string;
+  file_hash?: string;
+  workspace?: number;
+  load_info?: { loaded_at?: string; load_time?: number };
   custom_script_path?: string | null;
   inference_handler?: 'default' | 'custom';
   script_status?: 'none' | 'pending' | 'active' | 'failed';
@@ -276,6 +279,86 @@ const SectionHeader = styled.div`
   }
 `;
 
+const CardMenuWrapper = styled.div`
+  position: relative;
+`;
+
+const CardMenu = styled.div`
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  background: ${props => props.theme.colors.background.secondary};
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+
+  button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+
+    i {
+      width: 14px;
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+
+    &:hover, &:focus-visible {
+      background: ${props => props.theme.colors.background.tertiary};
+      outline: none;
+    }
+  }
+`;
+
+const InfoGrid = styled.dl`
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 18px;
+  margin: 0;
+  font-size: 14px;
+
+  dt {
+    color: ${props => props.theme.colors.text.secondary};
+  }
+
+  dd {
+    margin: 0;
+    color: ${props => props.theme.colors.text.primary};
+    word-break: break-word;
+  }
+
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #d4d4d4;
+    background: ${props => props.theme.colors.background.tertiary};
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+    gap: 2px;
+
+    dd {
+      margin-bottom: 8px;
+    }
+  }
+`;
+
 const ModelsToolbar = styled.div`
   display: flex;
   flex-wrap: wrap;
@@ -284,7 +367,6 @@ const ModelsToolbar = styled.div`
   margin: -10px 0 22px;
 
   .count {
-    margin-left: auto;
     font-size: 13px;
     color: ${props => props.theme.colors.text.secondary};
     white-space: nowrap;
@@ -294,7 +376,6 @@ const ModelsToolbar = styled.div`
     margin-top: -4px;
 
     .count {
-      margin-left: 0;
       order: 3;
       width: 100%;
     }
@@ -2319,6 +2400,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [searchQuery, setSearchQuery] = useState('');
   const [modelView, setModelView] = useState<ModelView>(loadModelView);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Card "..." menu (model id whose menu is open) and the Info dialog
+  const [cardMenu, setCardMenu] = useState<string | null>(null);
+  const [infoModel, setInfoModel] = useState<string | null>(null);
   const filtersRef = useRef<HTMLDivElement>(null);
   const toggleInList = <K extends 'framework' | 'status' | 'handler'>(key: K, value: ModelView[K][number]) => {
     const current = modelView[key] as string[];
@@ -2824,6 +2908,21 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const activeFilterCount = modelView.framework.length + modelView.status.length + modelView.handler.length;
   const viewIsFiltered = activeFilterCount > 0;
   const clearFilters = () => updateModelView({ framework: [], status: [], handler: [] });
+
+  // Close a card's "..." menu on an outside click or Escape
+  useEffect(() => {
+    if (!cardMenu) return undefined;
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as Element).closest?.('[data-card-menu]')) setCardMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCardMenu(null); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [cardMenu]);
 
   // Close the filters panel on an outside click or Escape
   useEffect(() => {
@@ -3863,9 +3962,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             $active={filtersOpen || viewIsFiltered}
             onClick={() => setFiltersOpen(open => !open)}
             aria-expanded={filtersOpen}
+            aria-label="Sort and filter models"
+            title="Sort and filter"
           >
             <i className="fas fa-sliders-h"></i>
-            Filters
             {activeFilterCount > 0 && <span className="badge">{activeFilterCount}</span>}
           </FiltersButton>
           {filtersOpen && (
@@ -3927,16 +4027,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           )}
         </FiltersWrapper>
 
+        <AddButton onClick={() => setShowModal(true)}>
+          <i className="fas fa-plus"></i>
+          Add Model
+        </AddButton>
         <div className="count">
           {filteredModels.length === models.length
             ? `${models.length} model${models.length === 1 ? '' : 's'}`
             : `Showing ${filteredModels.length} of ${models.length}`}
         </div>
 
-        <AddButton onClick={() => setShowModal(true)}>
-          <i className="fas fa-plus"></i>
-          Add Model
-        </AddButton>
       </ModelsToolbar>
 
       {/* Active Downloads Section */}
@@ -4067,7 +4167,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       ) : (
         <ModelsList>
           {filteredModels.map((model) => (
-            <ModelCard key={model.id}>
+            <ModelCard key={model.id}
+              style={cardMenu === model.id ? { position: 'relative', zIndex: 30 } : undefined}>
               <div className="model-header">
                 {editingModel === model.id ? (
                   <EditNameContainer>
@@ -4122,14 +4223,28 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                           <><i className="fas fa-spinner fa-spin"></i> {BUSY_LABEL[modelBusy.get(model.id)!]}</>
                         ) : (model.loaded ? 'Loaded' : 'Not Loaded')}
                       </span>
-                      <button 
-                        className="edit-header"
-                        onClick={() => handleEditModelName(model.id, model.id)}
-                        disabled={editingModel !== null}
-                        title="Edit model ID"
-                      >
-                        <i className="fas fa-ellipsis-h"></i>
-                      </button>
+                      <CardMenuWrapper data-card-menu>
+                        <button
+                          className="edit-header"
+                          onClick={() => setCardMenu(open => (open === model.id ? null : model.id))}
+                          disabled={editingModel !== null}
+                          title="More"
+                          aria-haspopup="menu"
+                          aria-expanded={cardMenu === model.id}
+                        >
+                          <i className="fas fa-ellipsis-h"></i>
+                        </button>
+                        {cardMenu === model.id && (
+                          <CardMenu role="menu">
+                            <button role="menuitem" onClick={() => { setCardMenu(null); handleEditModelName(model.id, model.id); }}>
+                              <i className="fas fa-pen"></i> Rename
+                            </button>
+                            <button role="menuitem" onClick={() => { setCardMenu(null); setInfoModel(model.id); }}>
+                              <i className="fas fa-info-circle"></i> Info
+                            </button>
+                          </CardMenu>
+                        )}
+                      </CardMenuWrapper>
                     </div>
                   </>
                 )}
@@ -4187,21 +4302,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   >
                     <span className="label"><i className="fas fa-exclamation-circle"></i> Can't load:</span>
                     <span className="value" style={{ whiteSpace: 'normal', textAlign: 'right' }}>{model.load_problem}</span>
-                  </div>
-                )}
-                {(model.created_at || model.upload_date) && (
-                  <div className="info-row">
-                    <span className="label">Added:</span>
-                    <span className="value">{new Date((model.created_at || model.upload_date)!).toLocaleDateString()}</span>
-                  </div>
-                )}
-                {!!model.inference_count && (
-                  <div className="info-row">
-                    <span className="label">Runs:</span>
-                    <span className="value">
-                      {model.inference_count}
-                      {model.last_used ? ` · last ${new Date(model.last_used).toLocaleDateString()}` : ''}
-                    </span>
                   </div>
                 )}
               </div>
@@ -4800,6 +4900,88 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </Modal>
       )}
       
+      {/* Model Info Modal */}
+      {infoModel && (() => {
+        const m = models.find(x => x.id === infoModel);
+        if (!m) return null;
+        const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : 'Never');
+        const fileName = (path?: string | null) => (path ? path.split('/').pop() : '');
+        const handlerText = m.script_status === 'failed'
+          ? 'Custom script failed (using default)'
+          : m.custom_script_path ? 'Custom script' : 'Default';
+        const rows: [string, React.ReactNode][] = [
+          ['Model ID', m.id],
+          ['Status', m.loaded ? 'Loaded' : 'Not loaded'],
+          ['Framework', FRAMEWORK_LABELS[m.framework] || m.framework],
+          ['Type', m.type],
+          ['Inference', handlerText],
+          ...(m.precision ? [['Precision', m.precision.toUpperCase()] as [string, React.ReactNode]] : []),
+          ...(m.imgsz ? [['Image size', `${m.imgsz}px`] as [string, React.ReactNode]] : []),
+          ...(m.workspace ? [['TensorRT workspace', `${m.workspace} GB`] as [string, React.ReactNode]] : []),
+          ...(m.calibration ? [['INT8 calibration', m.calibration === 'coco' ? 'COCO sample' : 'Custom images'] as [string, React.ReactNode]] : []),
+          ['Size', formatFileSize(m.file_size)],
+          ['Added', when(m.created_at || m.upload_date)],
+          ['Runs', String(m.inference_count || 0)],
+          ['Last used', when(m.last_used)],
+          ...(m.loaded && m.load_info?.loaded_at
+            ? [['Loaded at', `${when(m.load_info.loaded_at)}${m.load_info.load_time != null ? ` (took ${m.load_info.load_time.toFixed(1)} s)` : ''}`] as [string, React.ReactNode]]
+            : []),
+          ...(m.original_filename ? [['Original file', m.original_filename] as [string, React.ReactNode]] : []),
+          ['Model file', <code key="f" title={m.file_path}>{fileName(m.file_path)}</code>],
+          ...(m.custom_script_path ? [['Script file', <code key="s" title={m.custom_script_path}>{fileName(m.custom_script_path)}</code>] as [string, React.ReactNode]] : []),
+          ...(m.file_hash ? [['SHA-256', <code key="h" title={m.file_hash}>{m.file_hash.slice(0, 16)}…</code>] as [string, React.ReactNode]] : []),
+        ];
+        return (
+          <Modal isOpen={true} onClose={() => setInfoModel(null)} maxWidth="520px">
+            <ModalHeader>
+              <h3>
+                <i className="fas fa-info-circle"></i>
+                {m.id}
+              </h3>
+              <ModalCloseButton onClick={() => setInfoModel(null)}>
+                <i className="fas fa-times"></i>
+              </ModalCloseButton>
+            </ModalHeader>
+            <ModalBody>
+              <InfoGrid>
+                {rows.map(([label, value]) => (
+                  <React.Fragment key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </React.Fragment>
+                ))}
+              </InfoGrid>
+              {m.script_status === 'failed' && m.script_error && (
+                <ScriptErrorPanel style={{ marginTop: '14px' }}>
+                  <div className="message">
+                    <i className="fas fa-exclamation-triangle"></i>
+                    <span>{m.script_error}</span>
+                  </div>
+                </ScriptErrorPanel>
+              )}
+              {m.load_problem && !m.loaded && (
+                <ScriptErrorPanel style={{ marginTop: '14px' }}>
+                  <div className="message">
+                    <i className="fas fa-exclamation-circle"></i>
+                    <span>{m.load_problem}</span>
+                  </div>
+                </ScriptErrorPanel>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <ActionButtons>
+                <Button variant="secondary" onClick={() => { setInfoModel(null); openScriptEditor(m); }}>
+                  Inference Script
+                </Button>
+                <Button variant="primary" onClick={() => setInfoModel(null)}>
+                  Close
+                </Button>
+              </ActionButtons>
+            </ModalFooter>
+          </Modal>
+        );
+      })()}
+
       {/* Rename Confirmation Modal */}
       {showRenameConfirm && pendingRename && (
         <Modal isOpen={true} onClose={handleCancelRename} maxWidth="450px">
