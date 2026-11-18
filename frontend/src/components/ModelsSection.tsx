@@ -4443,18 +4443,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
           <ModalBody>
             <div style={{ padding: '30px 20px' }}>
-              <div style={{ 
-                background: 'rgba(255, 165, 0, 0.1)', 
-                border: '1px solid rgba(255, 165, 0, 0.3)',
-                borderRadius: '8px',
-                padding: '20px',
-                marginBottom: '25px'
-              }}>
-                <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.8', color: '#ffa500' }}>
-                  <i className="fas fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
-                  <strong>Warning:</strong> If you change the model ID, all applications and code that use this model ID for inference will be affected and may fail until updated with the new ID.
-                </p>
-              </div>
               <p style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.8' }}>
                 You are about to change the model ID from <strong>{pendingRename.modelId}</strong> to <strong>{pendingRename.newName}</strong>.
               </p>
