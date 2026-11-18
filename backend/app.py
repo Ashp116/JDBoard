@@ -470,6 +470,18 @@ def get_gpu_memory():
             'error': str(e)
         }), 500
 
+def model_name_problem(model_name):
+    """Error message if a new model can't use this name, else None. Checked
+    before any upload/download work starts, so a taken or invalid name doesn't
+    fail only after a long conversion."""
+    in_progress = [d.get('model_name') for d in list(active_downloads.values())]
+    try:
+        ai_manager.check_new_model_name(model_name, in_progress)
+        return None
+    except ValueError as e:
+        return str(e)
+
+
 def tensorrt_size_problem(source_name):
     """Error message if building a TensorRT engine for this YOLO size is likely
     to run out of memory on this board, else None.
@@ -535,6 +547,10 @@ def upload_model():
     filename = secure_filename(file.filename)
     if not model_name:
         model_name = filename.rsplit('.', 1)[0]
+    model_name = model_name.strip()
+    name_problem = model_name_problem(model_name)
+    if name_problem:
+        return jsonify({'success': False, 'error': name_problem}), 400
     is_pt = filename.lower().endswith('.pt')
     is_onnx = filename.lower().endswith('.onnx')
     # Keeping the uploaded format is not a conversion
@@ -731,6 +747,11 @@ def upload_model():
             if calibration_dir:
                 shutil.rmtree(os.path.dirname(calibration_dir), ignore_errors=True)
 
+    # Reserve the name now (the thread fills in the details) so a second
+    # upload with the same name is rejected straight away
+    active_downloads.setdefault(download_id, {'type': 'upload', 'download_type': 'upload', 'model_name': model_name,
+                                              'progress': 0, 'status': 'Starting...',
+                                              'started_at': datetime.now().isoformat()})
     upload_thread = threading.Thread(target=upload_async, daemon=True)
     download_threads[download_id] = upload_thread
     upload_thread.start()
@@ -1148,6 +1169,10 @@ def download_yolo_model():
             'success': False,
             'error': 'model_url and model_name are required'
         }), 400
+    model_name = model_name.strip()
+    name_problem = model_name_problem(model_name)
+    if name_problem:
+        return jsonify({'success': False, 'error': name_problem}), 400
 
     missing = ai_manager.missing_requirement(yolo=True, target_format=target_format if target_format != 'PyTorch' else None)
     if missing:
@@ -1290,6 +1315,10 @@ def download_yolo_model():
                 if calibration_dir:
                     shutil.rmtree(os.path.dirname(calibration_dir), ignore_errors=True)
         
+        # Reserve the name now (the thread fills in the details)
+        active_downloads.setdefault(download_id, {'type': 'yolo_download', 'download_type': 'yolo_download',
+                                                  'model_name': model_name, 'progress': 0, 'status': 'Starting...',
+                                                  'started_at': datetime.now().isoformat()})
         # Start download in background thread and track it
         download_thread = threading.Thread(target=download_async, daemon=True)
         download_threads[download_id] = download_thread

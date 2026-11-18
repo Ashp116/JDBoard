@@ -516,17 +516,25 @@ class AIModelManager:
         
         return model_name
     
+    def check_new_model_name(self, model_name, in_progress=()):
+        """Validate a name for a model about to be added and make sure it is not
+        taken - by a registered model or by one still downloading/converting
+        (in_progress). Case-insensitive. Returns the cleaned name."""
+        model_name = self._validate_model_name(model_name)
+        taken = {name.lower() for name in self.models_registry} | \
+                {str(name).strip().lower() for name in in_progress if name}
+        if model_name.lower() in taken:
+            raise ValueError(f"A model named '{model_name}' already exists. Please choose a different name.")
+        return model_name
+
     def register_model(self, model_name, file_path, model_type='vision', original_filename='', custom_script_path=None, model_meta=None):
         """Register a new model in the system with optional custom inference script"""
-        # Validate and clean the model name
-        model_name = self._validate_model_name(model_name)
+        # Validate and clean the model name (also re-checked here: another model
+        # could have taken the name while this one was converting)
+        model_name = self.check_new_model_name(model_name)
         
         # Use model name as ID (ensure it's safe for use as an identifier)
         model_id = model_name.strip()
-        
-        # Check if model name already exists
-        if model_id in self.models_registry:
-            raise ValueError(f"Model with name '{model_name}' already exists. Please use a different name.")
         
         file_path = Path(file_path)
         

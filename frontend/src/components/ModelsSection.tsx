@@ -2624,15 +2624,18 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       return 'Model name must be less than 50 characters';
     }
     
-    // Check for invalid characters
-    if (!/^[a-zA-Z0-9\s\-_\.()]+$/.test(name)) {
-      return 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed';
+    // Same characters the backend accepts (ai_inference._validate_model_name)
+    if (!/^[a-zA-Z0-9\s\-_]+$/.test(name)) {
+      return 'Model name can only contain letters, numbers, spaces, hyphens and underscores';
     }
     
-    // Check for uniqueness (case-insensitive)
-    const existingNames = models.map(model => model.id.toLowerCase());
-    if (existingNames.includes(name.toLowerCase())) {
+    // Unique (case-insensitive) among existing models and ones still being added
+    const wanted = name.trim().toLowerCase();
+    if (models.some(model => model.id.toLowerCase() === wanted)) {
       return 'A model with this name already exists. Please choose a different name.';
+    }
+    if (Array.from(activeDownloadsRef.current.values()).some(d => d.name.trim().toLowerCase() === wanted)) {
+      return 'A model with this name is already being added. Please choose a different name.';
     }
     
     return '';
@@ -2654,9 +2657,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     // Start from "keep as uploaded"
     chooseFormat(file.name.toLowerCase().endsWith('.onnx') ? 'ONNX' : 'PyTorch');
     if (!modelName) {
-      // Auto-generate model name from filename
-      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
-      setModelName(nameWithoutExt);
+      // Name it after the file, swapping characters the backend doesn't allow
+      // (e.g. "best.v2.pt" -> "best-v2"), and check it like a typed name
+      const suggested = file.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^a-zA-Z0-9\s\-_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 50);
+      validateAndSetName(suggested, false);
     }
   };
 
