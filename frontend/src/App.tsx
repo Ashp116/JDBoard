@@ -171,7 +171,7 @@ const AppContent: React.FC = () => {
       }
     }
     
-    document.title = `JDBoard | ${sectionTitle}`;
+    document.title = sectionTitle;
   }, [activeSection, location.pathname]);
 
   const sections: Record<SectionKey, any> = {
