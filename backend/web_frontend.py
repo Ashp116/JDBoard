@@ -1,17 +1,18 @@
 """
 Serve JDBoard from a single port, optionally behind a password.
 
-Layout (same as the Vite dev proxy and nginx_proxy_TEMPLATE):
+Layout (same as the Vite dev proxy and the nginx site in deploy/):
     /api/...            -> the Flask API (prefix stripped), incl. /api/socket.io
     everything else     -> the built frontend (frontend/dist), with SPA fallback
 
 Requests without the /api prefix that match an API route are still passed to
 the API, so older proxies that strip /api themselves keep working.
 
-Password protection is HTTP Basic auth, enabled when an auth file exists
-(JDBOARD_AUTH_FILE, default /etc/jdboard/auth) containing one line:
+The installed service (scripts/install.sh) runs behind nginx, which serves the
+frontend and checks the login; it sets JDBOARD_AUTH=nginx so nothing is
+checked here. For a standalone run, HTTP Basic auth is enabled when an auth
+file exists (JDBOARD_AUTH_FILE, default /etc/jdboard/auth) with one line:
     username:<werkzeug password hash>
-Create it with scripts/install-service.sh (or scripts/set-password.sh).
 """
 
 import base64
@@ -159,13 +160,19 @@ def install(flask_app):
     middleware sits inside this one)."""
     dist_dir = os.environ.get('JDBOARD_FRONTEND_DIST') or DEFAULT_DIST_DIR
     auth = None
-    creds = load_auth()
+    if os.environ.get('JDBOARD_AUTH', '').lower() == 'nginx':
+        # Installed service: nginx checks the login and the backend only
+        # listens on 127.0.0.1, so there is nothing to check here
+        logger.info("Login is handled by nginx (JDBOARD_AUTH=nginx)")
+        creds = None
+    else:
+        creds = load_auth()
     if creds:
         auth = BasicAuth(*creds)
         logger.info(f"Password protection enabled (user '{creds[0]}')")
-    else:
+    elif os.environ.get('JDBOARD_AUTH', '').lower() != 'nginx':
         logger.warning("No auth file found - JDBoard is open to anyone who can reach it. "
-                       "Run scripts/set-password.sh to add a password.")
+                       "Install it with scripts/install.sh (nginx login) to protect it.")
     wrapper = JDBoardWSGI(flask_app, flask_app.wsgi_app, dist_dir=dist_dir, auth=auth)
     if wrapper.frontend:
         logger.info(f"Serving frontend from {dist_dir}")

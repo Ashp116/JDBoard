@@ -1,0 +1,53 @@
+#!/bin/bash
+# jdboard-passwd - set or change the JDBoard login (checked by nginx).
+#
+#   sudo jdboard-passwd            # asks for a username and password
+#   sudo jdboard-passwd admin      # change the password for 'admin'
+#
+# Writes /etc/jdboard/htpasswd (one user) and reloads nginx.
+set -euo pipefail
+HTPASSWD=/etc/jdboard/htpasswd
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run with sudo: sudo jdboard-passwd $*" >&2
+    exit 1
+fi
+
+LOGIN="${1:-}"
+if [ -z "$LOGIN" ]; then
+    DEFAULT="$(cut -d: -f1 "$HTPASSWD" 2>/dev/null | head -1)"
+    DEFAULT="${DEFAULT:-admin}"
+    read -rp "JDBoard username [$DEFAULT]: " LOGIN
+    LOGIN="${LOGIN:-$DEFAULT}"
+fi
+if ! [[ "$LOGIN" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "Username may only contain letters, numbers, '.', '_' and '-'." >&2
+    exit 1
+fi
+
+while true; do
+    read -rsp "New JDBoard password: " PW1; echo
+    read -rsp "Repeat password: " PW2; echo
+    if [ "$PW1" != "$PW2" ]; then
+        echo "Passwords don't match, try again."
+    elif [ "${#PW1}" -lt 8 ]; then
+        echo "Use at least 8 characters."
+    else
+        break
+    fi
+done
+
+# SHA-512 crypt hash; the password goes to openssl on stdin, never on a command line
+HASH="$(printf '%s\n' "$PW1" | openssl passwd -6 -stdin)"
+unset PW1 PW2
+
+install -d -m 755 /etc/jdboard   # nginx (www-data) must be able to reach htpasswd
+umask 077
+printf '%s:%s\n' "$LOGIN" "$HASH" > "$HTPASSWD"
+chown root:www-data "$HTPASSWD"
+chmod 640 "$HTPASSWD"
+echo "✅ Login saved for '$LOGIN'."
+
+if systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+fi

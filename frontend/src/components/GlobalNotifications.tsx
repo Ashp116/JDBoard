@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import styled, { keyframes } from 'styled-components';
 import { useNotifications, Notification } from '../contexts/NotificationContext';
 import { getBackendUrl } from '../utils/api';
+import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
 import { useSocket } from '../hooks/useSocket';
 
 const slideIn = keyframes`
@@ -533,12 +534,15 @@ const GlobalNotifications: React.FC = () => {
       const actionText = isRestartCommand ? 'restart jtop service' : 'install jtop service';
       const endpoint = isRestartCommand ? '/system/jtop-restart-service' : '/system/jtop-install-service';
 
+      const action = { actionText, endpoint, isRestart: isRestartCommand };
+      // The installed service needs no password: run it straight away
+      if (await isPasswordlessSudo()) {
+        await handleSudoModalConfirm({ action, password: PASSWORDLESS });
+        return;
+      }
+
       // Show sudo modal instead of prompt
-      setPendingAction({
-        actionText,
-        endpoint,
-        isRestart: isRestartCommand
-      });
+      setPendingAction(action);
       setSudoPassword('');
       setSudoError('');
       setShowSudoModal(true);
@@ -554,20 +558,26 @@ const GlobalNotifications: React.FC = () => {
     }
   };
 
-  const handleSudoModalConfirm = async () => {
-    if (!sudoPassword.trim() || !pendingAction || isSubmittingSudo) return;
+  // direct: run without the password dialog (installed service, no password needed)
+  const handleSudoModalConfirm = async (direct?: { action: NonNullable<typeof pendingAction>; password: string }) => {
+    const action = direct?.action ?? pendingAction;
+    const password = direct?.password ?? sudoPassword;
+    if (!password.trim() || !action || isSubmittingSudo) return;
+    const showError = (message: string) => direct
+      ? addNotification({ type: 'error', title: 'jtop Service Action Failed', message })
+      : setSudoError(message);
 
     // Clear previous errors and set loading state
     setSudoError('');
     setIsSubmittingSudo(true);
 
     try {
-      const response = await fetch(`${getBackendUrl()}${pendingAction.endpoint}`, {
+      const response = await fetch(`${getBackendUrl()}${action.endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ sudo_password: sudoPassword })
+        body: JSON.stringify({ sudo_password: password })
       });
 
       const result = await response.json();
@@ -584,7 +594,7 @@ const GlobalNotifications: React.FC = () => {
         addNotification({
           type: 'success',
           title: 'Service Action Completed',
-          message: `jtop service ${pendingAction?.isRestart ? 'restarted' : 'installed'} successfully! Attempting to restore connection...`
+          message: `jtop service ${action.isRestart ? 'restarted' : 'installed'} successfully! Attempting to restore connection...`
         });
 
         // Force reload until broken pipe errors disappear
@@ -640,13 +650,13 @@ const GlobalNotifications: React.FC = () => {
       } else {
         // Handle different types of errors
         if (response.status === 401) {
-          setSudoError('Invalid sudo password. Please try again.');
+          showError('Invalid sudo password. Please try again.');
         } else {
-          setSudoError(result.error || 'Failed to authenticate or execute command. Please check your password.');
+          showError(result.error || 'Failed to authenticate or execute command. Please check your password.');
         }
       }
     } catch (error) {
-      setSudoError(`Network error: ${error}`);
+      showError(`Network error: ${error}`);
     } finally {
       setIsSubmittingSudo(false);
       setIsResolving(false);
@@ -786,7 +796,7 @@ const GlobalNotifications: React.FC = () => {
               </button>
               <button 
                 className="confirm" 
-                onClick={handleSudoModalConfirm}
+                onClick={() => handleSudoModalConfirm()}
                 disabled={!sudoPassword.trim() || isSubmittingSudo}
               >
                 {isSubmittingSudo ? (

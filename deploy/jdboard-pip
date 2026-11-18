@@ -1,0 +1,32 @@
+#!/bin/bash
+# jdboard-pip - install Python packages into JDBoard's environment safely.
+#
+#   sudo jdboard-pip install shapely
+#   sudo systemctl restart jdboard        # so the dashboard picks it up
+#
+# Keeps numpy, PyTorch and torchvision at the versions JDBoard was installed
+# with (constraints file), and refuses packages that would shadow JetPack's
+# CUDA-enabled OpenCV or replace PyTorch.
+set -euo pipefail
+VENV=/opt/jdboard/venv
+CONSTRAINTS=/opt/jdboard/constraints.txt
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run with sudo: sudo jdboard-pip $*" >&2
+    exit 1
+fi
+if [ "${1:-}" = "install" ]; then
+    for arg in "${@:2}"; do
+        name="$(echo "$arg" | tr '[:upper:]_' '[:lower:]-' | sed -E 's/[<>=!~;\[ ].*//')"
+        case "$name" in
+            opencv-python|opencv-contrib-python|opencv-python-headless|opencv-contrib-python-headless)
+                echo "Refusing $arg: it would hide JetPack's CUDA-enabled OpenCV (cv2 is already available)." >&2
+                exit 1 ;;
+            torch|torchvision|numpy)
+                echo "Refusing $arg: JDBoard needs the installed version (see $CONSTRAINTS)." >&2
+                exit 1 ;;
+        esac
+    done
+    exec "$VENV/bin/pip" install -c "$CONSTRAINTS" "${@:2}"
+fi
+exec "$VENV/bin/pip" "$@"
