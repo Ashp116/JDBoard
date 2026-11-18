@@ -147,7 +147,11 @@ install -d -m 2770 -o jdboard -g jdboard "$DATA" "$DATA/models" "$DATA/models/do
 
 # --- 3. app files --------------------------------------------------------------------
 step "Installing the backend to $APP"
-rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$REPO/backend/" "$APP/backend/"
+# Root-owned and read-only for everyone else: the service must not be able to
+# change its own code (rsync -a would copy the checkout's owner and modes)
+rsync -a --delete --no-owner --no-group --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
+      --exclude '__pycache__' --exclude '*.pyc' "$REPO/backend/" "$APP/backend/"
+chown -R root:root "$APP/backend"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-admin" "$APP/bin/jdboard-admin"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-pip" /usr/local/bin/jdboard-pip
 install -m 755 -o root -g root "$REPO/deploy/jdboard-passwd" /usr/local/bin/jdboard-passwd
@@ -189,7 +193,7 @@ fi
 # Versions jdboard-pip must not change
 "$VENV/bin/python" -m pip freeze 2>/dev/null | grep -iE '^(numpy|torch|torchvision|ml-dtypes)==' > "$APP/constraints.txt" || true
 chown -R root:root "$VENV"
-chmod -R a+rX "$VENV"
+chmod -R a+rX,go-w "$VENV"
 # The service can't write here, so compile the backend now
 "$VENV/bin/python" -m compileall -q "$APP/backend" >/dev/null || true
 
@@ -217,9 +221,8 @@ else
     DIST="$TMP/dist"
 fi
 [ -f "$DIST/index.html" ] || { echo "❌ frontend build is missing index.html"; exit 1; }
-rsync -a --delete "$DIST/" "$APP/frontend/"
+rsync -a --delete --no-owner --no-group --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r "$DIST/" "$APP/frontend/"
 chown -R root:root "$APP/frontend"
-chmod -R a+rX "$APP/frontend"
 
 # --- 6. move existing models/data from the repo checkout -------------------------------
 if [ "$MIGRATE" -eq 1 ] && [ ! -f "$DATA/models/models_registry.json" ] && [ -f "$REPO/models/models_registry.json" ]; then
