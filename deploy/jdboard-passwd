@@ -2,7 +2,7 @@
 # jdboard-passwd - set or change the JDBoard login (checked by nginx).
 #
 #   sudo jdboard-passwd            # asks for a username and password
-#   sudo jdboard-passwd admin      # change the password for 'admin'
+#   sudo jdboard-passwd admin      # change the password for user admin
 #
 # Writes /etc/jdboard/htpasswd (one user) and reloads nginx.
 set -euo pipefail
