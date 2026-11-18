@@ -332,6 +332,11 @@ const CancelButton = styled.button`
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 55px;
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
   
   ${props => props.theme.media.mobile} {
     padding: 10px 16px;
@@ -1357,6 +1362,11 @@ const ModelCard = styled.div`
       justify-content: center;
       gap: 6px;
       position: relative;
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
       
       ${props => props.theme.media.mobile} {
         padding: 12px;
@@ -2189,6 +2199,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [viewingTemplate, setViewingTemplate] = useState(false);
   const [templateContent, setTemplateContent] = useState('');
   const [loadingTemplate, setLoadingTemplate] = useState(false);
+
+  // Model card actions in progress: model id -> action. The clicked button
+  // shows a spinner and the card's other actions are disabled meanwhile.
+  type ModelAction = 'load' | 'unload' | 'reload' | 'delete';
+  const [modelBusy, setModelBusy] = useState<Map<string, ModelAction>>(new Map());
+  const [renaming, setRenaming] = useState(false);
+  const [cancellingDownloads, setCancellingDownloads] = useState<Set<string>>(new Set());
+  const withModelBusy = async (modelId: string, action: ModelAction, run: () => Promise<void>) => {
+    if (modelBusy.has(modelId)) return;
+    setModelBusy(prev => new Map(prev).set(modelId, action));
+    try {
+      await run();
+    } finally {
+      setModelBusy(prev => { const next = new Map(prev); next.delete(modelId); return next; });
+    }
+  };
+  const BUSY_LABEL: Record<ModelAction, string> = {
+    load: 'Loading...', unload: 'Unloading...', reload: 'Reloading...', delete: 'Deleting...'
+  };
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logsTerminalRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -3624,9 +3653,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <i className="fas fa-terminal"></i>
                     Logs
                   </LogsButton>
-                  <CancelButton onClick={() => cancelDownload(downloadId)}>
-                    <i className="fas fa-times"></i>
-                    Cancel
+                  <CancelButton
+                    disabled={cancellingDownloads.has(downloadId)}
+                    onClick={async () => {
+                      setCancellingDownloads(prev => new Set(prev).add(downloadId));
+                      try { await cancelDownload(downloadId); }
+                      finally { setCancellingDownloads(prev => { const next = new Set(prev); next.delete(downloadId); return next; }); }
+                    }}
+                  >
+                    <i className={cancellingDownloads.has(downloadId) ? 'fas fa-spinner fa-spin' : 'fas fa-times'}></i>
+                    {cancellingDownloads.has(downloadId) ? 'Cancelling...' : 'Cancel'}
                   </CancelButton>
                 </DownloadActions>
               </DownloadContent>
@@ -3759,7 +3795,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <h4>{model.id}</h4>
                     <div className="header-actions">
                       <span className={`status ${model.loaded ? 'loaded' : 'unloaded'}`}>
-                        {model.loaded ? 'Loaded' : 'Not Loaded'}
+                        {modelBusy.has(model.id) ? (
+                          <><i className="fas fa-spinner fa-spin"></i> {BUSY_LABEL[modelBusy.get(model.id)!]}</>
+                        ) : (model.loaded ? 'Loaded' : 'Not Loaded')}
                       </span>
                       <button 
                         className="edit-header"
@@ -3840,39 +3878,43 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 {!model.loaded ? (
                   <button 
                     className="load"
-                    onClick={() => handleLoadModel(model.id)}
+                    onClick={() => withModelBusy(model.id, 'load', () => handleLoadModel(model.id))}
+                    disabled={modelBusy.has(model.id)}
                     data-tooltip-id="tooltip-load"
                     data-tooltip-content="Load model into memory for inference"
                   >
-                    <i className="fas fa-upload"></i>
+                    <i className={modelBusy.get(model.id) === 'load' ? 'fas fa-spinner fa-spin' : 'fas fa-upload'}></i>
                   </button>
                 ) : (
                   <>
                     <button 
                       className="unload"
-                      onClick={() => handleUnloadModel(model.id)}
+                      onClick={() => withModelBusy(model.id, 'unload', () => handleUnloadModel(model.id))}
+                      disabled={modelBusy.has(model.id)}
                       data-tooltip-id="tooltip-unload"
                       data-tooltip-content="Unload model from memory to free resources"
                     >
-                      <i className="fas fa-download"></i>
+                      <i className={modelBusy.get(model.id) === 'unload' ? 'fas fa-spinner fa-spin' : 'fas fa-download'}></i>
                     </button>
                     <button 
                       className="force-reload"
-                      onClick={() => handleForceReloadModel(model.id)}
+                      onClick={() => withModelBusy(model.id, 'reload', () => handleForceReloadModel(model.id))}
+                      disabled={modelBusy.has(model.id)}
                       data-tooltip-id="tooltip-reload"
                       data-tooltip-content="Force reload model (clears stuck states)"
                     >
-                      <i className="fas fa-sync-alt"></i>
+                      <i className={modelBusy.get(model.id) === 'reload' ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'}></i>
                     </button>
                   </>
                 )}
                 <button 
                   className="delete"
-                  onClick={() => handleDeleteModel(model.id)}
+                  onClick={() => withModelBusy(model.id, 'delete', () => handleDeleteModel(model.id))}
+                  disabled={modelBusy.has(model.id)}
                   data-tooltip-id="tooltip-delete"
                   data-tooltip-content="Permanently delete this model"
                 >
-                  <i className="fas fa-trash"></i>
+                  <i className={modelBusy.get(model.id) === 'delete' ? 'fas fa-spinner fa-spin' : 'fas fa-trash'}></i>
                 </button>
               </div>
               
@@ -4457,8 +4499,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               <Button variant="secondary" onClick={handleCancelRename}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={handleConfirmRename}>
-                Confirm
+              <Button variant="primary" disabled={renaming}
+                      onClick={async () => { setRenaming(true); try { await handleConfirmRename(); } finally { setRenaming(false); } }}>
+                {renaming ? <LoadingSpinner /> : 'Confirm'}
               </Button>
             </ActionButtons>
           </ModalFooter>

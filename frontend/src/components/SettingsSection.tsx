@@ -952,7 +952,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Jetson Clocks</div>
-              <div className="description">Maximum performance mode</div>
+              <div className="description">{loading.jetsonClocks ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'Maximum performance mode'}</div>
             </div>
             <Toggle 
               $active={settings.jetsonClocks} 
@@ -965,7 +965,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Power Mode</div>
-              <div className="description">System power profile</div>
+              <div className="description">{loading.powerMode ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'System power profile'}</div>
             </div>
             <Select 
               value={settings.powerMode}
@@ -982,7 +982,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Fan Mode</div>
-              <div className="description">Cooling fan control</div>
+              <div className="description">{loading.fanMode ? <><i className="fas fa-spinner fa-spin"></i> Applying...</> : 'Cooling fan control'}</div>
             </div>
             <Select 
               value={settings.fanMode}

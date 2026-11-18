@@ -4115,9 +4115,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     setIsExportDropdownOpen(!isExportDropdownOpen);
   };
 
+  // Export in progress (shown as a spinner on the Export Data button)
+  const [exporting, setExporting] = useState(false);
+  const withExporting = async (run: () => Promise<void>) => {
+    if (exporting) return;
+    setExporting(true);
+    try { await run(); } finally { setExporting(false); }
+  };
+
   const handleDropdownExport = async (format: string) => {
     setIsExportDropdownOpen(false);
-    await handleExportLogs(format);
+    await withExporting(() => handleExportLogs(format));
   };
 
   // Close dropdown when clicking outside
@@ -6134,10 +6142,11 @@ print(result)`)}>
                     <DropdownExportButton 
                       onClick={toggleExportDropdown} 
                       className={isExportDropdownOpen ? 'open' : ''}
-                      style={{height: '32px', fontSize: '13px'}}
+                      style={{height: '32px', fontSize: '13px', opacity: exporting ? 0.7 : 1}}
+                      disabled={exporting}
                     >
-                      <i className="fas fa-download" />
-                      Export Data
+                      <i className={exporting ? 'fas fa-spinner fa-spin' : 'fas fa-download'} />
+                      {exporting ? 'Exporting...' : 'Export Data'}
                       <i className={`fas fa-chevron-down chevron`} />
                     </DropdownExportButton>
                     <DropdownExportMenu className="dropdown-export-menu" $isOpen={isExportDropdownOpen}>
@@ -6154,7 +6163,7 @@ print(result)`)}>
                         TXT
                       </DropdownExportItem>
                       {viewMode === 'chart' && (
-                        <DropdownExportItem onClick={handleExportChartsAsImage}>
+                        <DropdownExportItem onClick={() => withExporting(handleExportChartsAsImage)}>
                           <i className="fas fa-image" />
                           Charts as PNG
                         </DropdownExportItem>
