@@ -2375,6 +2375,54 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     };
   }, [socket]); // handlers read state through refs, so no re-subscribing mid-download
 
+  // Requests whose body (model file, calibration zip) the browser is still
+  // sending. The backend only learns about an upload once the whole file has
+  // arrived, so these must not be polled - a large file over Wi-Fi takes far
+  // longer than the "unknown" grace period below.
+  const sendingRef = useRef<Set<string>>(new Set());
+  const [sendingCount, setSendingCount] = useState(0);
+
+  // POST form data with upload progress (fetch can't report it). Resolves with
+  // the parsed JSON response.
+  const postFormWithProgress = (url: string, formData: FormData, downloadId: string): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      let lastPercent = -1;
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable || e.total === 0) return;
+        const percent = Math.floor((e.loaded / e.total) * 100);
+        if (percent === lastPercent) return;
+        lastPercent = percent;
+        const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(0);
+        // The backend reports 30%+ once it has the file; sending is the first quarter
+        updateDownloadProgress(downloadId, Math.round(percent / 4),
+          `Sending file to the Jetson: ${percent}% (${mb(e.loaded)}/${mb(e.total)} MB)`);
+      };
+      xhr.onload = () => {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error(`Backend returned ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error('The connection to the Jetson dropped while sending the file'));
+      xhr.onabort = () => reject(new Error('Sending the file was interrupted'));
+      sendingRef.current.add(downloadId);
+      setSendingCount(sendingRef.current.size);
+      const done = () => { sendingRef.current.delete(downloadId); setSendingCount(sendingRef.current.size); };
+      xhr.addEventListener('loadend', done);
+      xhr.send(formData);
+    });
+
+  // Leaving or reloading the page cancels a file that's still being sent
+  useEffect(() => {
+    if (sendingCount === 0) return undefined;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [sendingCount]);
+
   // Safety net for missed socket events (reconnects, very fast failures, the
   // socket being down): poll the outcome of every download still shown as active.
   const unknownCountsRef = useRef<Map<string, number>>(new Map());
@@ -2383,6 +2431,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
     const checkDownloads = async () => {
       for (const [downloadId, download] of activeDownloadsRef.current) {
+        if (sendingRef.current.has(downloadId)) continue;  // backend doesn't have it yet
         try {
           const response = await fetch(`${getBackendUrl()}/models/downloads/${encodeURIComponent(downloadId)}/status`);
           if (!response.ok) continue;
@@ -2737,12 +2786,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       // Close modal immediately to allow user to continue
       resetModal();
 
-      const response = await fetch(`${getBackendUrl()}/models/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
+      updateDownloadProgress(uploadId, 0, 'Sending file to the Jetson...');
+      const data = await postFormWithProgress(`${getBackendUrl()}/models/upload`, formData, uploadId);
       
       if (!data.success && !data.download_started) {
         // If upload failed immediately (validation error, etc.)
@@ -2789,18 +2834,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         formData.append('custom_script', customScript);
       }
 
-      const response = await fetch(`${getBackendUrl()}/models/download-yolo`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const textResponse = await response.text();
-        throw new Error(`Backend returned ${response.status} ${contentType || ''}: ${textResponse.slice(0, 200)}`);
-      }
-
-      const data = await response.json();
+      const data = await postFormWithProgress(`${getBackendUrl()}/models/download-yolo`, formData, downloadId);
 
       if (!data.success && !data.download_started) {
         // If download failed immediately (validation error, etc.)

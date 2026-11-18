@@ -470,6 +470,18 @@ def get_gpu_memory():
             'error': str(e)
         }), 500
 
+from werkzeug.exceptions import ClientDisconnected
+
+
+@app.errorhandler(ClientDisconnected)
+def handle_client_disconnected(e):
+    """The browser stopped sending a request body partway (page reloaded or
+    closed, network dropped). Werkzeug only logs a bare 400 for this."""
+    logger.warning(f"{request.method} {request.path}: the browser disconnected before the upload finished "
+                   f"(page reloaded/closed or network dropped) - nothing was saved")
+    return jsonify({'success': False, 'error': 'The upload was interrupted before the file finished sending'}), 400
+
+
 def model_name_problem(model_name):
     """Error message if a new model can't use this name, else None. Checked
     before any upload/download work starts, so a taken or invalid name doesn't
