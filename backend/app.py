@@ -485,6 +485,10 @@ def handle_client_disconnected(e):
     return jsonify({'success': False, 'error': 'The upload was interrupted before the file finished sending'}), 400
 
 
+ONNX_TARGET_ERROR = ("JDBoard can't run ONNX models on the Jetson (ONNX Runtime is disabled because it "
+                     "caused bus errors). Choose TensorRT instead.")
+
+
 def model_name_problem(model_name):
     """Error message if a new model can't use this name, else None. Checked
     before any upload/download work starts, so a taken or invalid name doesn't
@@ -568,8 +572,13 @@ def upload_model():
         return jsonify({'success': False, 'error': name_problem}), 400
     is_pt = filename.lower().endswith('.pt')
     is_onnx = filename.lower().endswith('.onnx')
-    # Keeping the uploaded format is not a conversion
-    converting = target_format not in ('PyTorch', 'ONNX' if is_onnx else 'PyTorch')
+    # ONNX models can't run here: .onnx uploads are always built into TensorRT,
+    # and nothing is converted *to* ONNX
+    if is_onnx and target_format in ('PyTorch', 'ONNX'):
+        target_format = 'TensorRT'
+    if target_format == 'ONNX':
+        return jsonify({'success': False, 'error': ONNX_TARGET_ERROR}), 400
+    converting = target_format != 'PyTorch'
 
     if custom_script and custom_script.filename and not custom_script.filename.endswith('.py'):
         return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
@@ -1188,6 +1197,8 @@ def download_yolo_model():
     name_problem = model_name_problem(model_name)
     if name_problem:
         return jsonify({'success': False, 'error': name_problem}), 400
+    if target_format == 'ONNX':
+        return jsonify({'success': False, 'error': ONNX_TARGET_ERROR}), 400
 
     missing = ai_manager.missing_requirement(yolo=True, target_format=target_format if target_format != 'PyTorch' else None)
     if missing:

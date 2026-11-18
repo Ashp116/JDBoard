@@ -136,18 +136,13 @@ const PRECISION_OPTIONS: Record<string, { value: Precision; label: string; hint:
     { value: 'fp32', label: 'FP32', hint: 'Full precision' },
     { value: 'fp16', label: 'FP16', hint: 'Faster on GPU, same accuracy in practice' },
   ],
-  ONNX: [
-    { value: 'fp32', label: 'FP32', hint: 'Full precision, most compatible' },
-    { value: 'fp16', label: 'FP16', hint: 'Half the size' },
-    { value: 'int8', label: 'INT8', hint: 'Smallest; needs calibration images' },
-  ],
   TensorRT: [
     { value: 'fp32', label: 'FP32', hint: 'Most accurate, slowest, most memory to build' },
     { value: 'fp16', label: 'FP16', hint: 'Recommended: fast, accuracy ≈ FP32' },
     { value: 'int8', label: 'INT8', hint: 'Fastest; some accuracy loss; needs calibration images' },
   ],
 };
-const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', ONNX: 'fp32', TensorRT: 'fp16' };
+const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', TensorRT: 'fp16' };
 // Background for selected options/buttons in the Add Model dialog. The theme's
 // NVIDIA green (#76B900) is too light for white text (2.4:1); this is 5.1:1.
 const SELECTED_GREEN = '#4E7A00';
@@ -1959,7 +1954,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '6.2MB',
         description: 'Ultra-lightweight model for edge deployment with fastest inference',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '3.2M',
         accuracy: '37.3% mAP'
       },
@@ -1968,7 +1963,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '21.5MB',
         description: 'Small model balancing speed and accuracy for general use',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '11.2M',
         accuracy: '44.9% mAP'
       },
@@ -1977,7 +1972,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.7MB',
         description: 'Medium model with improved accuracy for production environments',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '25.9M',
         accuracy: '50.2% mAP'
       },
@@ -1986,7 +1981,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '83.7MB',
         description: 'Large model for high-accuracy applications with moderate speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '43.7M',
         accuracy: '52.9% mAP'
       },
@@ -1995,7 +1990,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '136MB',
         description: 'Extra-large model for maximum accuracy in resource-rich scenarios',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '68.2M',
         accuracy: '53.9% mAP'
       }
@@ -2010,7 +2005,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '3.9MB',
         description: 'Nano model - smallest and fastest for mobile deployment',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '1.9M',
         accuracy: '28.0% mAP'
       },
@@ -2019,7 +2014,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '14.1MB',
         description: 'Small model optimized for speed and mobile applications',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '7.2M',
         accuracy: '37.4% mAP'
       },
@@ -2028,7 +2023,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '42.2MB',
         description: 'Medium model with balanced accuracy and speed',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '21.2M',
         accuracy: '45.4% mAP'
       },
@@ -2037,7 +2032,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '93.6MB',
         description: 'Large model for high-accuracy detection tasks',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '46.5M',
         accuracy: '49.0% mAP'
       },
@@ -2046,7 +2041,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '166MB',
         description: 'Extra-large model for maximum detection accuracy',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '86.7M',
         accuracy: '50.7% mAP'
       }
@@ -2061,7 +2056,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '5.1MB',
         description: 'Nano model with improved efficiency over previous versions',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '2.6M',
         accuracy: '39.5% mAP'
       },
@@ -2070,7 +2065,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '19.4MB',
         description: 'Small model with enhanced accuracy and speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '9.4M',
         accuracy: '47.0% mAP'
       },
@@ -2079,7 +2074,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.8MB',
         description: 'Medium model with state-of-the-art performance',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '20.1M',
         accuracy: '51.5% mAP'
       },
@@ -2088,7 +2083,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '86.9MB',
         description: 'Large model for high-accuracy applications',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '25.3M',
         accuracy: '53.4% mAP'
       },
@@ -2097,7 +2092,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '56.9MB',
         description: 'Extra-large model with maximum accuracy',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '56.9M',
         accuracy: '54.7% mAP'
       }
@@ -2818,8 +2813,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
-    // Start from "keep as uploaded"
-    chooseFormat(file.name.toLowerCase().endsWith('.onnx') ? 'ONNX' : 'PyTorch');
+    // .pt starts as "keep as PyTorch"; ONNX can't run on Jetson, so .onnx is always built into TensorRT
+    chooseFormat(file.name.toLowerCase().endsWith('.onnx') ? 'TensorRT' : 'PyTorch');
     if (!modelName) {
       // Name it after the file, swapping characters the backend doesn't allow
       // (e.g. "best.v2.pt" -> "best-v2"), and check it like a typed name
@@ -2862,9 +2857,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   };
 
   const uploadIsOnnx = !!selectedFile && selectedFile.name.toLowerCase().endsWith('.onnx');
-  // .pt (Ultralytics YOLO) -> ONNX/TensorRT; .onnx (any model) -> TensorRT via trtexec
+  // .pt (Ultralytics YOLO) -> kept or TensorRT; .onnx (any model) -> always TensorRT via trtexec
   const isConvertibleUpload = !!selectedFile && (selectedFile.name.toLowerCase().endsWith('.pt') || uploadIsOnnx);
-  const uploadKeepFormat = uploadIsOnnx ? 'ONNX' : 'PyTorch';
+  const uploadKeepFormat = uploadIsOnnx ? null : 'PyTorch';
   const uploadConverting = isConvertibleUpload && selectedFormat !== uploadKeepFormat;
 
   const handleFileUpload = async () => {
@@ -2969,12 +2964,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               </div>
             ))}
           </div>
-          {selectedFormat === 'ONNX' && (
-            <ScriptInfo style={{ marginTop: '8px' }}>
-              <i className="fas fa-info-circle"></i>
-              JDBoard can't run ONNX models on Jetson; use this to take the model to another machine.
-            </ScriptInfo>
-          )}
   
           {precision === 'int8' && (
             <div style={{ marginTop: '10px' }}>
@@ -4038,8 +4027,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               {isConvertibleUpload && (
                 <>
                   {uploadIsOnnx
-                    ? renderExportSettings(['ONNX', 'TensorRT'], 'upload', 'Convert To', { keepFormat: 'ONNX', noInt8: true })
-                    : renderExportSettings(['PyTorch', 'ONNX', 'TensorRT'], 'upload', 'Convert To')}
+                    ? renderExportSettings(['TensorRT'], 'upload', 'Convert To', { noInt8: true })
+                    : renderExportSettings(['PyTorch', 'TensorRT'], 'upload', 'Convert To')}
                   {uploadIsOnnx && selectedFormat === 'TensorRT' && (
                     <ScriptInfo style={{ marginTop: '8px', marginBottom: '16px' }}>
                       <i className="fas fa-info-circle"></i>
@@ -4093,7 +4082,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     >
                       <i className="fas fa-cogs"></i>
                       <span>Default</span>
-                      <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
+                      <small>Built-in handler (YOLO, TensorRT, PyTorch)</small>
                     </ScriptOption>
                     
                     <ScriptOption
@@ -4262,7 +4251,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       >
                         <i className="fas fa-cogs"></i>
                         <span>Default</span>
-                        <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
+                        <small>Built-in handler (YOLO, TensorRT, PyTorch)</small>
                       </ScriptOption>
                       
                       <ScriptOption
