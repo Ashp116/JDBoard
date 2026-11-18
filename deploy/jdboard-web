@@ -1,0 +1,47 @@
+#!/bin/bash
+# jdboard-web - serve the JDBoard website only while JDBoard is running.
+#
+# Installed as /opt/jdboard/bin/jdboard-web (root-owned) and run by systemd as
+# root, never by the dashboard:
+#   jdboard.service   ExecStartPre=+... on    enable the nginx site, reload nginx
+#                     ExecStopPost=+... off   disable it after a clean stop
+#                                             (not when systemd is about to restart
+#                                             a crashed backend)
+#   nginx.service     ExecStartPre=-... nginx-start   drop a site left enabled by a
+#                     power cut, unless JDBoard is starting
+# So with "Auto-start JDBoard" off, nothing answers on the dashboard's ports after
+# a reboot until `sudo systemctl start jdboard`.
+set -euo pipefail
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+AVAILABLE="${JDBOARD_NGINX_SITE:-/etc/nginx/sites-available/jdboard}"
+ENABLED="${JDBOARD_NGINX_ENABLED:-/etc/nginx/sites-enabled/jdboard}"
+
+reload_nginx() {
+    # Don't wait on systemd (we may be inside another unit's start job); does
+    # nothing if nginx isn't running yet - it reads the site when it starts
+    systemctl --no-block try-reload-or-restart nginx.service 2>/dev/null || true
+}
+
+case "${1:-}" in
+    on)
+        [ -f "$AVAILABLE" ] || { echo "jdboard-web: $AVAILABLE is missing" >&2; exit 0; }
+        ln -sfn "$AVAILABLE" "$ENABLED"
+        reload_nginx ;;
+    off)
+        # systemd sets SERVICE_RESULT for ExecStopPost: anything but "success"
+        # means a failure, after which Restart=on-failure starts it again
+        if [ "${SERVICE_RESULT:-success}" != "success" ]; then
+            exit 0
+        fi
+        rm -f "$ENABLED"
+        reload_nginx ;;
+    nginx-start)
+        case "$(systemctl is-active jdboard.service 2>/dev/null || true)" in
+            active|activating|reloading) ;;
+            *) rm -f "$ENABLED" ;;
+        esac ;;
+    *)
+        echo "usage: jdboard-web {on|off|nginx-start}" >&2
+        exit 2 ;;
+esac
