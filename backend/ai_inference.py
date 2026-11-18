@@ -1820,7 +1820,16 @@ class AIModelManager:
         final_path = source_path
         final_format = 'pytorch'
 
-        if target_format != 'PyTorch':
+        if source_path.suffix.lower() == '.onnx':
+            # Any ONNX model -> TensorRT engine with NVIDIA's trtexec
+            if target_format == 'TensorRT':
+                update_progress(80, 'Converting ONNX to TensorRT with trtexec...')
+                check_cancelled()
+                final_path = self._convert_onnx_with_trtexec(source_path, progress_callback, cancel_check_callback, export_options)
+                final_format = 'tensorrt'
+            else:
+                final_format = 'onnx'
+        elif target_format != 'PyTorch':
             logger.info(f"Converting model to {target_format}")
             update_progress(80, f'Converting to {target_format} format...')
             check_cancelled()
@@ -1851,6 +1860,157 @@ class AIModelManager:
             'download_path': str(final_path),
             'format': final_format
         }
+
+    @staticmethod
+    def find_trtexec():
+        """Path to NVIDIA's trtexec (ships with JetPack's TensorRT), or None."""
+        for candidate in (shutil.which('trtexec'), '/usr/src/tensorrt/bin/trtexec', '/usr/bin/trtexec'):
+            if candidate and os.path.exists(candidate):
+                return candidate
+        return None
+
+    @staticmethod
+    def _onnx_shape_args(source_path, imgsz):
+        """trtexec --shapes value for an ONNX model with dynamic input sizes, or None
+        when every input already has a fixed shape.
+
+        Dynamic image inputs (N x C x H x W) are built for batch 1 at imgsz x imgsz;
+        other dynamic inputs can't be guessed, so they are rejected."""
+        import onnx
+        model = onnx.load(str(source_path), load_external_data=False)
+        initializers = {init.name for init in model.graph.initializer}
+        specs, dynamic = [], False
+        for inp in model.graph.input:
+            if inp.name in initializers:
+                continue
+            dims = [(d.dim_value if d.HasField('dim_value') and d.dim_value > 0 else None)
+                    for d in inp.type.tensor_type.shape.dim]
+            if all(d is not None for d in dims):
+                specs.append(f"{inp.name}:{'x'.join(map(str, dims))}")
+                continue
+            dynamic = True
+            if len(dims) != 4:
+                raise ValueError(f"Input '{inp.name}' has a variable shape that isn't an image (N x C x H x W), "
+                                 "so JDBoard can't pick a size for it. Export the ONNX model with a fixed input shape.")
+            n, c, h, w = dims
+            specs.append(f"{inp.name}:{n or 1}x{c or 3}x{h or imgsz}x{w or imgsz}")
+        return ','.join(specs) if dynamic else None
+
+    def _convert_onnx_with_trtexec(self, source_path, progress_callback=None, cancel_check_callback=None, export_options=None):
+        """Build a TensorRT engine from any ONNX model with trtexec.
+
+        Ultralytics ONNX exports carry their metadata (class names, image size,
+        task); it is written ahead of the engine in the same header Ultralytics'
+        own .engine exports use, so the built-in YOLO handler keeps the class names.
+        Returns the path of the .engine file."""
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+
+        trtexec = self.find_trtexec()
+        if not trtexec:
+            raise RuntimeError("trtexec was not found. It comes with TensorRT on JetPack "
+                               "(/usr/src/tensorrt/bin/trtexec); install the 'tensorrt' JetPack package.")
+        opts = export_options or normalize_export_options('TensorRT')
+        if opts['precision'] not in ('fp32', 'fp16'):
+            raise ValueError("ONNX to TensorRT supports FP32 or FP16")
+        workspace = opts.get('workspace', TRT_WORKSPACE_GB)
+        raw_engine = source_path.with_name(source_path.stem + '_trtexec.engine')
+        final_engine = source_path.with_suffix('.engine')
+
+        cmd = [trtexec, f'--onnx={source_path}', f'--saveEngine={raw_engine}',
+               f'--memPoolSize=workspace:{workspace}G', '--skipInference']
+        if opts['precision'] == 'fp16':
+            cmd.append('--fp16')
+        shapes = self._onnx_shape_args(source_path, opts['imgsz'])
+        if shapes:
+            cmd.append(f'--shapes={shapes}')
+        logger.info(f"Building TensorRT engine with trtexec: {opts['precision'].upper()}, workspace {workspace} GB"
+                    + (f", shapes {shapes}" if shapes else ''))
+        update_progress(85, f"Building {opts['precision'].upper()} TensorRT engine with trtexec - this takes a few minutes...")
+
+        start = time.time()
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   universal_newlines=True, bufsize=1)
+        recent_errors = []
+
+        def monitor_output():
+            try:
+                for line in iter(process.stdout.readline, ''):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if '[E]' in line or 'Error' in line:
+                        recent_errors.append(line)
+                        del recent_errors[:-5]
+                        logger.warning(line)
+                    elif '[W]' in line:
+                        logger.warning(line)
+                    elif any(k in line for k in ('Engine built', 'PASSED', 'FAILED', 'Input', 'Output', 'Total')):
+                        logger.info(line)
+            finally:
+                process.stdout.close()
+
+        output_thread = threading.Thread(target=monitor_output, daemon=True)
+        output_thread.start()
+        with _ACTIVE_EXPORTS_LOCK:
+            _ACTIVE_EXPORTS.add(process)
+        cancelled = False
+        try:
+            while True:
+                try:
+                    return_code = process.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel_check_callback and cancel_check_callback():
+                        cancelled = True
+                        logger.info("Stopping trtexec (cancelled)")
+                        stop_process(process)
+                    else:
+                        update_progress(86, f"Building TensorRT engine with trtexec... {int(time.time() - start)}s")
+        finally:
+            with _ACTIVE_EXPORTS_LOCK:
+                _ACTIVE_EXPORTS.discard(process)
+        output_thread.join(timeout=2.0)
+
+        try:
+            if cancelled:
+                raise Exception("TensorRT conversion cancelled by user")
+            if return_code == -9:
+                raise RuntimeError("trtexec was killed by the system because it ran out of memory. "
+                                   "Try a smaller TensorRT workspace or a smaller model.")
+            if return_code != 0 or not raw_engine.exists():
+                detail = recent_errors[-1] if recent_errors else f"exit code {return_code}"
+                raise RuntimeError(f"trtexec could not build the engine: {detail}")
+
+            # Ultralytics metadata from the ONNX file, if it is an Ultralytics export
+            metadata = {}
+            try:
+                from ultralytics.nn.backends.base import BaseBackend
+                metadata = BaseBackend.read_metadata(source_path) or {}
+            except Exception as e:
+                logger.info(f"No Ultralytics metadata read from {source_path.name}: {e}")
+            if metadata:
+                meta = json.dumps(metadata, default=str)
+                with open(final_engine, 'wb') as out, open(raw_engine, 'rb') as engine:
+                    out.write(len(meta).to_bytes(4, byteorder='little', signed=True))
+                    out.write(meta.encode())
+                    shutil.copyfileobj(engine, out)
+                raw_engine.unlink()
+                logger.info(f"Added Ultralytics metadata to the engine ({len(metadata.get('names', {}))} class names)")
+            else:
+                raw_engine.replace(final_engine)
+
+            # The engine replaces the uploaded ONNX
+            source_path.unlink(missing_ok=True)
+            size_mb = final_engine.stat().st_size / (1024 * 1024)
+            logger.info(f"trtexec built {final_engine.name} ({size_mb:.1f} MB) in {time.time() - start:.0f}s")
+            update_progress(89, f"TensorRT engine built in {time.time() - start:.0f}s")
+            return final_engine
+        except Exception:
+            for leftover in (raw_engine, final_engine):
+                leftover.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def is_ultralytics_checkpoint(path):

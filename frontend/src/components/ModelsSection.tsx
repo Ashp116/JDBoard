@@ -2493,6 +2493,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
+    // Start from "keep as uploaded"
+    chooseFormat(file.name.toLowerCase().endsWith('.onnx') ? 'ONNX' : 'PyTorch');
     if (!modelName) {
       // Auto-generate model name from filename
       const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
@@ -2529,7 +2531,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
-  const isConvertibleUpload = !!selectedFile && selectedFile.name.toLowerCase().endsWith('.pt');
+  const uploadIsOnnx = !!selectedFile && selectedFile.name.toLowerCase().endsWith('.onnx');
+  // .pt (Ultralytics YOLO) -> ONNX/TensorRT; .onnx (any model) -> TensorRT via trtexec
+  const isConvertibleUpload = !!selectedFile && (selectedFile.name.toLowerCase().endsWith('.pt') || uploadIsOnnx);
+  const uploadKeepFormat = uploadIsOnnx ? 'ONNX' : 'PyTorch';
+  const uploadConverting = isConvertibleUpload && selectedFormat !== uploadKeepFormat;
 
   const handleFileUpload = async () => {
     if (!selectedFile || !modelName.trim()) {
@@ -2645,7 +2651,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   // Target format, precision, INT8 calibration and advanced export settings.
   // Shared by the YOLO download tab and the upload tab (for .pt files).
-  const renderExportSettings = (formats: string[], idPrefix: string, targetLabel: string = 'Target Format') => (
+  // keepFormat: the uploaded file's own format (no conversion, so no precision
+  // settings); noInt8: hide INT8 (trtexec ONNX builds have no image calibration)
+  const renderExportSettings = (formats: string[], idPrefix: string, targetLabel: string = 'Target Format',
+                                opts: { keepFormat?: string; noInt8?: boolean } = {}) => (
     <>
         <FormatSelector>
           <label>{targetLabel}</label>
@@ -2662,10 +2671,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           </div>
         </FormatSelector>
   
+        {opts.keepFormat !== selectedFormat && (
         <FormatSelector>
           <label>Precision</label>
           <div className="format-grid">
-            {(PRECISION_OPTIONS[selectedFormat] || []).map(option => (
+            {(PRECISION_OPTIONS[selectedFormat] || []).filter(o => !(opts.noInt8 && o.value === 'int8')).map(option => (
               <div
                 key={option.value}
                 className={`format-option ${precision === option.value ? 'selected' : ''}`}
@@ -2757,6 +2767,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             )}
           </div>
         </FormatSelector>
+        )}
     </>
   );
 
@@ -3621,16 +3632,20 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
               {isConvertibleUpload ? (
                 <>
-                  {renderExportSettings(['PyTorch', 'ONNX', 'TensorRT'], 'upload', 'Convert To')}
+                  {uploadIsOnnx
+                    ? renderExportSettings(['ONNX', 'TensorRT'], 'upload', 'Convert To', { keepFormat: 'ONNX', noInt8: true })
+                    : renderExportSettings(['PyTorch', 'ONNX', 'TensorRT'], 'upload', 'Convert To')}
                   <ScriptInfo style={{ marginTop: '8px', marginBottom: '16px' }}>
                     <i className="fas fa-info-circle"></i>
-                    Conversion works for Ultralytics YOLO .pt files (e.g. your own trained best.pt). Choose PyTorch to keep the file as uploaded.
+                    {uploadIsOnnx
+                      ? "TensorRT builds an engine from this ONNX file with NVIDIA's trtexec (FP32 or FP16). Ultralytics YOLO exports keep their class names; other models need a custom inference script to show results. Choose ONNX to keep the file as uploaded."
+                      : 'Conversion works for Ultralytics YOLO .pt files (e.g. your own trained best.pt). Choose PyTorch to keep the file as uploaded.'}
                   </ScriptInfo>
                 </>
               ) : selectedFile && (
                 <ScriptInfo style={{ marginBottom: '16px' }}>
                   <i className="fas fa-info-circle"></i>
-                  This file will be used as-is. To convert a model to TensorRT, upload its Ultralytics .pt file.
+                  This file will be used as-is. Only .pt (Ultralytics YOLO) and .onnx files can be converted to TensorRT.
                 </ScriptInfo>
               )}
 
@@ -3930,7 +3945,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     disabled={loading || !selectedFile || !modelName.trim() || !!nameError || (scriptOption === 'custom' && !customScript)
                               || (isConvertibleUpload && precision === 'int8' && calibrationSource === 'upload' && !calibrationZip)}
                   >
-                    {loading ? <LoadingSpinner /> : (isConvertibleUpload && selectedFormat !== 'PyTorch' ? 'Upload & Convert' : 'Upload Model')}
+                    {loading ? <LoadingSpinner /> : (uploadConverting ? 'Upload & Convert' : 'Upload Model')}
                   </Button>
                 </>
               ) : (

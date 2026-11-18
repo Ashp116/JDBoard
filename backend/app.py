@@ -536,7 +536,9 @@ def upload_model():
     if not model_name:
         model_name = filename.rsplit('.', 1)[0]
     is_pt = filename.lower().endswith('.pt')
-    converting = target_format != 'PyTorch'
+    is_onnx = filename.lower().endswith('.onnx')
+    # Keeping the uploaded format is not a conversion
+    converting = target_format not in ('PyTorch', 'ONNX' if is_onnx else 'PyTorch')
 
     if custom_script and custom_script.filename and not custom_script.filename.endswith('.py'):
         return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
@@ -567,10 +569,30 @@ def upload_model():
             )
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
+    elif is_onnx and converting:
+        # Any ONNX model -> TensorRT with trtexec (FP32/FP16; INT8 would need a calibration cache)
+        if target_format != 'TensorRT':
+            return jsonify({'success': False, 'error': 'ONNX files can only be converted to TensorRT'}), 400
+        if not ai_manager.find_trtexec():
+            return jsonify({'success': False,
+                            'error': "trtexec (part of JetPack's TensorRT) was not found, so ONNX can't be converted."}), 400
+        if (request.form.get('precision') or '').lower() == 'int8':
+            return jsonify({'success': False,
+                            'error': 'INT8 is not available for ONNX uploads. Choose FP16 or FP32, '
+                                     'or upload the YOLO .pt file to build an INT8 engine.'}), 400
+        try:
+            export_options = normalize_export_options(
+                'TensorRT',
+                precision=request.form.get('precision'),
+                imgsz=request.form.get('imgsz'),
+                workspace=request.form.get('workspace'),
+            )
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
     elif converting:
         return jsonify({'success': False,
-                        'error': 'Only Ultralytics YOLO .pt files can be converted. Upload this file as-is, '
-                                 'or upload the .pt it was trained as.'}), 400
+                        'error': 'Only Ultralytics YOLO .pt files and ONNX files can be converted. '
+                                 'Upload this file as-is.'}), 400
 
     # Save the uploaded files now: Flask closes the request's file streams
     # once this handler returns, so the background thread can't read them.
