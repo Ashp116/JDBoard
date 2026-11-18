@@ -2686,12 +2686,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               </div>
             ))}
           </div>
-          <ScriptInfo style={{ marginTop: '8px' }}>
-            <i className="fas fa-info-circle"></i>
-            {(PRECISION_OPTIONS[selectedFormat] || []).find(o => o.value === precision)?.hint}
-            {selectedFormat === 'PyTorch' && ' (applied when the model runs; no conversion)'}
-            {selectedFormat === 'ONNX' && '. Note: JDBoard can\'t run ONNX models on Jetson (ONNX Runtime is disabled), so use this to take the model to another machine.'}
-          </ScriptInfo>
+          {selectedFormat === 'ONNX' && (
+            <ScriptInfo style={{ marginTop: '8px' }}>
+              <i className="fas fa-info-circle"></i>
+              JDBoard can't run ONNX models on Jetson; use this to take the model to another machine.
+            </ScriptInfo>
+          )}
   
           {precision === 'int8' && (
             <div style={{ marginTop: '10px' }}>
@@ -3630,23 +3630,18 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </select>
               </FormGroup>
 
-              {isConvertibleUpload ? (
+              {isConvertibleUpload && (
                 <>
                   {uploadIsOnnx
                     ? renderExportSettings(['ONNX', 'TensorRT'], 'upload', 'Convert To', { keepFormat: 'ONNX', noInt8: true })
                     : renderExportSettings(['PyTorch', 'ONNX', 'TensorRT'], 'upload', 'Convert To')}
-                  <ScriptInfo style={{ marginTop: '8px', marginBottom: '16px' }}>
-                    <i className="fas fa-info-circle"></i>
-                    {uploadIsOnnx
-                      ? "TensorRT builds an engine from this ONNX file with NVIDIA's trtexec (FP32 or FP16). Ultralytics YOLO exports keep their class names; other models need a custom inference script to show results. Choose ONNX to keep the file as uploaded."
-                      : 'Conversion works for Ultralytics YOLO .pt files (e.g. your own trained best.pt). Choose PyTorch to keep the file as uploaded.'}
-                  </ScriptInfo>
+                  {uploadIsOnnx && selectedFormat === 'TensorRT' && (
+                    <ScriptInfo style={{ marginTop: '8px', marginBottom: '16px' }}>
+                      <i className="fas fa-info-circle"></i>
+                      Non-YOLO ONNX models need a custom inference script to show results.
+                    </ScriptInfo>
+                  )}
                 </>
-              ) : selectedFile && (
-                <ScriptInfo style={{ marginBottom: '16px' }}>
-                  <i className="fas fa-info-circle"></i>
-                  This file will be used as-is. Only .pt (Ultralytics YOLO) and .onnx files can be converted to TensorRT.
-                </ScriptInfo>
               )}
 
               <CustomScriptSection>
@@ -3741,13 +3736,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                         </button>
                       )}
                     </CustomScriptUpload>
-                  )}
-
-                  {scriptOption === 'default' && (
-                    <ScriptInfo>
-                      <i className="fas fa-info-circle"></i>
-                      No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
-                    </ScriptInfo>
                   )}
                 </CustomScriptSection>
             </div>
@@ -3917,13 +3905,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                           </button>
                         )}
                       </CustomScriptUpload>
-                    )}
-
-                    {scriptOption === 'default' && (
-                      <ScriptInfo>
-                        <i className="fas fa-info-circle"></i>
-                        No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
-                      </ScriptInfo>
                     )}
                   </CustomScriptSection>
                 </>
