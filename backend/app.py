@@ -2194,20 +2194,38 @@ def get_system_info():
 
 SETTINGS_FILE = os.path.join(DATA_DIR, 'config', 'settings.json')
 
+# Dashboard settings saved on the Jetson (Settings > JDBoard Settings).
+# Hardware settings (clocks, power, fan) and start-on-boot live in jtop/systemd.
+UPDATE_INTERVALS = {'0.5s': 0.5, '1s': 1.0, '2s': 2.0, '5s': 5.0}
+DASHBOARD_SETTING_DEFAULTS = {'updateInterval': '1s', 'enableNotifications': True}
+_settings_cache = {'mtime': None, 'values': dict(DASHBOARD_SETTING_DEFAULTS)}
+
+
+def load_dashboard_settings():
+    """Saved dashboard settings merged over the defaults (re-read when the file changes)."""
+    try:
+        mtime = os.path.getmtime(SETTINGS_FILE)
+    except OSError:
+        return dict(DASHBOARD_SETTING_DEFAULTS)
+    if mtime != _settings_cache['mtime']:
+        values = dict(DASHBOARD_SETTING_DEFAULTS)
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                values.update(json.load(f))
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not read {SETTINGS_FILE}: {e}")
+        _settings_cache.update(mtime=mtime, values=values)
+    return dict(_settings_cache['values'])
+
+
+def update_interval_seconds():
+    return UPDATE_INTERVALS.get(load_dashboard_settings().get('updateInterval'), 1.0)
+
 @app.route('/settings', methods=['GET'])
 def get_settings():
     """Get dashboard settings, with hardware settings read live from jtop"""
     try:
-        settings = {
-            'theme': 'nvidia',
-            'refreshInterval': 2000,
-            'notifications': True,
-            'autoUpdate': True,
-            'debugMode': False,
-        }
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r') as f:
-                settings.update(json.load(f))
+        settings = load_dashboard_settings()
 
         system_data = system_monitor.get_system_status()
         settings['jetsonClocks'] = bool(system_data.get('jetson_clocks', False))
@@ -2222,13 +2240,24 @@ def get_settings():
 def save_settings():
     """Save dashboard settings (hardware settings are applied via their own endpoints)"""
     try:
-        settings = {k: v for k, v in (request.json or {}).items()
-                    if k not in ('jetsonClocks', 'powerMode', 'fanMode', 'autoStartDashboard')}  # systemd holds start-on-boot
+        data = request.json or {}
+        settings = load_dashboard_settings()
+        if 'updateInterval' in data:
+            if data['updateInterval'] not in UPDATE_INTERVALS:
+                return jsonify({'success': False, 'error': f"Update interval must be one of {', '.join(UPDATE_INTERVALS)}"}), 400
+            settings['updateInterval'] = data['updateInterval']
+        if 'enableNotifications' in data:
+            settings['enableNotifications'] = bool(data['enableNotifications'])
+        # Only known dashboard settings are stored; hardware settings and
+        # start-on-boot are applied through their own endpoints
+        settings = {k: settings[k] for k in DASHBOARD_SETTING_DEFAULTS}
         os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-        with open(SETTINGS_FILE, 'w') as f:
+        tmp = SETTINGS_FILE + '.tmp'
+        with open(tmp, 'w') as f:
             json.dump(settings, f, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
         logger.info(f"Settings saved: {settings}")
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'settings': settings})
     except Exception as e:
         logger.error(f"Error saving settings: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -3308,7 +3337,8 @@ def background_system_updates():
             except Exception:
                 pass  # If we can't even emit this, just continue
         
-        socketio.sleep(0.5)  # Update every 0.5 seconds for more responsive data
+        # Settings > Update Interval (0.5-5 s); jtop itself samples every 0.5 s
+        socketio.sleep(update_interval_seconds())
 
 @app.route('/system/processes', methods=['GET'])
 def get_processes():
