@@ -3315,6 +3315,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
+  const openScriptEditor = (model: ModelInfo) => {
+    if (loadingScript) return;
+    handleEditScript(model.id, model.id, !!model.custom_script_path,
+      model.script_status === 'failed'
+        ? { error: model.script_error, line: model.script_error_line, traceback: model.script_traceback }
+        : undefined);
+  };
+
   const closeScriptEditor = () => {
     if (viewingScript && viewingScript.draft !== viewingScript.scriptContent &&
         !window.confirm('Discard your changes to this script?')) {
@@ -3695,19 +3703,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </div>
                 <div className="info-row">
                   <span className="label">Inference:</span>
-                  {model.script_status === 'failed' ? (
-                    <span
-                      className="value"
-                      style={{ color: '#ff6b6b' }}
-                      title={model.script_error || 'Custom script failed'}
-                    >
-                      <i className="fas fa-exclamation-triangle"></i> Custom script failed (using default)
-                    </span>
-                  ) : (
-                    <span className="value">
-                      {model.custom_script_path ? 'Custom script' : 'Default'}
-                    </span>
-                  )}
+                  {/* Clicking the handler opens the script editor */}
+                  <span
+                    className="value"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openScriptEditor(model)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openScriptEditor(model); } }}
+                    style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: '3px',
+                             ...(model.script_status === 'failed' ? { color: '#ff6b6b' } : {}) }}
+                    title={model.script_status === 'failed'
+                      ? `${model.script_error || 'Custom script failed'} (click to open the script)`
+                      : 'Click to view or edit the inference script'}
+                  >
+                    {model.script_status === 'failed' ? (
+                      <><i className="fas fa-exclamation-triangle"></i> Custom script failed (using default)</>
+                    ) : (
+                      model.custom_script_path ? 'Custom script' : 'Default'
+                    )}
+                  </span>
                 </div>
                 {model.load_problem && !model.loaded && (
                   <div
@@ -3768,10 +3782,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               
               <div style={{ marginTop: '8px' }}>
                 <button
-                  onClick={() => handleEditScript(model.id, model.id, !!model.custom_script_path,
-                    model.script_status === 'failed'
-                      ? { error: model.script_error, line: model.script_error_line, traceback: model.script_traceback }
-                      : undefined)}
+                  onClick={() => openScriptEditor(model)}
                   disabled={loadingScript}
                   style={{
                     width: '100%',

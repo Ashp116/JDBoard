@@ -2123,13 +2123,18 @@ class AIModelManager:
                 detail = recent_errors[-1] if recent_errors else f"exit code {return_code}"
                 raise RuntimeError(f"trtexec could not build the engine: {detail}")
 
-            # Ultralytics metadata from the ONNX file, if it is an Ultralytics export
+            # Ultralytics metadata from the ONNX file, only if it is an Ultralytics
+            # export. Other ONNX files can carry their own metadata (e.g. RF-DETR's
+            # 'rfdetr_inference'); a header on those engines breaks scripts that
+            # hand the whole file to TensorRT.
             metadata = {}
             try:
                 from ultralytics.nn.backends.base import BaseBackend
                 metadata = BaseBackend.read_metadata(source_path) or {}
             except Exception as e:
                 logger.info(f"No Ultralytics metadata read from {source_path.name}: {e}")
+            if not ('names' in metadata and ('task' in metadata or 'stride' in metadata)):
+                metadata = {}
             if metadata:
                 meta = json.dumps(metadata, default=str)
                 with open(final_engine, 'wb') as out, open(raw_engine, 'rb') as engine:
