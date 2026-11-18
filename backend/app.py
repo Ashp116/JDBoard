@@ -56,6 +56,8 @@ def _helper_action(cmd):
         return ['poweroff']
     if cmd == ['jtop', '--install-service']:
         return ['jtop-install-service']
+    if cmd in (['systemctl', 'enable', 'jdboard.service'], ['systemctl', 'disable', 'jdboard.service']):
+        return ['autostart-on' if cmd[1] == 'enable' else 'autostart-off']
     if len(cmd) == 3 and cmd[0] == 'systemctl' and cmd[2] == 'jtop.service' and cmd[1] in ('start', 'stop', 'restart'):
         return [f'jtop-{cmd[1]}']
     if len(cmd) == 3 and cmd[:2] == ['sh', '-c']:
@@ -2221,7 +2223,7 @@ def save_settings():
     """Save dashboard settings (hardware settings are applied via their own endpoints)"""
     try:
         settings = {k: v for k, v in (request.json or {}).items()
-                    if k not in ('jetsonClocks', 'powerMode', 'fanMode')}
+                    if k not in ('jetsonClocks', 'powerMode', 'fanMode', 'autoStartDashboard')}  # systemd holds start-on-boot
         os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(settings, f, indent=2)
@@ -2282,6 +2284,51 @@ def set_fan_mode():
         return jsonify({'success': True, 'mode': mode, 'profile': mode})
     except Exception as e:
         return _control_error('setting fan mode', e)
+
+def _autostart_state():
+    """(installed, enabled) for jdboard.service - is-enabled needs no root."""
+    out = subprocess.run(['systemctl', 'is-enabled', 'jdboard.service'],
+                         capture_output=True, text=True, timeout=10).stdout.strip()
+    return out not in ('', 'not-found'), out == 'enabled'
+
+
+@app.route('/system/autostart', methods=['GET'])
+def get_autostart():
+    """Whether JDBoard starts on boot (systemd)."""
+    try:
+        installed, enabled = _autostart_state()
+        return jsonify({'success': True, 'installed': installed, 'enabled': enabled})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/system/autostart', methods=['POST'])
+def set_autostart():
+    """Turn starting JDBoard on boot on or off (systemctl enable/disable)."""
+    try:
+        data = request.json or {}
+        enabled = bool(data.get('enabled'))
+        sudo_password = data.get('sudo_password', '')
+        installed, _ = _autostart_state()
+        if not installed:
+            return jsonify({'success': False, 'error': "JDBoard isn't installed as a service "
+                                                       "(sudo ./scripts/install.sh), so there's nothing to start on boot."}), 400
+        if not sudo_password and not passwordless_privileges():
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        result = sudo_run(['systemctl', 'enable' if enabled else 'disable', 'jdboard.service'],
+                          sudo_password, timeout=30)
+        _, now_enabled = _autostart_state()
+        if result.returncode != 0 or now_enabled != enabled:
+            detail = (result.stderr or result.stdout or '').strip()
+            return jsonify({'success': False, 'enabled': now_enabled,
+                            'error': f"Could not {'enable' if enabled else 'disable'} start on boot"
+                                     + (f": {detail}" if detail else '')}), 500
+        logger.info(f"Start on boot {'enabled' if enabled else 'disabled'} by {get_client_ip()}")
+        return jsonify({'success': True, 'enabled': now_enabled})
+    except Exception as e:
+        logger.error(f"Error changing start on boot: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/system/reboot', methods=['POST'])
 def reboot_system():

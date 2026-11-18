@@ -421,8 +421,11 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     reboot: false,
     shutdown: false,
     clearInferenceLogs: false,
-    exportInferenceLogs: false
+    exportInferenceLogs: false,
+    autostart: false
   });
+  // Start on boot is jdboard.service's systemd setting; null until read
+  const [autostartInstalled, setAutostartInstalled] = useState<boolean | null>(null);
 
   const [sudoModal, setSudoModal] = useState<SudoModalState>({
     show: false,
@@ -484,6 +487,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   useEffect(() => {
     // Fetch settings on component mount
     fetchSettings();
+    fetchAutostart();
     // Also fetch current fan mode to ensure accuracy
     fetchCurrentFanMode();
   }, []);
@@ -671,6 +675,45 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       body: JSON.stringify(data),
     });
     return await response.json();
+  };
+
+  const fetchAutostart = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/system/autostart`);
+      const data = await response.json();
+      if (data.success) {
+        setAutostartInstalled(!!data.installed);
+        setSettings(prev => ({ ...prev, autoStartDashboard: !!data.enabled }));
+      }
+    } catch (error) {
+      console.error('Error reading start-on-boot setting:', error);
+    }
+  };
+
+  const handleAutostartToggle = async () => {
+    if (!autostartInstalled || loading.autostart) return;
+    const enabled = !settings.autoStartDashboard;
+    setLoading(prev => ({ ...prev, autostart: true }));
+    try {
+      const result = await executeSudoCommand('/system/autostart', { enabled }, 'Start JDBoard on boot');
+      if (result.success) {
+        setSettings(prev => ({ ...prev, autoStartDashboard: !!result.enabled }));
+        addNotification({
+          type: 'success',
+          title: 'Start on Boot',
+          message: result.enabled ? 'JDBoard will start when the Jetson boots.' : "JDBoard won't start on boot anymore."
+        });
+      } else {
+        addNotification({ type: 'error', title: 'Start on Boot', message: result.error || 'Could not change the setting' });
+        fetchAutostart();
+      }
+    } catch (error) {
+      if (error.message !== 'User cancelled sudo authentication') {
+        addNotification({ type: 'error', title: 'Start on Boot', message: error.message });
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, autostart: false }));
+    }
   };
 
   const handleToggle = (setting) => {
@@ -1013,11 +1056,19 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Auto-start JDBoard</div>
-              <div className="description">Start JDBoard on boot</div>
+              <div className="description">
+                {loading.autostart
+                  ? <><i className="fas fa-spinner fa-spin"></i> Applying...</>
+                  : autostartInstalled === false
+                    ? 'Only available when installed as a service'
+                    : 'Start JDBoard on boot'}
+              </div>
             </div>
             <Toggle 
-              $active={settings.autoStartDashboard} 
-              onClick={() => handleToggle('autoStartDashboard')}
+              $active={!!settings.autoStartDashboard && autostartInstalled !== false} 
+              onClick={handleAutostartToggle}
+              disabled={!autostartInstalled || loading.autostart}
+              style={{ opacity: !autostartInstalled || loading.autostart ? 0.6 : 1 }}
             />
           </SettingItem>
 
