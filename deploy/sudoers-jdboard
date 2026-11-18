@@ -1,3 +1,4 @@
 # JDBoard: the service user may run its root helper (fixed actions only:
-# reboot, poweroff, drop caches, manage jtop.service) without a password.
+# reboot, poweroff, drop caches, manage jtop.service, start JDBoard on boot)
+# without a password.
 jdboard ALL=(root) NOPASSWD: /opt/jdboard/bin/jdboard-admin

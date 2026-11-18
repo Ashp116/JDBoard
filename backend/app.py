@@ -56,6 +56,8 @@ def _helper_action(cmd):
         return ['poweroff']
     if cmd == ['jtop', '--install-service']:
         return ['jtop-install-service']
+    if cmd in (['systemctl', 'enable', 'jdboard.service'], ['systemctl', 'disable', 'jdboard.service']):
+        return ['autostart-on' if cmd[1] == 'enable' else 'autostart-off']
     if len(cmd) == 3 and cmd[0] == 'systemctl' and cmd[2] == 'jtop.service' and cmd[1] in ('start', 'stop', 'restart'):
         return [f'jtop-{cmd[1]}']
     if len(cmd) == 3 and cmd[:2] == ['sh', '-c']:
@@ -2192,20 +2194,38 @@ def get_system_info():
 
 SETTINGS_FILE = os.path.join(DATA_DIR, 'config', 'settings.json')
 
+# Dashboard settings saved on the Jetson (Settings > JDBoard Settings).
+# Hardware settings (clocks, power, fan) and start-on-boot live in jtop/systemd.
+UPDATE_INTERVALS = {'0.5s': 0.5, '1s': 1.0, '2s': 2.0, '5s': 5.0}
+DASHBOARD_SETTING_DEFAULTS = {'updateInterval': '1s', 'enableNotifications': True}
+_settings_cache = {'mtime': None, 'values': dict(DASHBOARD_SETTING_DEFAULTS)}
+
+
+def load_dashboard_settings():
+    """Saved dashboard settings merged over the defaults (re-read when the file changes)."""
+    try:
+        mtime = os.path.getmtime(SETTINGS_FILE)
+    except OSError:
+        return dict(DASHBOARD_SETTING_DEFAULTS)
+    if mtime != _settings_cache['mtime']:
+        values = dict(DASHBOARD_SETTING_DEFAULTS)
+        try:
+            with open(SETTINGS_FILE, 'r') as f:
+                values.update(json.load(f))
+        except (OSError, ValueError) as e:
+            logger.warning(f"Could not read {SETTINGS_FILE}: {e}")
+        _settings_cache.update(mtime=mtime, values=values)
+    return dict(_settings_cache['values'])
+
+
+def update_interval_seconds():
+    return UPDATE_INTERVALS.get(load_dashboard_settings().get('updateInterval'), 1.0)
+
 @app.route('/settings', methods=['GET'])
 def get_settings():
     """Get dashboard settings, with hardware settings read live from jtop"""
     try:
-        settings = {
-            'theme': 'nvidia',
-            'refreshInterval': 2000,
-            'notifications': True,
-            'autoUpdate': True,
-            'debugMode': False,
-        }
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r') as f:
-                settings.update(json.load(f))
+        settings = load_dashboard_settings()
 
         system_data = system_monitor.get_system_status()
         settings['jetsonClocks'] = bool(system_data.get('jetson_clocks', False))
@@ -2220,13 +2240,24 @@ def get_settings():
 def save_settings():
     """Save dashboard settings (hardware settings are applied via their own endpoints)"""
     try:
-        settings = {k: v for k, v in (request.json or {}).items()
-                    if k not in ('jetsonClocks', 'powerMode', 'fanMode')}
+        data = request.json or {}
+        settings = load_dashboard_settings()
+        if 'updateInterval' in data:
+            if data['updateInterval'] not in UPDATE_INTERVALS:
+                return jsonify({'success': False, 'error': f"Update interval must be one of {', '.join(UPDATE_INTERVALS)}"}), 400
+            settings['updateInterval'] = data['updateInterval']
+        if 'enableNotifications' in data:
+            settings['enableNotifications'] = bool(data['enableNotifications'])
+        # Only known dashboard settings are stored; hardware settings and
+        # start-on-boot are applied through their own endpoints
+        settings = {k: settings[k] for k in DASHBOARD_SETTING_DEFAULTS}
         os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
-        with open(SETTINGS_FILE, 'w') as f:
+        tmp = SETTINGS_FILE + '.tmp'
+        with open(tmp, 'w') as f:
             json.dump(settings, f, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
         logger.info(f"Settings saved: {settings}")
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'settings': settings})
     except Exception as e:
         logger.error(f"Error saving settings: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2282,6 +2313,51 @@ def set_fan_mode():
         return jsonify({'success': True, 'mode': mode, 'profile': mode})
     except Exception as e:
         return _control_error('setting fan mode', e)
+
+def _autostart_state():
+    """(installed, enabled) for jdboard.service - is-enabled needs no root."""
+    out = subprocess.run(['systemctl', 'is-enabled', 'jdboard.service'],
+                         capture_output=True, text=True, timeout=10).stdout.strip()
+    return out not in ('', 'not-found'), out == 'enabled'
+
+
+@app.route('/system/autostart', methods=['GET'])
+def get_autostart():
+    """Whether JDBoard starts on boot (systemd)."""
+    try:
+        installed, enabled = _autostart_state()
+        return jsonify({'success': True, 'installed': installed, 'enabled': enabled})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/system/autostart', methods=['POST'])
+def set_autostart():
+    """Turn starting JDBoard on boot on or off (systemctl enable/disable)."""
+    try:
+        data = request.json or {}
+        enabled = bool(data.get('enabled'))
+        sudo_password = data.get('sudo_password', '')
+        installed, _ = _autostart_state()
+        if not installed:
+            return jsonify({'success': False, 'error': "JDBoard isn't installed as a service "
+                                                       "(sudo ./scripts/install.sh), so there's nothing to start on boot."}), 400
+        if not sudo_password and not passwordless_privileges():
+            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        result = sudo_run(['systemctl', 'enable' if enabled else 'disable', 'jdboard.service'],
+                          sudo_password, timeout=30)
+        _, now_enabled = _autostart_state()
+        if result.returncode != 0 or now_enabled != enabled:
+            detail = (result.stderr or result.stdout or '').strip()
+            return jsonify({'success': False, 'enabled': now_enabled,
+                            'error': f"Could not {'enable' if enabled else 'disable'} start on boot"
+                                     + (f": {detail}" if detail else '')}), 500
+        logger.info(f"Start on boot {'enabled' if enabled else 'disabled'} by {get_client_ip()}")
+        return jsonify({'success': True, 'enabled': now_enabled})
+    except Exception as e:
+        logger.error(f"Error changing start on boot: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/system/reboot', methods=['POST'])
 def reboot_system():
@@ -3261,7 +3337,8 @@ def background_system_updates():
             except Exception:
                 pass  # If we can't even emit this, just continue
         
-        socketio.sleep(0.5)  # Update every 0.5 seconds for more responsive data
+        # Settings > Update Interval (0.5-5 s); jtop itself samples every 0.5 s
+        socketio.sleep(update_interval_seconds())
 
 @app.route('/system/processes', methods=['GET'])
 def get_processes():

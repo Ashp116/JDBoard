@@ -396,7 +396,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     fanMode: 'quiet',
     powerMode: 'MAXN_SUPER',
     autoStartDashboard: true,
-    dataRetention: '24h',
     updateInterval: '1s',
     enableNotifications: true
   });
@@ -421,8 +420,13 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     reboot: false,
     shutdown: false,
     clearInferenceLogs: false,
-    exportInferenceLogs: false
+    exportInferenceLogs: false,
+    autostart: false,
+    updateInterval: false,
+    enableNotifications: false
   });
+  // Start on boot is jdboard.service's systemd setting; null until read
+  const [autostartInstalled, setAutostartInstalled] = useState<boolean | null>(null);
 
   const [sudoModal, setSudoModal] = useState<SudoModalState>({
     show: false,
@@ -439,7 +443,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
 
-  const { addNotification } = useNotifications();
+  const { addNotification, setPopupsEnabled } = useNotifications();
 
   // Fetch current settings from backend
   const fetchSettings = async () => {
@@ -451,7 +455,10 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           ...prev,
           jetsonClocks: settingsData.jetsonClocks || false,
           powerMode: settingsData.powerMode || prev.powerMode,
-          fanMode: settingsData.fanMode || 'quiet'
+          fanMode: settingsData.fanMode || 'quiet',
+          updateInterval: settingsData.updateInterval || prev.updateInterval,
+          enableNotifications: typeof settingsData.enableNotifications === 'boolean'
+            ? settingsData.enableNotifications : prev.enableNotifications
         }));
         console.log('Settings loaded from backend:', settingsData);
       }
@@ -484,6 +491,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   useEffect(() => {
     // Fetch settings on component mount
     fetchSettings();
+    fetchAutostart();
     // Also fetch current fan mode to ensure accuracy
     fetchCurrentFanMode();
   }, []);
@@ -673,18 +681,67 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     return await response.json();
   };
 
-  const handleToggle = (setting) => {
-    setSettings(prev => ({
-      ...prev,
-      [setting]: !prev[setting]
-    }));
+  const fetchAutostart = async () => {
+    try {
+      const response = await fetch(`${getBackendUrl()}/system/autostart`);
+      const data = await response.json();
+      if (data.success) {
+        setAutostartInstalled(!!data.installed);
+        setSettings(prev => ({ ...prev, autoStartDashboard: !!data.enabled }));
+      }
+    } catch (error) {
+      console.error('Error reading start-on-boot setting:', error);
+    }
   };
 
-  const handleSelectChange = (setting, value) => {
-    setSettings(prev => ({
-      ...prev,
-      [setting]: value
-    }));
+  const handleAutostartToggle = async () => {
+    if (!autostartInstalled || loading.autostart) return;
+    const enabled = !settings.autoStartDashboard;
+    setLoading(prev => ({ ...prev, autostart: true }));
+    try {
+      const result = await executeSudoCommand('/system/autostart', { enabled }, 'Start JDBoard on boot');
+      if (result.success) {
+        setSettings(prev => ({ ...prev, autoStartDashboard: !!result.enabled }));
+        addNotification({
+          type: 'success',
+          title: 'Start on Boot',
+          message: result.enabled ? 'JDBoard will start when the Jetson boots.' : "JDBoard won't start on boot anymore."
+        });
+      } else {
+        addNotification({ type: 'error', title: 'Start on Boot', message: result.error || 'Could not change the setting' });
+        fetchAutostart();
+      }
+    } catch (error) {
+      if (error.message !== 'User cancelled sudo authentication') {
+        addNotification({ type: 'error', title: 'Start on Boot', message: error.message });
+      }
+    } finally {
+      setLoading(prev => ({ ...prev, autostart: false }));
+    }
+  };
+
+  // Save one dashboard setting on the Jetson (Settings > JDBoard Settings)
+  const saveDashboardSetting = async (key: 'updateInterval' | 'enableNotifications', value: string | boolean) => {
+    const previous = settings[key];
+    setSettings(prev => ({ ...prev, [key]: value }));
+    if (key === 'enableNotifications') setPopupsEnabled(value as boolean);
+    setLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const response = await fetch(`${getBackendUrl()}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Could not save the setting');
+    } catch (error) {
+      // Put it back the way it was
+      setSettings(prev => ({ ...prev, [key]: previous }));
+      if (key === 'enableNotifications') setPopupsEnabled(previous as boolean);
+      addNotification({ type: 'error', title: 'Settings', message: error.message });
+    } finally {
+      setLoading(prev => ({ ...prev, [key]: false }));
+    }
   };
 
   const handleJetsonClocksToggle = async () => {
@@ -1007,44 +1064,41 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         <SettingsCard>
           <h3>
             <i className="fas fa-desktop"></i>
-            JDBoard Settings [Not working, fix this later bro]
+            JDBoard Settings
           </h3>
 
           <SettingItem>
             <div>
               <div className="label">Auto-start JDBoard</div>
-              <div className="description">Start JDBoard on boot</div>
+              <div className="description">
+                {loading.autostart
+                  ? <><i className="fas fa-spinner fa-spin"></i> Applying...</>
+                  : autostartInstalled === false
+                    ? 'Only available when installed as a service'
+                    : 'Start JDBoard on boot'}
+              </div>
             </div>
             <Toggle 
-              $active={settings.autoStartDashboard} 
-              onClick={() => handleToggle('autoStartDashboard')}
+              $active={!!settings.autoStartDashboard && autostartInstalled !== false} 
+              onClick={handleAutostartToggle}
+              disabled={!autostartInstalled || loading.autostart}
+              style={{ opacity: !autostartInstalled || loading.autostart ? 0.6 : 1 }}
             />
           </SettingItem>
 
           <SettingItem>
             <div>
-              <div className="label">Data Retention</div>
-              <div className="description">How long to keep monitoring data</div>
-            </div>
-            <Select 
-              value={settings.dataRetention}
-              onChange={(e) => handleSelectChange('dataRetention', e.target.value)}
-            >
-              <option value="1h">1 Hour</option>
-              <option value="6h">6 Hours</option>
-              <option value="24h">24 Hours</option>
-              <option value="7d">7 Days</option>
-            </Select>
-          </SettingItem>
-
-          <SettingItem>
-            <div>
               <div className="label">Update Interval</div>
-              <div className="description">Data refresh frequency</div>
+              <div className="description">
+                {loading.updateInterval
+                  ? <><i className="fas fa-spinner fa-spin"></i> Saving...</>
+                  : 'How often live system data is sent to the dashboard'}
+              </div>
             </div>
             <Select 
               value={settings.updateInterval}
-              onChange={(e) => handleSelectChange('updateInterval', e.target.value)}
+              onChange={(e) => saveDashboardSetting('updateInterval', e.target.value)}
+              disabled={loading.updateInterval}
             >
               <option value="0.5s">0.5 Second</option>
               <option value="1s">1 Second</option>
@@ -1056,11 +1110,16 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <SettingItem>
             <div>
               <div className="label">Enable Notifications</div>
-              <div className="description">System alerts and warnings</div>
+              <div className="description">
+                {loading.enableNotifications
+                  ? <><i className="fas fa-spinner fa-spin"></i> Saving...</>
+                  : 'Pop-up messages when actions finish (errors always show)'}
+              </div>
             </div>
             <Toggle 
               $active={settings.enableNotifications} 
-              onClick={() => handleToggle('enableNotifications')}
+              onClick={() => saveDashboardSetting('enableNotifications', !settings.enableNotifications)}
+              disabled={loading.enableNotifications}
             />
           </SettingItem>
         </SettingsCard>

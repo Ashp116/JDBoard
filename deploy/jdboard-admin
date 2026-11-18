@@ -4,12 +4,13 @@
 # Installed as /opt/jdboard/bin/jdboard-admin (owned by root, not writable by
 # the service). /etc/sudoers.d/jdboard lets the 'jdboard' user run it without
 # a password; it accepts only the fixed actions below, so the dashboard can
-# reboot or manage jtop but cannot run anything else as root.
+# reboot, manage jtop or turn its own start-on-boot on/off, but cannot run
+# anything else as root.
 set -euo pipefail
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 usage() {
-    echo "usage: jdboard-admin {reboot|poweroff|drop-caches 1|2|3|jtop-start|jtop-stop|jtop-restart|jtop-install-service}" >&2
+    echo "usage: jdboard-admin {reboot|poweroff|drop-caches 1|2|3|jtop-start|jtop-stop|jtop-restart|jtop-install-service|autostart-on|autostart-off}" >&2
     exit 2
 }
 
@@ -25,6 +26,10 @@ case "${1:-}" in
         esac ;;
     jtop-start|jtop-stop|jtop-restart)
         exec systemctl "${1#jtop-}" jtop.service ;;
+    autostart-on)
+        exec systemctl enable jdboard.service ;;
+    autostart-off)
+        exec systemctl disable jdboard.service ;;
     jtop-install-service)
         JTOP="$(command -v jtop || echo /usr/local/bin/jtop)"
         exec "$JTOP" --install-service ;;

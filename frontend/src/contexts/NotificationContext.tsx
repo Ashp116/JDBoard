@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
+import { getBackendUrl } from '../utils/api';
 
 export interface Notification {
   id: string;
@@ -27,6 +28,10 @@ interface NotificationContextType {
   clearNotifications: () => void;
   systemError: Notification | null;
   setSystemError: (error: Notification | null) => void;
+  // Settings > Enable Notifications. When off, success/info/warning pop-ups
+  // are skipped; errors and persistent ones (download progress) still show.
+  popupsEnabled: boolean;
+  setPopupsEnabled: (enabled: boolean) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
@@ -42,6 +47,22 @@ export const useNotifications = () => {
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [systemError, setSystemError] = useState<Notification | null>(null);
+  const [popupsEnabled, setPopupsEnabledState] = useState(true);
+  const popupsEnabledRef = useRef(true);
+  const setPopupsEnabled = useCallback((enabled: boolean) => {
+    popupsEnabledRef.current = enabled;
+    setPopupsEnabledState(enabled);
+  }, []);
+
+  // Saved on the Jetson (Settings > JDBoard Settings)
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/settings`)
+      .then(response => response.json())
+      .then(data => {
+        if (typeof data.enableNotifications === 'boolean') setPopupsEnabled(data.enableNotifications);
+      })
+      .catch(() => { /* keep showing notifications */ });
+  }, [setPopupsEnabled]);
 
   const addNotification = useCallback((notification: NewNotification) => {
     const newNotification: Notification = {
@@ -49,6 +70,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       id: notification.id || Date.now().toString() + Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString()
     };
+
+    // Notifications turned off: skip routine pop-ups, keep errors and
+    // persistent ones (progress, things that need action)
+    if (!popupsEnabledRef.current && notification.type !== 'error' && !notification.persistent) {
+      return newNotification.id;
+    }
 
     // Replace an existing notification with the same id instead of duplicating it
     setNotifications(prev => [...prev.filter(n => n.id !== newNotification.id), newNotification]);
@@ -85,7 +112,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         updateNotification,
         clearNotifications,
         systemError,
-        setSystemError
+        setSystemError,
+        popupsEnabled,
+        setPopupsEnabled
       }}
     >
       {children}
