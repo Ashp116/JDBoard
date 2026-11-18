@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { getBackendUrl } from '../utils/api';
 
@@ -13,8 +13,7 @@ interface Model {
 
 interface Props {
   models: Model[];
-  selectedModel: string | null;
-  onSelectModel: (id: string) => void;
+  selectedModel: string | null;   // the Run Inference tab's choice, used as the starting model
   onModelsChanged: () => void;   // refresh after load/unload from the test panel
 }
 
@@ -296,6 +295,15 @@ const Tester = styled.div`
     color: ${props => props.theme.colors.text.secondary};
   }
 
+  select {
+    padding: 7px 10px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    background: ${props => props.theme.colors.background.tertiary};
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 13px;
+  }
+
   .status {
     font-weight: 600;
   }
@@ -361,9 +369,8 @@ const example = (route: RouteDoc, lang: Lang, base: string, model: string) => {
   ].join('\n');
 };
 
-const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel, onModelsChanged }) => {
+const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onModelsChanged }) => {
   const base = getBackendUrl();
-  const model = selectedModel || 'MODEL_ID';
   const [open, setOpen] = useState<RouteId | null>('inference');
   const [lang, setLang] = useState<Lang>('curl');
   const [authMode, setAuthMode] = useState<'login' | 'key'>('login');
@@ -372,10 +379,30 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
   const [busy, setBusy] = useState<RouteId | null>(null);
   const [results, setResults] = useState<Partial<Record<RouteId, { status: string; ok: boolean; ms: number; body: string }>>>({});
 
-  const selected = models.find(m => m.id === selectedModel);
+  // This tab's own model choice (the Run Inference tab keeps its own): starts
+  // from the model selected there, else the first loaded one, else the first
+  const [testModel, setTestModel] = useState('');
+  useEffect(() => {
+    if (models.length === 0 || models.some(m => m.id === testModel)) return;
+    const fromInferenceTab = models.find(m => m.id === selectedModel);
+    setTestModel((fromInferenceTab || models.find(m => m.status === 'loaded') || models[0]).id);
+  }, [models, selectedModel, testModel]);
+
+  const selected = models.find(m => m.id === testModel);
+  const model = testModel || 'MODEL_ID';
+
+  const modelPicker = (
+    <select value={testModel} onChange={(e) => setTestModel(e.target.value)} aria-label="Model to test">
+      {models.map(m => (
+        <option key={m.id} value={m.id}>
+          {m.id}{m.status !== 'loaded' ? ' (not loaded)' : ''}
+        </option>
+      ))}
+    </select>
+  );
 
   const send = async (route: RouteDoc) => {
-    if (route.needsModel && !selectedModel) return;
+    if (route.needsModel && !testModel) return;
     if (route.needsImage && !image) return;
     setBusy(route.id);
     const started = performance.now();
@@ -387,7 +414,7 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
         body = new FormData();
         body.append('image', image);
       }
-      const response = await fetch(`${base}${route.path.replace('{model}', encodeURIComponent(selectedModel || ''))}`,
+      const response = await fetch(`${base}${route.path.replace('{model}', encodeURIComponent(testModel))}`,
         { method: route.method, headers, body });
       const text = await response.text();
       let pretty = text;
@@ -417,8 +444,8 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
       <TopBar>
         <label>
           Model
-          <select value={selectedModel || ''} onChange={(e) => onSelectModel(e.target.value)}>
-            <option value="">Select a model...</option>
+          <select value={testModel} onChange={(e) => setTestModel(e.target.value)}>
+            {models.length === 0 && <option value="">No models yet</option>}
             {models.map(m => (
               <option key={m.id} value={m.id}>
                 {m.id} ({m.framework}){m.status !== 'loaded' ? ' - not loaded' : ''}
@@ -455,7 +482,7 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
         const isOpen = open === route.id;
         const code = example(route, lang, base, model);
         const result = results[route.id];
-        const missing = route.needsModel && !selectedModel ? 'Select a model above'
+        const missing = route.needsModel && models.length === 0 ? 'No models on this Jetson yet - add one on the Models page'
           : route.needsImage && !image ? 'Choose an image'
           : authMode === 'key' && !apiKey.trim() ? 'Paste an API key above'
           : '';
@@ -463,7 +490,7 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
           <RouteCard key={route.id} $open={isOpen}>
             <button className="head" onClick={() => setOpen(isOpen ? null : route.id)} aria-expanded={isOpen}>
               <span className="method" style={{ background: METHOD_COLOURS[route.method] }}>{route.method}</span>
-              <span className="path">/api{route.path.replace('{model}', selectedModel ? selectedModel : '{model_id}')}</span>
+              <span className="path">/api{route.path.replace('{model}', testModel || '{model_id}')}</span>
               <span className="title">{route.title}</span>
               <i className={`fas fa-chevron-${isOpen ? 'up' : 'down'}`} style={{ color: '#76b900' }}></i>
             </button>
@@ -495,6 +522,7 @@ const InferenceApiTab: React.FC<Props> = ({ models, selectedModel, onSelectModel
                 <Tester>
                   <h4 style={{ margin: 0 }}><i className="fas fa-vial"></i> Test</h4>
                   <div className="row">
+                    {route.needsModel && models.length > 0 && modelPicker}
                     {route.needsImage && (
                       <input type="file" accept="image/*" onChange={(e) => setImage(e.target.files?.[0] || null)} />
                     )}

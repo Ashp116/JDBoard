@@ -4809,7 +4809,6 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
           <InferenceApiTab
             models={models}
             selectedModel={selectedModel}
-            onSelectModel={setSelectedModel}
             onModelsChanged={fetchModels}
           />
         </TabContent>
