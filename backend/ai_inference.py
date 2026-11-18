@@ -587,6 +587,94 @@ class AIModelManager:
         }
         return framework_map.get(file_extension, 'unknown')
     
+    MAX_SCRIPT_BYTES = 512 * 1024
+
+    @staticmethod
+    def check_script_source(content):
+        """Static checks on an edited script (nothing is executed): it must parse
+        and define CustomModelInference with preprocess/inference/postprocess.
+        Raises ValueError with a message naming the line for syntax errors."""
+        import ast
+        try:
+            tree = ast.parse(content)
+        except SyntaxError as e:
+            raise ValueError(f"Syntax error on line {e.lineno}: {e.msg}")
+        cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'CustomModelInference'), None)
+        if cls is None:
+            raise ValueError("The script must define a class named CustomModelInference")
+        methods = {n.name for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        missing = [m for m in ('preprocess', 'inference', 'postprocess') if m not in methods]
+        if missing:
+            raise ValueError(f"CustomModelInference is missing: {', '.join(missing)}")
+
+    def _refresh_handler(self, model_id):
+        """Re-create a loaded model's custom handler after its script changed,
+        without reloading the model weights."""
+        loaded = self.loaded_models.get(model_id)
+        if not loaded:
+            return
+        info = self.models_registry[model_id]
+        loaded['info'] = info
+        loaded['custom_handler'] = None
+        loaded['script_error'] = None
+        script = info.get('custom_script_path')
+        if script:
+            try:
+                handler_class = self.script_loader.load_script(script)
+                loaded['custom_handler'] = handler_class(loaded['model'], info, logger)
+                logger.info(f"Custom inference handler updated for {model_id}")
+            except Exception as e:
+                logger.warning(f"Edited script failed to load for {model_id}, using default inference: {e}")
+                loaded['script_error'] = f"Failed to load script: {e}"
+
+    def set_custom_script(self, model_id, content):
+        """Save edited script content as the model's custom inference script.
+
+        The script is checked statically, then imported once (like an uploaded
+        script) so import errors - e.g. a missing library - are reported before
+        it replaces the current one. A loaded model switches over immediately."""
+        if model_id not in self.models_registry:
+            raise KeyError(model_id)
+        if len(content.encode('utf-8')) > self.MAX_SCRIPT_BYTES:
+            raise ValueError("Script is too large (max 512 KB)")
+        self.check_script_source(content)
+
+        info = self.models_registry[model_id]
+        safe = ''.join(c if c.isalnum() or c in '-_' else '_' for c in info.get('name', model_id))[:40] or 'model'
+        new_path = self.models_dir / f"{uuid.uuid4().hex}_{safe}_script.py"
+        new_path.write_text(content, encoding='utf-8')
+        try:
+            self.script_loader.validate_script(new_path)
+        except Exception as e:
+            self._remove_custom_script(new_path)
+            message = str(e).replace('Invalid custom script: Failed to load custom inference script: ', '')
+            if isinstance(getattr(e, '__cause__', None), ModuleNotFoundError) or 'No module named' in message:
+                message += " - install the library into JDBoard's .venv, then save again"
+            raise ValueError(message)
+
+        old_path = info.get('custom_script_path')
+        info['custom_script_path'] = str(new_path.resolve())
+        self._save_registry()
+        if old_path and not any(m.get('custom_script_path') == old_path for m in self.models_registry.values()):
+            self._remove_custom_script(old_path)
+        self._refresh_handler(model_id)
+        logger.info(f"Custom inference script for {info.get('name', model_id)} updated")
+        return self._handler_status(model_id, info)
+
+    def clear_custom_script(self, model_id):
+        """Switch a model back to the built-in (default) handler."""
+        if model_id not in self.models_registry:
+            raise KeyError(model_id)
+        info = self.models_registry[model_id]
+        old_path = info.get('custom_script_path')
+        info['custom_script_path'] = None
+        self._save_registry()
+        if old_path and not any(m.get('custom_script_path') == old_path for m in self.models_registry.values()):
+            self._remove_custom_script(old_path)
+        self._refresh_handler(model_id)
+        logger.info(f"{info.get('name', model_id)} now uses the default inference handler")
+        return self._handler_status(model_id, info)
+
     def _remove_custom_script(self, script_path):
         """Delete an uploaded custom script, its compiled cache and loader cache entry."""
         script = Path(script_path)

@@ -1067,6 +1067,45 @@ def get_model_custom_script(model_id):
             'error': str(e)
         }), 500
 
+@app.route('/models/<model_id>/custom-script', methods=['PUT'])
+def update_model_custom_script(model_id):
+    """Save an edited inference script for a model (body: {"script_content": "..."})."""
+    data = request.get_json(silent=True) or {}
+    content = data.get('script_content')
+    if not isinstance(content, str) or not content.strip():
+        return jsonify({'success': False, 'error': 'script_content is required'}), 400
+    request_logger.log_request(
+        endpoint=f'/models/{model_id}/custom-script',
+        client_ip=get_client_ip(),
+        user_agent=request.headers.get('User-Agent', 'Unknown'),
+        method=request.method,
+        data={'bytes': len(content)}
+    )
+    try:
+        status = ai_manager.set_custom_script(model_id, content)
+        return jsonify({'success': True, 'data': status})
+    except KeyError:
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error saving custom script for {model_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/models/<model_id>/custom-script', methods=['DELETE'])
+def reset_model_custom_script(model_id):
+    """Remove a model's custom script so it uses the default handler again."""
+    try:
+        status = ai_manager.clear_custom_script(model_id)
+        return jsonify({'success': True, 'data': status})
+    except KeyError:
+        return jsonify({'success': False, 'error': 'Model not found'}), 404
+    except Exception as e:
+        logger.error(f"Error resetting custom script for {model_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/models/download-yolo', methods=['POST'])
 def download_yolo_model():
     """Download and optionally convert a YOLO model with custom script support and real-time progress updates"""

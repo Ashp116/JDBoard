@@ -1678,6 +1678,24 @@ const CodeContent = styled.pre`
   }
 `;
 
+const ScriptEditor = styled.textarea`
+  width: 100%;
+  min-height: 420px;
+  margin: 0;
+  padding: 16px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #d4d4d4;
+  background: #1e1e1e;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+`;
+
 const ScriptInfoBanner = styled.div`
   background: rgba(118, 185, 0, 0.1);
   border-left: 3px solid #76b900;
@@ -1930,10 +1948,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [pendingRename, setPendingRename] = useState<{modelId: string, newName: string} | null>(null);
   
   // Custom script viewing states
+  // Inference script editor (per model). isCustom=false means the model uses
+  // the default handler and the editor starts from the template.
   const [viewingScript, setViewingScript] = useState<{
     modelId: string;
     modelName: string;
-    scriptContent: string;
+    scriptContent: string;   // as loaded, to detect unsaved changes
+    draft: string;
+    isCustom: boolean;
+    error: string;
+    saving: boolean;
   } | null>(null);
   const [loadingScript, setLoadingScript] = useState(false);
   
@@ -3125,35 +3149,99 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     });
   };
 
-  const handleViewCustomScript = async (modelId: string, modelName: string) => {
+  const handleEditScript = async (modelId: string, modelName: string, hasCustomScript: boolean) => {
     setLoadingScript(true);
     try {
-      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setViewingScript({
-          modelId,
-          modelName,
-          scriptContent: data.data.script_content
-        });
+      let content: string;
+      if (hasCustomScript) {
+        const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Could not retrieve custom script');
+        content = data.data.script_content;
       } else {
-        addNotification({
-          type: 'error',
-          title: 'Failed to Load Script',
-          message: data.error || 'Could not retrieve custom script'
-        });
+        const response = await fetch(`${getBackendUrl()}/models/custom-script-template`);
+        if (!response.ok) throw new Error(`Template request failed (${response.status})`);
+        content = await response.text();
       }
+      setViewingScript({ modelId, modelName, scriptContent: content, draft: content,
+                         isCustom: hasCustomScript, error: '', saving: false });
     } catch (error) {
-      console.error('Error fetching custom script:', error);
+      console.error('Error loading inference script:', error);
       addNotification({
         type: 'error',
-        title: 'Error',
-        message: 'Failed to load custom inference script'
+        title: 'Failed to Load Script',
+        message: error instanceof Error ? error.message : 'Could not load the inference script'
       });
     } finally {
       setLoadingScript(false);
     }
+  };
+
+  const closeScriptEditor = () => {
+    if (viewingScript && viewingScript.draft !== viewingScript.scriptContent &&
+        !window.confirm('Discard your changes to this script?')) {
+      return;
+    }
+    setViewingScript(null);
+  };
+
+  const handleSaveScript = async () => {
+    if (!viewingScript) return;
+    const { modelId, modelName, draft } = viewingScript;
+    setViewingScript(prev => prev && { ...prev, saving: true, error: '' });
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script_content: draft })
+      });
+      const data = await response.json();
+      if (!data.success) {
+        setViewingScript(prev => prev && { ...prev, saving: false, error: data.error || 'Could not save the script' });
+        return;
+      }
+      setViewingScript(null);
+      await loadModels();
+      if (data.data?.script_status === 'failed') {
+        addNotification({ type: 'warning', title: 'Script Saved, But Not Running',
+                          message: `${modelName}: ${data.data.script_error} (using the default handler)` });
+      } else {
+        addNotification({ type: 'success', title: 'Script Saved',
+                          message: `${modelName} now uses your custom inference script.` });
+      }
+    } catch (error) {
+      setViewingScript(prev => prev && { ...prev, saving: false,
+        error: `Could not save: ${error instanceof Error ? error.message : error}` });
+    }
+  };
+
+  const handleResetScript = async () => {
+    if (!viewingScript) return;
+    const { modelId, modelName } = viewingScript;
+    if (!window.confirm(`Remove the custom script from ${modelName} and use the default handler?`)) return;
+    setViewingScript(prev => prev && { ...prev, saving: true, error: '' });
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Could not reset the script');
+      setViewingScript(null);
+      await loadModels();
+      addNotification({ type: 'success', title: 'Script Reset', message: `${modelName} uses the default handler again.` });
+    } catch (error) {
+      setViewingScript(prev => prev && { ...prev, saving: false,
+        error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  // Tab inserts 4 spaces instead of leaving the editor
+  const handleScriptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const { selectionStart, selectionEnd, value } = el;
+    const next = value.slice(0, selectionStart) + '    ' + value.slice(selectionEnd);
+    setViewingScript(prev => prev && { ...prev, draft: next });
+    requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = selectionStart + 4; });
   };
 
   const highlightPythonSyntax = (code: string) => {
@@ -3180,11 +3268,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleCopyScript = () => {
     if (viewingScript) {
-      navigator.clipboard.writeText(viewingScript.scriptContent).then(() => {
+      navigator.clipboard.writeText(viewingScript.draft).then(() => {
         addNotification({
           type: 'success',
           title: 'Copied!',
-          message: 'Custom inference script copied to clipboard'
+          message: 'Inference script copied to clipboard'
         });
       }).catch((err) => {
         console.error('Failed to copy:', err);
@@ -3512,32 +3600,30 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </button>
               </div>
               
-              {model.custom_script_path && (
-                <div style={{ marginTop: '8px' }}>
-                  <button
-                    onClick={() => handleViewCustomScript(model.id, model.name)}
-                    disabled={loadingScript}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      background: 'transparent',
-                      border: '1px solid #76b900',
-                      borderRadius: '4px',
-                      color: '#76b900',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <i className="fas fa-code"></i>
-                    {loadingScript ? 'Loading...' : 'View Custom Inference Script'}
-                  </button>
-                </div>
-              )}
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  onClick={() => handleEditScript(model.id, model.id, !!model.custom_script_path)}
+                  disabled={loadingScript}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    background: 'transparent',
+                    border: '1px solid #76b900',
+                    borderRadius: '4px',
+                    color: '#76b900',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <i className="fas fa-code"></i>
+                  {loadingScript ? 'Loading...' : 'Edit Inference Script'}
+                </button>
+              </div>
             </ModelCard>
           ))}
         </ModelsList>
@@ -3950,27 +4036,26 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </Modal>
       )}
       
-      {/* Custom Script Viewer Modal */}
+      {/* Inference Script Editor Modal */}
       {viewingScript && (
-        <Modal isOpen={true} onClose={() => setViewingScript(null)}>
+        <Modal isOpen={true} onClose={closeScriptEditor}>
           <ModalHeader>
             <h3>
               <i className="fas fa-code"></i>
-              Custom Inference Script - {viewingScript.modelName}
+              Inference Script - {viewingScript.modelName}
             </h3>
-            <ModalCloseButton onClick={() => setViewingScript(null)}>
+            <ModalCloseButton onClick={closeScriptEditor}>
               <i className="fas fa-times"></i>
             </ModalCloseButton>
           </ModalHeader>
 
           <ModalBody>
-            <ScriptInfoBanner>
-              <i className="fas fa-info-circle"></i>
-              <p>
-                This is the custom inference script used by this model. You can copy it to create similar scripts for other models.
-              </p>
-            </ScriptInfoBanner>
-            
+            {!viewingScript.isCustom && (
+              <ScriptInfoBanner>
+                <i className="fas fa-info-circle"></i>
+                <p>This model uses the default handler. Edit the template below and save to give it a custom script.</p>
+              </ScriptInfoBanner>
+            )}
             <CodeViewerContainer>
               <CodeViewerHeader>
                 <h4>
@@ -3979,19 +4064,43 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </h4>
                 <CopyButton onClick={handleCopyScript}>
                   <i className="fas fa-copy"></i>
-                  Copy to Clipboard
+                  Copy
                 </CopyButton>
               </CodeViewerHeader>
-              <CodeContent>
-                {highlightPythonSyntax(viewingScript.scriptContent)}
-              </CodeContent>
+              <ScriptEditor
+                value={viewingScript.draft}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setViewingScript(prev => prev && { ...prev, draft: value, error: '' });
+                }}
+                onKeyDown={handleScriptKeyDown}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
             </CodeViewerContainer>
+            {viewingScript.error && (
+              <ErrorMessage style={{ marginTop: '10px' }}>
+                <i className="fas fa-exclamation-triangle"></i>
+                {viewingScript.error}
+              </ErrorMessage>
+            )}
           </ModalBody>
 
           <ModalFooter>
             <ActionButtons>
-              <Button variant="secondary" onClick={() => setViewingScript(null)}>
-                Close
+              {viewingScript.isCustom && (
+                <Button variant="secondary" onClick={handleResetScript} disabled={viewingScript.saving}
+                        style={{ marginRight: 'auto' }}>
+                  Reset to Default
+                </Button>
+              )}
+              <Button variant="secondary" onClick={closeScriptEditor} disabled={viewingScript.saving}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleSaveScript}
+                      disabled={viewingScript.saving || (viewingScript.isCustom && viewingScript.draft === viewingScript.scriptContent)}>
+                {viewingScript.saving ? <LoadingSpinner /> : 'Save'}
               </Button>
             </ActionButtons>
           </ModalFooter>
