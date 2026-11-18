@@ -21,7 +21,8 @@ fi
 
 LOGIN="${1:-}"
 if [ -z "$LOGIN" ]; then
-    DEFAULT="$(cut -d: -f1 "$HTPASSWD" 2>/dev/null | head -1)"
+    # (no htpasswd yet on a first install - that's fine)
+    DEFAULT="$(cut -d: -f1 "$HTPASSWD" 2>/dev/null | head -1 || true)"
     DEFAULT="${DEFAULT:-admin}"
     read -rp "JDBoard username [$DEFAULT]: " LOGIN
     LOGIN="${LOGIN:-$DEFAULT}"
