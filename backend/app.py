@@ -26,6 +26,7 @@ from ai_inference import terminate_active_exports, log_failure, normalize_export
 # Model loading/inference runs in a separate worker process that only exists
 # while a model is loaded (see inference_client.py / inference_worker.py)
 from inference_client import ManagedModelManager
+from api_keys import ApiKeyStore, SCOPES as API_KEY_SCOPES
 import atexit
 import signal
 from request_logger import RequestLogger
@@ -313,6 +314,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 system_monitor = SystemMonitor()
 ai_manager = ManagedModelManager(models_dir=MODELS_DIR)
 request_logger = RequestLogger(logs_dir=LOGS_DIR)
+api_key_store = ApiKeyStore(os.path.join(DATA_DIR, 'config', 'api_keys.json'))
 
 # Logging setup
 logging.basicConfig(
@@ -2184,6 +2186,102 @@ def handle_log_subscription(data):
         })
 
 # System Settings API Endpoints
+# --- API keys for bots and scripts (see api_keys.py) ---------------------------
+
+@app.route('/_internal/key-check', methods=['GET'])
+def api_key_check():
+    """Called by nginx (auth_request) for requests that carry a Bearer key.
+    nginx blocks this path from outside, and only sends requests with a key."""
+    path = request.headers.get('X-Original-URI', '/')
+    if path.startswith('/api/'):
+        path = path[4:]
+    status, key_id = api_key_store.check(
+        request.headers.get('Authorization', ''),
+        request.headers.get('X-Original-Method', 'GET'),
+        path,
+        request.headers.get('X-Real-IP') or request.remote_addr,
+    )
+    if status == 429:
+        status = 401   # auth_request only understands 2xx, 401 and 403
+    response = app.response_class(status=status)
+    if key_id:
+        response.headers['X-JDBoard-Key-Id'] = key_id
+    return response
+
+
+def _key_management_error():
+    """API keys can't manage API keys: only someone logged in to the dashboard."""
+    if request.headers.get('X-JDBoard-Key-Id'):
+        return jsonify({'success': False, 'error': 'API keys cannot manage API keys'}), 403
+    return None
+
+
+@app.route('/api-keys', methods=['GET'])
+def list_api_keys():
+    error = _key_management_error()
+    if error:
+        return error
+    return jsonify({'success': True, 'keys': api_key_store.list(),
+                    'scopes': [{'value': k, 'label': v} for k, v in API_KEY_SCOPES.items()],
+                    # Creating and viewing keys need it when one is set
+                    'admin_password': admin_password_required()})
+
+
+@app.route('/api-keys', methods=['POST'])
+def create_api_key():
+    error = _key_management_error()
+    if error:
+        return error
+    data = request.json or {}
+    # A key is a lasting way in, so creating one needs the admin password (if set)
+    if admin_password_required():
+        ok, error = verify_admin_password(data.get('admin_password', ''), get_client_ip())
+        if not ok:
+            return error
+    try:
+        key, info = api_key_store.create(data.get('name'), data.get('scope'))
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info(f"API key '{info['name']}' created by {get_client_ip()}")
+    return jsonify({'success': True, 'key': key, 'info': info})
+
+
+@app.route('/api-keys/<key_id>/reveal', methods=['POST'])
+def reveal_api_key(key_id):
+    """Show a key again - only with the admin password, so one must be set."""
+    error = _key_management_error()
+    if error:
+        return error
+    if not admin_password_required():
+        return jsonify({'success': False, 'needs_admin_password': True,
+                        'error': 'Set an admin password first (sudo jdboard-passwd --admin) '
+                                 'to be able to view keys again'}), 400
+    ok, error = verify_admin_password((request.json or {}).get('admin_password', ''), get_client_ip())
+    if not ok:
+        return error
+    try:
+        key = api_key_store.reveal(key_id)
+    except KeyError:
+        return jsonify({'success': False, 'error': 'Key not found'}), 404
+    except LookupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info(f"API key {key_id} viewed by {get_client_ip()}")
+    return jsonify({'success': True, 'key': key})
+
+
+@app.route('/api-keys/<key_id>', methods=['DELETE'])
+def revoke_api_key(key_id):
+    error = _key_management_error()
+    if error:
+        return error
+    try:
+        api_key_store.revoke(key_id)
+    except KeyError:
+        return jsonify({'success': False, 'error': 'Key not found'}), 404
+    logger.info(f"API key {key_id} revoked by {get_client_ip()}")
+    return jsonify({'success': True})
+
+
 @app.route('/system/privileges', methods=['GET'])
 def get_privileges():
     """Whether admin actions (reboot, shutdown, jtop service, cache) need a

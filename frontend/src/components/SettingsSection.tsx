@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import ApiKeysCard from './ApiKeysCard';
 import { isPasswordlessSudo, PASSWORDLESS, usePasswordLabel } from '../utils/privileges';
 import { useNotifications } from '../contexts/NotificationContext';
 import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
@@ -1238,6 +1239,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
             </Button>
           </SettingItem>
         </SettingsCard>
+        {/* API keys for bots and scripts */}
+        <ApiKeysCard />
       </SettingsGrid>
 
       {/* Sudo Password Modal */}
