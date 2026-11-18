@@ -9,6 +9,7 @@
 # Options: --port N (HTTP port, default 80), --https-port N (default 443),
 #          --no-https (plain HTTP only), --renew-cert (new self-signed certificate),
 #          --no-fail2ban (don't block IPs after repeated wrong logins),
+#          --admin-password / --no-admin-password (set one now / don't ask),
 #          --backend-port N (default 5001), --rebuild-frontend, --fresh-venv, --no-migrate
 #
 # Layout
@@ -40,6 +41,7 @@ HTTPS_PORT=443
 HTTPS=1
 RENEW_CERT=0
 FAIL2BAN=1
+ADMIN_PASSWORD=ask    # ask on a fresh install | yes (--admin-password) | no (--no-admin-password)
 BACKEND_PORT=5001
 WITH_PYTORCH=0
 REBUILD_FRONTEND=0
@@ -48,7 +50,7 @@ MIGRATE=1
 UNINSTALL=0
 PURGE=0
 
-usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="${2:?--port needs a number}"; shift 2 ;;
@@ -56,6 +58,8 @@ while [ $# -gt 0 ]; do
         --no-https) HTTPS=0; shift ;;
         --renew-cert) RENEW_CERT=1; shift ;;
         --no-fail2ban) FAIL2BAN=0; shift ;;
+        --admin-password) ADMIN_PASSWORD=yes; shift ;;
+        --no-admin-password) ADMIN_PASSWORD=no; shift ;;
         --backend-port) BACKEND_PORT="${2:?--backend-port needs a number}"; shift 2 ;;
         --with-pytorch) WITH_PYTORCH=1; shift ;;
         --rebuild-frontend) REBUILD_FRONTEND=1; shift ;;
@@ -311,6 +315,25 @@ elif [ ! -t 0 ]; then
 else
     echo "Choose the username and password for the dashboard (not your Linux account)."
     /usr/local/bin/jdboard-passwd
+fi
+
+# Optional second password for reboot/shutdown/cache/jtop/start-on-boot.
+# Asked once (the first install run with this option), or with --admin-password.
+if [ -s "$ETC/admin-password" ]; then
+    echo "Keeping the existing admin password (change it: sudo jdboard-passwd --admin)"
+elif [ "$ADMIN_PASSWORD" = ask ] && [ -t 0 ] && [ ! -e "$ETC/.admin-password-asked" ]; then
+    echo
+    echo "Optional: an admin password the dashboard asks for before reboot, shutdown,"
+    echo "clearing caches, fixing the jtop service and changing start-on-boot."
+    read -rp "Set an admin password now? [Y/n] " REPLY_ADMIN
+    if [[ ! "$REPLY_ADMIN" =~ ^[Nn] ]]; then
+        /usr/local/bin/jdboard-passwd --admin
+    else
+        echo "Skipped - those actions won't ask for a password. Add one any time: sudo jdboard-passwd --admin"
+    fi
+    touch "$ETC/.admin-password-asked"
+elif [ "$ADMIN_PASSWORD" = yes ]; then
+    /usr/local/bin/jdboard-passwd --admin
 fi
 
 step "nginx"
