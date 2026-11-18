@@ -4486,7 +4486,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <ModalBody>
             <div style={{ padding: '30px 20px' }}>
               <p style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.8' }}>
-                You are about to change the model ID from <strong>{pendingRename.modelId}</strong> to <strong>{pendingRename.newName}</strong>.
+                You are about to change the model ID:
+                <br />
+                From: <strong>{pendingRename.modelId}</strong>
+                <br />
+                To: <strong>{pendingRename.newName}</strong>
               </p>
               <p style={{ margin: 0, fontSize: '14px', color: '#999', lineHeight: '1.6' }}>
                 Are you sure you want to continue?
