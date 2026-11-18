@@ -23,6 +23,8 @@ interface ModelInfo {
   inference_handler?: 'default' | 'custom';
   script_status?: 'none' | 'pending' | 'active' | 'failed';
   script_error?: string | null;
+  script_error_line?: number | null;  // line in the script where it failed
+  script_traceback?: string | null;
   load_problem?: string | null;   // set when the backend can't load this model (missing framework)
   precision?: Precision;          // export / inference precision chosen at download
   imgsz?: number;
@@ -36,6 +38,96 @@ interface ModelInfo {
 const DOWNLOAD_TOAST_PREFIX = 'download-';
 const downloadToastId = (downloadId: string) => `${DOWNLOAD_TOAST_PREFIX}${downloadId}`;
 
+// Uploads (model files, calibration zips) the browser is still sending.
+// Kept at module level, not in component state, so they survive the Models
+// page being unmounted when switching dashboard tabs. The backend only learns
+// about an upload once the whole file has arrived.
+type SendState = { name: string; progress: number; status: string };
+type SendEvent =
+  | { kind: 'progress'; id: string; progress: number; status: string }
+  | { kind: 'failed'; id: string; name: string; error: string }
+  | { kind: 'accepted'; id: string }
+  | { kind: 'cancelled'; id: string; name: string };
+const sendingUploads = new Map<string, SendState>();
+const sendListeners = new Set<(e: SendEvent) => void>();
+const unreportedSendFailures = new Map<string, { name: string; error: string }>();
+const sendingRequests = new Map<string, XMLHttpRequest>();
+const cancelledSends = new Set<string>();
+
+// Stop sending a file (the backend never saw the request, so nothing to clean up there)
+const abortSend = (id: string): boolean => {
+  const xhr = sendingRequests.get(id);
+  if (!xhr) return false;
+  cancelledSends.add(id);
+  xhr.abort();
+  return true;
+};
+
+const emitSend = (e: SendEvent) => {
+  if (e.kind === 'failed' && sendListeners.size === 0) {
+    unreportedSendFailures.set(e.id, { name: e.name, error: e.error });
+  }
+  sendListeners.forEach(listener => listener(e));
+};
+
+// POST form data with upload progress (fetch can't report it)
+const sendFormWithProgress = (url: string, formData: FormData, id: string, name: string) => {
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', url);
+  sendingUploads.set(id, { name, progress: 0, status: 'Sending file to the Jetson...' });
+  let lastPercent = -1;
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable || e.total === 0) return;
+    const percent = Math.floor((e.loaded / e.total) * 100);
+    if (percent === lastPercent) return;
+    lastPercent = percent;
+    const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(0);
+    // The backend reports 30%+ once it has the file; sending is the first quarter
+    const state = { name, progress: Math.round(percent / 4),
+                    status: `Sending file to the Jetson: ${percent}% (${mb(e.loaded)}/${mb(e.total)} MB)` };
+    sendingUploads.set(id, state);
+    emitSend({ kind: 'progress', id, progress: state.progress, status: state.status });
+  };
+  const fail = (error: string) => { sendingUploads.delete(id); emitSend({ kind: 'failed', id, name, error }); };
+  xhr.onload = () => {
+    let data: any;
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch {
+      fail(`Backend returned ${xhr.status}: ${xhr.responseText.slice(0, 200)}`);
+      return;
+    }
+    sendingUploads.delete(id);
+    if (!data.success && !data.download_started) {
+      emitSend({ kind: 'failed', id, name, error: data.error || 'Upload failed' });
+    } else {
+      emitSend({ kind: 'accepted', id });   // backend progress (socket/polling) takes over
+    }
+  };
+  xhr.onerror = () => fail('The connection to the Jetson dropped while sending the file');
+  xhr.onabort = () => {
+    if (cancelledSends.delete(id)) {
+      sendingUploads.delete(id);
+      emitSend({ kind: 'cancelled', id, name });
+    } else {
+      fail('Sending the file was interrupted');
+    }
+  };
+  xhr.addEventListener('loadend', () => sendingRequests.delete(id));
+  sendingRequests.set(id, xhr);
+  xhr.send(formData);
+};
+
+// Leaving or reloading the page cancels a file that's still being sent
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    if (sendingUploads.size > 0) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+}
+
 // Export precision choices per target format (must match the backend's
 // PRECISIONS_BY_FORMAT / DEFAULT_PRECISION in ai_inference.py)
 type Precision = 'fp32' | 'fp16' | 'int8';
@@ -44,18 +136,17 @@ const PRECISION_OPTIONS: Record<string, { value: Precision; label: string; hint:
     { value: 'fp32', label: 'FP32', hint: 'Full precision' },
     { value: 'fp16', label: 'FP16', hint: 'Faster on GPU, same accuracy in practice' },
   ],
-  ONNX: [
-    { value: 'fp32', label: 'FP32', hint: 'Full precision, most compatible' },
-    { value: 'fp16', label: 'FP16', hint: 'Half the size' },
-    { value: 'int8', label: 'INT8', hint: 'Smallest; needs calibration images' },
-  ],
   TensorRT: [
     { value: 'fp32', label: 'FP32', hint: 'Most accurate, slowest, most memory to build' },
     { value: 'fp16', label: 'FP16', hint: 'Recommended: fast, accuracy ≈ FP32' },
     { value: 'int8', label: 'INT8', hint: 'Fastest; some accuracy loss; needs calibration images' },
   ],
 };
-const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', ONNX: 'fp32', TensorRT: 'fp16' };
+const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', TensorRT: 'fp16' };
+// Background for selected options/buttons in the Add Model dialog. The theme's
+// NVIDIA green (#76B900) is too light for white text (2.4:1); this is 5.1:1.
+const SELECTED_GREEN = '#4E7A00';
+const SELECTED_GREEN_HOVER = '#416600';
 const IMAGE_SIZES = [320, 416, 480, 640, 800, 960, 1280];
 
 interface YOLOModelOption {
@@ -236,6 +327,11 @@ const CancelButton = styled.button`
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 55px;
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
   
   ${props => props.theme.media.mobile} {
     padding: 10px 16px;
@@ -818,8 +914,8 @@ const ScriptOptions = styled.div`
 
 const ScriptOption = styled.div<{ $selected: boolean }>`
   padding: 12px;
-  background: ${props => props.$selected ? props.theme.colors.nvidia.green : props.theme.colors.background.tertiary};
-  border: 2px solid ${props => props.$selected ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  background: ${props => props.$selected ? SELECTED_GREEN : props.theme.colors.background.tertiary};
+  border: 2px solid ${props => props.$selected ? SELECTED_GREEN : props.theme.colors.border.secondary};
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -949,9 +1045,9 @@ const FormatSelector = styled.div`
     }
 
     &.selected {
-      background: ${props => props.theme.colors.nvidia.green};
+      background: ${SELECTED_GREEN};
       color: white;
-      border-color: ${props => props.theme.colors.nvidia.green};
+      border-color: ${SELECTED_GREEN};
     }
   }
 `;
@@ -999,9 +1095,9 @@ const ModelSizeGrid = styled.div`
 `;
 
 const ModelSizeCard = styled.div<{ selected?: boolean }>`
-  background: ${props => props.selected ? props.theme.colors.nvidia.green : props.theme.colors.background.tertiary};
+  background: ${props => props.selected ? SELECTED_GREEN : props.theme.colors.background.tertiary};
   color: ${props => props.selected ? 'white' : props.theme.colors.text.primary};
-  border: 1px solid ${props => props.selected ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  border: 1px solid ${props => props.selected ? SELECTED_GREEN : props.theme.colors.border.secondary};
   border-radius: 8px;
   padding: 12px;
   cursor: pointer;
@@ -1061,12 +1157,12 @@ const Button = styled.button<{ variant?: 'primary' | 'secondary' }>`
   }
 
   ${props => props.variant === 'primary' ? `
-    background: ${props.theme.colors.nvidia.green};
+    background: ${SELECTED_GREEN};
     color: white;
     border: none;
 
-    &:hover {
-      background: ${props.theme.colors.nvidia.darkGreen};
+    &:hover:not(:disabled) {
+      background: ${SELECTED_GREEN_HOVER};
     }
   ` : `
     background: transparent;
@@ -1261,6 +1357,11 @@ const ModelCard = styled.div`
       justify-content: center;
       gap: 6px;
       position: relative;
+
+      &:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
       
       ${props => props.theme.media.mobile} {
         padding: 12px;
@@ -1674,6 +1775,151 @@ const CodeContent = styled.pre`
   }
 `;
 
+// The script editor is a transparent textarea over syntax-highlighted code;
+// both must use exactly the same font metrics so the caret lines up.
+const SCRIPT_LINE_HEIGHT = 20;   // px
+const SCRIPT_PAD = 16;           // px
+const SCRIPT_FONT_STYLE: React.CSSProperties = {
+  fontFamily: "'Courier New', monospace",
+  fontSize: '13px',
+  lineHeight: `${SCRIPT_LINE_HEIGHT}px`,
+  tabSize: 4,
+};
+const SCRIPT_HIGHLIGHT_STYLE: React.CSSProperties = {
+  ...SCRIPT_FONT_STYLE,
+  margin: 0,
+  padding: `${SCRIPT_PAD}px`,
+  background: 'transparent',
+  overflow: 'visible',
+  whiteSpace: 'pre',
+};
+
+const ScriptEditorFrame = styled.div`
+  display: flex;
+  height: 440px;
+  background: #1e1e1e;
+  overflow: hidden;
+`;
+
+const ScriptGutter = styled.div`
+  flex: 0 0 auto;
+  min-width: 44px;
+  overflow: hidden;
+  padding: ${SCRIPT_PAD}px 8px ${SCRIPT_PAD}px 0;
+  border-right: 1px solid #333;
+  text-align: right;
+  color: #6e7681;
+  user-select: none;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: ${SCRIPT_LINE_HEIGHT}px;
+
+  .error {
+    color: #fff;
+    background: #b3261e;
+    border-radius: 2px;
+  }
+`;
+
+const ScriptEditorArea = styled.div`
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+
+  .layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .error-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: ${SCRIPT_LINE_HEIGHT}px;
+    background: rgba(255, 82, 82, 0.18);
+  }
+`;
+
+const ScriptEditor = styled.textarea`
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: ${SCRIPT_PAD}px;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: ${SCRIPT_LINE_HEIGHT}px;
+  tab-size: 4;
+  white-space: pre;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  caret-color: #ffffff;
+
+  &::selection {
+    background: rgba(118, 185, 0, 0.35);
+    color: transparent;
+  }
+`;
+
+const ScriptErrorPanel = styled.div`
+  margin-top: 10px;
+  border: 1px solid rgba(255, 82, 82, 0.5);
+  background: rgba(255, 82, 82, 0.08);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #ff8a80;
+  font-size: 13px;
+
+  .message {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .message span {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  button {
+    background: #b3261e;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-right: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  summary {
+    margin-top: 8px;
+    cursor: pointer;
+    color: #ffb4ab;
+  }
+
+  pre {
+    margin: 6px 0 0;
+    padding: 8px;
+    max-height: 160px;
+    overflow: auto;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
+`;
+
 const ScriptInfoBanner = styled.div`
   background: rgba(118, 185, 0, 0.1);
   border-left: 3px solid #76b900;
@@ -1708,7 +1954,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '6.2MB',
         description: 'Ultra-lightweight model for edge deployment with fastest inference',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '3.2M',
         accuracy: '37.3% mAP'
       },
@@ -1717,7 +1963,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '21.5MB',
         description: 'Small model balancing speed and accuracy for general use',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '11.2M',
         accuracy: '44.9% mAP'
       },
@@ -1726,7 +1972,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.7MB',
         description: 'Medium model with improved accuracy for production environments',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '25.9M',
         accuracy: '50.2% mAP'
       },
@@ -1735,7 +1981,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '83.7MB',
         description: 'Large model for high-accuracy applications with moderate speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '43.7M',
         accuracy: '52.9% mAP'
       },
@@ -1744,7 +1990,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '136MB',
         description: 'Extra-large model for maximum accuracy in resource-rich scenarios',
         url: 'https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '68.2M',
         accuracy: '53.9% mAP'
       }
@@ -1759,7 +2005,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '3.9MB',
         description: 'Nano model - smallest and fastest for mobile deployment',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '1.9M',
         accuracy: '28.0% mAP'
       },
@@ -1768,7 +2014,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '14.1MB',
         description: 'Small model optimized for speed and mobile applications',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '7.2M',
         accuracy: '37.4% mAP'
       },
@@ -1777,7 +2023,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '42.2MB',
         description: 'Medium model with balanced accuracy and speed',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '21.2M',
         accuracy: '45.4% mAP'
       },
@@ -1786,7 +2032,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '93.6MB',
         description: 'Large model for high-accuracy detection tasks',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '46.5M',
         accuracy: '49.0% mAP'
       },
@@ -1795,7 +2041,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '166MB',
         description: 'Extra-large model for maximum detection accuracy',
         url: 'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '86.7M',
         accuracy: '50.7% mAP'
       }
@@ -1810,7 +2056,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '5.1MB',
         description: 'Nano model with improved efficiency over previous versions',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '2.6M',
         accuracy: '39.5% mAP'
       },
@@ -1819,7 +2065,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '19.4MB',
         description: 'Small model with enhanced accuracy and speed',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '9.4M',
         accuracy: '47.0% mAP'
       },
@@ -1828,7 +2074,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '49.8MB',
         description: 'Medium model with state-of-the-art performance',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '20.1M',
         accuracy: '51.5% mAP'
       },
@@ -1837,7 +2083,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '86.9MB',
         description: 'Large model for high-accuracy applications',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '25.3M',
         accuracy: '53.4% mAP'
       },
@@ -1846,7 +2092,7 @@ const YOLO_VERSIONS: YOLOVersion[] = [
         size: '56.9MB',
         description: 'Extra-large model with maximum accuracy',
         url: 'https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x.pt',
-        formats: ['PyTorch', 'ONNX', 'TensorRT'],
+        formats: ['PyTorch', 'TensorRT'],
         parameters: '56.9M',
         accuracy: '54.7% mAP'
       }
@@ -1926,17 +2172,47 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [pendingRename, setPendingRename] = useState<{modelId: string, newName: string} | null>(null);
   
   // Custom script viewing states
+  // Inference script editor (per model). isCustom=false means the model uses
+  // the default handler and the editor starts from the template.
   const [viewingScript, setViewingScript] = useState<{
     modelId: string;
     modelName: string;
-    scriptContent: string;
+    scriptContent: string;   // as loaded, to detect unsaved changes
+    draft: string;
+    isCustom: boolean;
+    error: string;
+    errorLine: number | null;
+    traceback: string;
+    saving: boolean;
   } | null>(null);
+  const scriptEditorRef = useRef<HTMLTextAreaElement>(null);
+  const scriptLayerRef = useRef<HTMLDivElement>(null);
+  const scriptGutterRef = useRef<HTMLDivElement>(null);
   const [loadingScript, setLoadingScript] = useState(false);
   
   // Template viewing state
   const [viewingTemplate, setViewingTemplate] = useState(false);
   const [templateContent, setTemplateContent] = useState('');
   const [loadingTemplate, setLoadingTemplate] = useState(false);
+
+  // Model card actions in progress: model id -> action. The clicked button
+  // shows a spinner and the card's other actions are disabled meanwhile.
+  type ModelAction = 'load' | 'unload' | 'reload' | 'delete';
+  const [modelBusy, setModelBusy] = useState<Map<string, ModelAction>>(new Map());
+  const [renaming, setRenaming] = useState(false);
+  const [cancellingDownloads, setCancellingDownloads] = useState<Set<string>>(new Set());
+  const withModelBusy = async (modelId: string, action: ModelAction, run: () => Promise<void>) => {
+    if (modelBusy.has(modelId)) return;
+    setModelBusy(prev => new Map(prev).set(modelId, action));
+    try {
+      await run();
+    } finally {
+      setModelBusy(prev => { const next = new Map(prev); next.delete(modelId); return next; });
+    }
+  };
+  const BUSY_LABEL: Record<ModelAction, string> = {
+    load: 'Loading...', unload: 'Unloading...', reload: 'Reloading...', delete: 'Deleting...'
+  };
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logsTerminalRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -2002,7 +2278,19 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           restoredLogsState.set(downloadId, true);
         });
         
+        // Uploads still being sent from this browser (the backend doesn't know them yet)
+        sendingUploads.forEach((send, downloadId) => {
+          if (restoredDownloads.has(downloadId)) return;
+          restoredDownloads.set(downloadId, {
+            name: send.name, progress: send.progress, status: send.status,
+            notificationId: downloadToastId(downloadId)
+          });
+          addNotification({ id: downloadToastId(downloadId), type: 'info', title: 'Downloading Model',
+                            message: send.status, persistent: true });
+        });
+        
         if (restoredDownloads.size > 0) {
+          activeDownloadsRef.current = restoredDownloads;
           setActiveDownloads(restoredDownloads);
           setShowLogs(restoredLogsState); // Restore logs state
           
@@ -2014,7 +2302,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         // look up how each one ended, report it, and close the progress toast.
         const stale = notifications.filter(n =>
           n.id.startsWith(DOWNLOAD_TOAST_PREFIX) &&
-          !(n.id.slice(DOWNLOAD_TOAST_PREFIX.length) in data.active_downloads));
+          !(n.id.slice(DOWNLOAD_TOAST_PREFIX.length) in data.active_downloads) &&
+          !sendingUploads.has(n.id.slice(DOWNLOAD_TOAST_PREFIX.length)));
         for (const toast of stale) {
           const downloadId = toast.id.slice(DOWNLOAD_TOAST_PREFIX.length);
           removeNotification(toast.id);
@@ -2213,6 +2502,34 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     };
   }, [socket]); // handlers read state through refs, so no re-subscribing mid-download
 
+  // Uploads still being sent are tracked outside this component (see
+  // sendingUploads), so they survive switching dashboard tabs. Route their
+  // progress/result events to the current instance's handlers.
+  const sendHandlerRef = useRef<(e: SendEvent) => void>(() => {});
+  sendHandlerRef.current = (e: SendEvent) => {
+    if (e.kind === 'progress') {
+      updateDownloadProgress(e.id, e.progress, e.status);
+    } else if (e.kind === 'failed') {
+      completeDownload(e.id, false, e.error, { modelName: e.name });
+    } else if (e.kind === 'cancelled') {
+      const download = activeDownloadsRef.current.get(e.id);
+      if (download) removeNotification(download.notificationId);
+      const remaining = new Map(activeDownloadsRef.current);
+      remaining.delete(e.id);
+      activeDownloadsRef.current = remaining;
+      setActiveDownloads(remaining);
+      addNotification({ type: 'info', title: 'Upload Cancelled', message: `${e.name}: the file was not sent` });
+    }
+  };
+  useEffect(() => {
+    const listener = (e: SendEvent) => sendHandlerRef.current(e);
+    sendListeners.add(listener);
+    // Report sends that failed while this page wasn't open
+    unreportedSendFailures.forEach((f, id) => completeDownload(id, false, f.error, { modelName: f.name }));
+    unreportedSendFailures.clear();
+    return () => { sendListeners.delete(listener); };
+  }, []);
+
   // Safety net for missed socket events (reconnects, very fast failures, the
   // socket being down): poll the outcome of every download still shown as active.
   const unknownCountsRef = useRef<Map<string, number>>(new Map());
@@ -2221,6 +2538,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
     const checkDownloads = async () => {
       for (const [downloadId, download] of activeDownloadsRef.current) {
+        if (sendingUploads.has(downloadId)) continue;  // backend doesn't have it yet
         try {
           const response = await fetch(`${getBackendUrl()}/models/downloads/${encodeURIComponent(downloadId)}/status`);
           if (!response.ok) continue;
@@ -2385,6 +2703,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     const download = activeDownloadsRef.current.get(downloadId);
     if (!download) return;
 
+    // Still sending the file: stop the transfer here, the backend hasn't seen it
+    if (abortSend(downloadId)) return;
+
     try {
       // Send cancel request to backend
       const response = await fetch(`${getBackendUrl()}/models/cancel-download`, {
@@ -2462,15 +2783,18 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       return 'Model name must be less than 50 characters';
     }
     
-    // Check for invalid characters
-    if (!/^[a-zA-Z0-9\s\-_\.()]+$/.test(name)) {
-      return 'Model name contains invalid characters. Only letters, numbers, spaces, and -_.() are allowed';
+    // Same characters the backend accepts (ai_inference._validate_model_name)
+    if (!/^[a-zA-Z0-9\s\-_]+$/.test(name)) {
+      return 'Model name can only contain letters, numbers, spaces, hyphens and underscores';
     }
     
-    // Check for uniqueness (case-insensitive)
-    const existingNames = models.map(model => model.id.toLowerCase());
-    if (existingNames.includes(name.toLowerCase())) {
+    // Unique (case-insensitive) among existing models and ones still being added
+    const wanted = name.trim().toLowerCase();
+    if (models.some(model => model.id.toLowerCase() === wanted)) {
       return 'A model with this name already exists. Please choose a different name.';
+    }
+    if (Array.from(activeDownloadsRef.current.values()).some(d => d.name.trim().toLowerCase() === wanted)) {
+      return 'A model with this name is already being added. Please choose a different name.';
     }
     
     return '';
@@ -2489,10 +2813,17 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
+    // .pt starts as "keep as PyTorch"; ONNX can't run on Jetson, so .onnx is always built into TensorRT
+    chooseFormat(file.name.toLowerCase().endsWith('.onnx') ? 'TensorRT' : 'PyTorch');
     if (!modelName) {
-      // Auto-generate model name from filename
-      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
-      setModelName(nameWithoutExt);
+      // Name it after the file, swapping characters the backend doesn't allow
+      // (e.g. "best.v2.pt" -> "best-v2"), and check it like a typed name
+      const suggested = file.name
+        .replace(/\.[^/.]+$/, '')
+        .replace(/[^a-zA-Z0-9\s\-_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 50);
+      validateAndSetName(suggested, false);
     }
   };
 
@@ -2525,6 +2856,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     }
   };
 
+  const uploadIsOnnx = !!selectedFile && selectedFile.name.toLowerCase().endsWith('.onnx');
+  // .pt (Ultralytics YOLO) -> kept or TensorRT; .onnx (any model) -> always TensorRT via trtexec
+  const isConvertibleUpload = !!selectedFile && (selectedFile.name.toLowerCase().endsWith('.pt') || uploadIsOnnx);
+  const uploadKeepFormat = uploadIsOnnx ? null : 'PyTorch';
+  const uploadConverting = isConvertibleUpload && selectedFormat !== uploadKeepFormat;
+
   const handleFileUpload = async () => {
     if (!selectedFile || !modelName.trim()) {
       addNotification({
@@ -2538,41 +2875,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     startDownload(uploadId, modelName.trim());
     
-    setLoading(true);
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('model_name', modelName.trim());
-      formData.append('model_type', modelType);
-      formData.append('download_id', uploadId); // Send download ID to backend
-      
-      // Only a custom script is sent; otherwise the backend uses its default handler
-      if (scriptOption === 'custom' && customScript) {
-        formData.append('custom_script', customScript);
-      }
-
-      // Close modal immediately to allow user to continue
-      resetModal();
-
-      const response = await fetch(`${getBackendUrl()}/models/upload`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const data = await response.json();
-      
-      if (!data.success && !data.download_started) {
-        // If upload failed immediately (validation error, etc.)
-        completeDownload(uploadId, false, data.error || 'Upload failed');
-      }
-      // If successful or download started, progress will be handled by WebSocket
-    } catch (error) {
-      console.error('Upload error:', error);
-      completeDownload(uploadId, false, `Upload failed: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      setLoading(false);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('model_name', modelName.trim());
+    formData.append('model_type', modelType);
+    formData.append('download_id', uploadId); // Send download ID to backend
+    // .pt files can be converted (Ultralytics YOLO); .onnx to TensorRT; others are used as-is
+    if (isConvertibleUpload) {
+      appendExportSettings(formData);
     }
+    // Only a custom script is sent; otherwise the backend uses its default handler
+    if (scriptOption === 'custom' && customScript) {
+      formData.append('custom_script', customScript);
+    }
+
+    // Close the dialog right away; the toast shows progress, also after
+    // switching tabs (the send is tracked outside this page)
+    resetModal();
+    updateDownloadProgress(uploadId, 0, 'Sending file to the Jetson...');
+    sendFormWithProgress(`${getBackendUrl()}/models/upload`, formData, uploadId, modelName.trim());
   };
 
   const handleYOLODownload = async () => {
@@ -2588,59 +2909,153 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     const downloadId = `yolo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     startDownload(downloadId, yoloModelName.trim()); // Use user-entered name, not template name
 
-    setLoading(true);
+    // Use FormData to support custom script upload
+    const formData = new FormData();
+    formData.append('model_url', selectedYOLO.url);
+    formData.append('model_name', yoloModelName.trim());
+    appendExportSettings(formData);
+    formData.append('original_format', 'PyTorch');
+    formData.append('download_id', downloadId);
+    
+    // Only a custom script is sent; otherwise the backend uses its default handler
+    if (scriptOption === 'custom' && customScript) {
+      formData.append('custom_script', customScript);
+    }
 
-    try {
-      // Close modal immediately to allow user to continue
-      resetModal();
+    // Close the dialog right away; progress shows in the toast
+    resetModal();
+    sendFormWithProgress(`${getBackendUrl()}/models/download-yolo`, formData, downloadId, yoloModelName.trim());
+  };
 
-      // Use FormData to support custom script upload
-      const formData = new FormData();
-      formData.append('model_url', selectedYOLO.url);
-      formData.append('model_name', yoloModelName.trim());
-      formData.append('target_format', selectedFormat);
-      formData.append('precision', precision);
-      formData.append('imgsz', String(imageSize));
-      if (selectedFormat === 'TensorRT') {
-        formData.append('workspace', String(trtWorkspace));
+  // Target format, precision, INT8 calibration and advanced export settings.
+  // Shared by the YOLO download tab and the upload tab (for .pt files).
+  // keepFormat: the uploaded file's own format (no conversion, so no precision
+  // settings); noInt8: hide INT8 (trtexec ONNX builds have no image calibration)
+  const renderExportSettings = (formats: string[], idPrefix: string, targetLabel: string = 'Target Format',
+                                opts: { keepFormat?: string; noInt8?: boolean } = {}) => (
+    <>
+        <FormatSelector>
+          <label>{targetLabel}</label>
+          <div className="format-grid">
+            {formats.map((format) => (
+              <div
+                key={format}
+                className={`format-option ${selectedFormat === format ? 'selected' : ''}`}
+                onClick={() => chooseFormat(format)}
+              >
+                {format}
+              </div>
+            ))}
+          </div>
+        </FormatSelector>
+  
+        {opts.keepFormat !== selectedFormat && (
+        <FormatSelector>
+          <label>Precision</label>
+          <div className="format-grid">
+            {(PRECISION_OPTIONS[selectedFormat] || []).filter(o => !(opts.noInt8 && o.value === 'int8')).map(option => (
+              <div
+                key={option.value}
+                className={`format-option ${precision === option.value ? 'selected' : ''}`}
+                onClick={() => setPrecision(option.value)}
+                title={option.hint}
+              >
+                {option.label}
+              </div>
+            ))}
+          </div>
+  
+          {precision === 'int8' && (
+            <div style={{ marginTop: '10px' }}>
+              <label>Calibration images</label>
+              <div className="format-grid">
+                <div
+                  className={`format-option ${calibrationSource === 'coco' ? 'selected' : ''}`}
+                  onClick={() => { setCalibrationSource('coco'); setCalibrationZip(null); }}
+                  title="Ultralytics' COCO sample - fine for the stock COCO-trained YOLO models"
+                >
+                  Built-in COCO sample
+                </div>
+                <div
+                  className={`format-option ${calibrationSource === 'upload' ? 'selected' : ''}`}
+                  onClick={() => setCalibrationSource('upload')}
+                  title="A .zip of 100-500 images like the ones the model will see"
+                >
+                  Upload .zip
+                </div>
+              </div>
+              {calibrationSource === 'upload' && (
+                <CustomScriptUpload style={{ marginTop: '8px' }}>
+                  <input
+                    type="file"
+                    accept=".zip"
+                    id={`calibration-zip-${idPrefix}`}
+                    style={{ display: 'none' }}
+                    onChange={(e) => setCalibrationZip(e.target.files?.[0] || null)}
+                  />
+                  <label htmlFor={`calibration-zip-${idPrefix}`} className="upload-button">
+                    <i className="fas fa-file-archive"></i>
+                    {calibrationZip ? calibrationZip.name : 'Choose .zip of images (100-500 recommended)'}
+                  </label>
+                  {calibrationZip && (
+                    <button onClick={() => setCalibrationZip(null)} className="remove-button">
+                      <i className="fas fa-times"></i>
+                    </button>
+                  )}
+                </CustomScriptUpload>
+              )}
+            </div>
+          )}
+  
+          <div style={{ marginTop: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(v => !v)}
+              style={{ background: 'transparent', border: 'none', color: '#76b900', cursor: 'pointer', padding: 0, fontSize: '13px' }}
+            >
+              <i className={`fas fa-chevron-${showAdvanced ? 'down' : 'right'}`}></i> Advanced
+            </button>
+            {showAdvanced && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '8px' }}>
+                <div>
+                  <label>Image size</label>
+                  <select value={imageSize} onChange={(e) => setImageSize(Number(e.target.value))}>
+                    {IMAGE_SIZES.map(size => (
+                      <option key={size} value={size}>{size}px{size === 640 ? ' (default)' : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                {selectedFormat === 'TensorRT' && (
+                  <div>
+                    <label>TensorRT workspace</label>
+                    <select value={trtWorkspace} onChange={(e) => setTrtWorkspace(Number(e.target.value))}>
+                      {[0.5, 1, 2, 3, 4].map(gb => (
+                        <option key={gb} value={gb}>{gb} GB{gb === 2 ? ' (default)' : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </FormatSelector>
+        )}
+    </>
+  );
+
+  // Adds the export settings above to an upload/download request
+  const appendExportSettings = (formData: FormData) => {
+    formData.append('target_format', selectedFormat);
+    formData.append('precision', precision);
+    formData.append('imgsz', String(imageSize));
+    if (selectedFormat === 'TensorRT') {
+      formData.append('workspace', String(trtWorkspace));
+    }
+    if (precision === 'int8') {
+      formData.append('calibration', calibrationSource);
+      if (calibrationSource === 'upload' && calibrationZip) {
+        formData.append('calibration_zip', calibrationZip);
       }
-      if (precision === 'int8') {
-        formData.append('calibration', calibrationSource);
-        if (calibrationSource === 'upload' && calibrationZip) {
-          formData.append('calibration_zip', calibrationZip);
-        }
-      }
-      formData.append('original_format', 'PyTorch');
-      formData.append('download_id', downloadId);
-      
-      // Only a custom script is sent; otherwise the backend uses its default handler
-      if (scriptOption === 'custom' && customScript) {
-        formData.append('custom_script', customScript);
-      }
-
-      const response = await fetch(`${getBackendUrl()}/models/download-yolo`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const textResponse = await response.text();
-        throw new Error(`Backend returned ${response.status} ${contentType || ''}: ${textResponse.slice(0, 200)}`);
-      }
-
-      const data = await response.json();
-
-      if (!data.success && !data.download_started) {
-        // If download failed immediately (validation error, etc.)
-        completeDownload(downloadId, false, data.error || 'Download failed');
-      }
-      // If successful or download started, progress will be handled by WebSocket
-    } catch (error) {
-      console.error('Download error:', error);
-      completeDownload(downloadId, false, `Download failed: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -2982,35 +3397,139 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     });
   };
 
-  const handleViewCustomScript = async (modelId: string, modelName: string) => {
+  const handleEditScript = async (modelId: string, modelName: string, hasCustomScript: boolean,
+                                  lastError?: { error?: string | null; line?: number | null; traceback?: string | null }) => {
     setLoadingScript(true);
     try {
-      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`);
-      const data = await response.json();
-      
-      if (data.success) {
-        setViewingScript({
-          modelId,
-          modelName,
-          scriptContent: data.data.script_content
-        });
+      let content: string;
+      if (hasCustomScript) {
+        const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`);
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Could not retrieve custom script');
+        content = data.data.script_content;
       } else {
-        addNotification({
-          type: 'error',
-          title: 'Failed to Load Script',
-          message: data.error || 'Could not retrieve custom script'
-        });
+        const response = await fetch(`${getBackendUrl()}/models/custom-script-template`);
+        if (!response.ok) throw new Error(`Template request failed (${response.status})`);
+        content = await response.text();
       }
+      setViewingScript({ modelId, modelName, scriptContent: content, draft: content,
+                         isCustom: hasCustomScript, saving: false,
+                         error: lastError?.error || '', errorLine: lastError?.line ?? null,
+                         traceback: lastError?.traceback || '' });
+      if (lastError?.line) scrollScriptToLine(lastError.line);
     } catch (error) {
-      console.error('Error fetching custom script:', error);
+      console.error('Error loading inference script:', error);
       addNotification({
         type: 'error',
-        title: 'Error',
-        message: 'Failed to load custom inference script'
+        title: 'Failed to Load Script',
+        message: error instanceof Error ? error.message : 'Could not load the inference script'
       });
     } finally {
       setLoadingScript(false);
     }
+  };
+
+  const openScriptEditor = (model: ModelInfo) => {
+    if (loadingScript) return;
+    handleEditScript(model.id, model.id, !!model.custom_script_path,
+      model.script_status === 'failed'
+        ? { error: model.script_error, line: model.script_error_line, traceback: model.script_traceback }
+        : undefined);
+  };
+
+  const closeScriptEditor = () => {
+    if (viewingScript && viewingScript.draft !== viewingScript.scriptContent &&
+        !window.confirm('Discard your changes to this script?')) {
+      return;
+    }
+    setViewingScript(null);
+  };
+
+  const handleSaveScript = async () => {
+    if (!viewingScript) return;
+    const { modelId, modelName, draft } = viewingScript;
+    setViewingScript(prev => prev && { ...prev, saving: true, error: '' });
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script_content: draft })
+      });
+      const data = await response.json();
+      if (!data.success) {
+        setViewingScript(prev => prev && { ...prev, saving: false, error: data.error || 'Could not save the script',
+                                           errorLine: data.error_line ?? null, traceback: data.traceback || '' });
+        if (data.error_line) scrollScriptToLine(data.error_line);
+        return;
+      }
+      await loadModels();
+      if (data.data?.script_status === 'failed') {
+        // Saved, but it failed when the loaded model switched to it: keep the editor open with the error
+        setViewingScript(prev => prev && { ...prev, saving: false, isCustom: true, scriptContent: prev.draft,
+                                           error: `Saved, but the script failed to start (the default handler is used): ${data.data.script_error}`,
+                                           errorLine: data.data.script_error_line ?? null,
+                                           traceback: data.data.script_traceback || '' });
+        if (data.data.script_error_line) scrollScriptToLine(data.data.script_error_line);
+        return;
+      }
+      setViewingScript(null);
+      addNotification({ type: 'success', title: 'Script Saved',
+                        message: `${modelName} now uses your custom inference script.` });
+    } catch (error) {
+      setViewingScript(prev => prev && { ...prev, saving: false, errorLine: null, traceback: '',
+        error: `Could not save: ${error instanceof Error ? error.message : error}` });
+    }
+  };
+
+  const handleResetScript = async () => {
+    if (!viewingScript) return;
+    const { modelId, modelName } = viewingScript;
+    if (!window.confirm(`Remove the custom script from ${modelName} and use the default handler?`)) return;
+    setViewingScript(prev => prev && { ...prev, saving: true, error: '' });
+    try {
+      const response = await fetch(`${getBackendUrl()}/models/${modelId}/custom-script`, { method: 'DELETE' });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Could not reset the script');
+      setViewingScript(null);
+      await loadModels();
+      addNotification({ type: 'success', title: 'Script Reset', message: `${modelName} uses the default handler again.` });
+    } catch (error) {
+      setViewingScript(prev => prev && { ...prev, saving: false, errorLine: null, traceback: '',
+        error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  // The highlighted code and line numbers sit under the transparent textarea
+  // and follow its scroll position
+  const syncScriptScroll = () => {
+    const el = scriptEditorRef.current;
+    if (!el) return;
+    if (scriptLayerRef.current) {
+      scriptLayerRef.current.style.transform = `translate(${-el.scrollLeft}px, ${-el.scrollTop}px)`;
+    }
+    if (scriptGutterRef.current) {
+      scriptGutterRef.current.style.transform = `translateY(${-el.scrollTop}px)`;
+    }
+  };
+
+  const scrollScriptToLine = (line: number) => {
+    requestAnimationFrame(() => {
+      const el = scriptEditorRef.current;
+      if (!el) return;
+      el.scrollTop = Math.max(0, SCRIPT_PAD + (line - 1) * SCRIPT_LINE_HEIGHT - el.clientHeight / 3);
+      syncScriptScroll();
+    });
+  };
+
+  // Tab inserts 4 spaces instead of leaving the editor
+  const handleScriptKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Tab') return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const { selectionStart, selectionEnd, value } = el;
+    const next = value.slice(0, selectionStart) + '    ' + value.slice(selectionEnd);
+    setViewingScript(prev => prev && { ...prev, draft: next });
+    requestAnimationFrame(() => { el.selectionStart = el.selectionEnd = selectionStart + 4; });
   };
 
   const highlightPythonSyntax = (code: string) => {
@@ -3037,11 +3556,11 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
   const handleCopyScript = () => {
     if (viewingScript) {
-      navigator.clipboard.writeText(viewingScript.scriptContent).then(() => {
+      navigator.clipboard.writeText(viewingScript.draft).then(() => {
         addNotification({
           type: 'success',
           title: 'Copied!',
-          message: 'Custom inference script copied to clipboard'
+          message: 'Inference script copied to clipboard'
         });
       }).catch((err) => {
         console.error('Failed to copy:', err);
@@ -3123,9 +3642,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <i className="fas fa-terminal"></i>
                     Logs
                   </LogsButton>
-                  <CancelButton onClick={() => cancelDownload(downloadId)}>
-                    <i className="fas fa-times"></i>
-                    Cancel
+                  <CancelButton
+                    disabled={cancellingDownloads.has(downloadId)}
+                    onClick={async () => {
+                      setCancellingDownloads(prev => new Set(prev).add(downloadId));
+                      try { await cancelDownload(downloadId); }
+                      finally { setCancellingDownloads(prev => { const next = new Set(prev); next.delete(downloadId); return next; }); }
+                    }}
+                  >
+                    <i className={cancellingDownloads.has(downloadId) ? 'fas fa-spinner fa-spin' : 'fas fa-times'}></i>
+                    {cancellingDownloads.has(downloadId) ? 'Cancelling...' : 'Cancel'}
                   </CancelButton>
                 </DownloadActions>
               </DownloadContent>
@@ -3155,8 +3681,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       No logs yet for this download...
                     </div>
                   ) : (
+                    // Oldest first, newest at the bottom (the terminal auto-scrolls there)
                     logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name))
-                       .slice().reverse().map(log => (
+                       .map(log => (
                       <LogEntry key={log.id} className={log.type}>
                         <span style={{ opacity: 0.7, marginRight: '8px' }}>
                           [{log.timestamp}]
@@ -3167,7 +3694,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   )}
                   {/* Show all logs if no specific download logs found */}
                   {logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name)).length === 0 && logs.length > 0 && (
-                    logs.slice().reverse().map(log => (
+                    logs.map(log => (
                       <LogEntry key={log.id} className={log.type}>
                         <span style={{ opacity: 0.7, marginRight: '8px' }}>
                           [{log.timestamp}]
@@ -3257,7 +3784,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <h4>{model.id}</h4>
                     <div className="header-actions">
                       <span className={`status ${model.loaded ? 'loaded' : 'unloaded'}`}>
-                        {model.loaded ? 'Loaded' : 'Not Loaded'}
+                        {modelBusy.has(model.id) ? (
+                          <><i className="fas fa-spinner fa-spin"></i> {BUSY_LABEL[modelBusy.get(model.id)!]}</>
+                        ) : (model.loaded ? 'Loaded' : 'Not Loaded')}
                       </span>
                       <button 
                         className="edit-header"
@@ -3297,19 +3826,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </div>
                 <div className="info-row">
                   <span className="label">Inference:</span>
-                  {model.script_status === 'failed' ? (
-                    <span
-                      className="value"
-                      style={{ color: '#ff6b6b' }}
-                      title={model.script_error || 'Custom script failed'}
-                    >
-                      <i className="fas fa-exclamation-triangle"></i> Custom script failed (using default)
-                    </span>
-                  ) : (
-                    <span className="value">
-                      {model.custom_script_path ? 'Custom script' : 'Default'}
-                    </span>
-                  )}
+                  {/* Clicking the handler opens the script editor */}
+                  <span
+                    className="value"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openScriptEditor(model)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openScriptEditor(model); } }}
+                    style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: '3px',
+                             ...(model.script_status === 'failed' ? { color: '#ff6b6b' } : {}) }}
+                    title={model.script_status === 'failed'
+                      ? `${model.script_error || 'Custom script failed'} (click to open the script)`
+                      : 'Click to view or edit the inference script'}
+                  >
+                    {model.script_status === 'failed' ? (
+                      <><i className="fas fa-exclamation-triangle"></i> Custom script failed (using default)</>
+                    ) : (
+                      model.custom_script_path ? 'Custom script' : 'Default'
+                    )}
+                  </span>
                 </div>
                 {model.load_problem && !model.loaded && (
                   <div
@@ -3332,68 +3867,70 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 {!model.loaded ? (
                   <button 
                     className="load"
-                    onClick={() => handleLoadModel(model.id)}
+                    onClick={() => withModelBusy(model.id, 'load', () => handleLoadModel(model.id))}
+                    disabled={modelBusy.has(model.id)}
                     data-tooltip-id="tooltip-load"
                     data-tooltip-content="Load model into memory for inference"
                   >
-                    <i className="fas fa-upload"></i>
+                    <i className={modelBusy.get(model.id) === 'load' ? 'fas fa-spinner fa-spin' : 'fas fa-upload'}></i>
                   </button>
                 ) : (
                   <>
                     <button 
                       className="unload"
-                      onClick={() => handleUnloadModel(model.id)}
+                      onClick={() => withModelBusy(model.id, 'unload', () => handleUnloadModel(model.id))}
+                      disabled={modelBusy.has(model.id)}
                       data-tooltip-id="tooltip-unload"
                       data-tooltip-content="Unload model from memory to free resources"
                     >
-                      <i className="fas fa-download"></i>
+                      <i className={modelBusy.get(model.id) === 'unload' ? 'fas fa-spinner fa-spin' : 'fas fa-download'}></i>
                     </button>
                     <button 
                       className="force-reload"
-                      onClick={() => handleForceReloadModel(model.id)}
+                      onClick={() => withModelBusy(model.id, 'reload', () => handleForceReloadModel(model.id))}
+                      disabled={modelBusy.has(model.id)}
                       data-tooltip-id="tooltip-reload"
                       data-tooltip-content="Force reload model (clears stuck states)"
                     >
-                      <i className="fas fa-sync-alt"></i>
+                      <i className={modelBusy.get(model.id) === 'reload' ? 'fas fa-spinner fa-spin' : 'fas fa-sync-alt'}></i>
                     </button>
                   </>
                 )}
                 <button 
                   className="delete"
-                  onClick={() => handleDeleteModel(model.id)}
+                  onClick={() => withModelBusy(model.id, 'delete', () => handleDeleteModel(model.id))}
+                  disabled={modelBusy.has(model.id)}
                   data-tooltip-id="tooltip-delete"
                   data-tooltip-content="Permanently delete this model"
                 >
-                  <i className="fas fa-trash"></i>
+                  <i className={modelBusy.get(model.id) === 'delete' ? 'fas fa-spinner fa-spin' : 'fas fa-trash'}></i>
                 </button>
               </div>
               
-              {model.custom_script_path && (
-                <div style={{ marginTop: '8px' }}>
-                  <button
-                    onClick={() => handleViewCustomScript(model.id, model.name)}
-                    disabled={loadingScript}
-                    style={{
-                      width: '100%',
-                      padding: '8px 12px',
-                      background: 'transparent',
-                      border: '1px solid #76b900',
-                      borderRadius: '4px',
-                      color: '#76b900',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <i className="fas fa-code"></i>
-                    {loadingScript ? 'Loading...' : 'View Custom Inference Script'}
-                  </button>
-                </div>
-              )}
+              <div style={{ marginTop: '8px' }}>
+                <button
+                  onClick={() => openScriptEditor(model)}
+                  disabled={loadingScript}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    background: 'transparent',
+                    border: '1px solid #76b900',
+                    borderRadius: '4px',
+                    color: '#76b900',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <i className="fas fa-code"></i>
+                  {loadingScript ? 'Loading...' : 'Edit Inference Script'}
+                </button>
+              </div>
             </ModelCard>
           ))}
         </ModelsList>
@@ -3415,14 +3952,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             <OptionTabs>
               <Tab 
                 $active={activeTab === 'upload'} 
-                onClick={() => setActiveTab('upload')}
+                onClick={() => { if (activeTab !== 'upload') { chooseFormat('PyTorch'); setCalibrationSource('coco'); setCalibrationZip(null); setShowAdvanced(false); } setActiveTab('upload'); }}
               >
                 <i className="fas fa-upload"></i>
                 File Upload
               </Tab>
               <Tab 
                 $active={activeTab === 'yolo'} 
-                onClick={() => setActiveTab('yolo')}
+                onClick={() => { if (activeTab !== 'yolo') { chooseFormat('PyTorch'); setCalibrationSource('coco'); setCalibrationZip(null); setShowAdvanced(false); } setActiveTab('yolo'); }}
               >
                 <i className="fas fa-download"></i>
                 YOLO Models
@@ -3487,6 +4024,20 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </select>
               </FormGroup>
 
+              {isConvertibleUpload && (
+                <>
+                  {uploadIsOnnx
+                    ? renderExportSettings(['TensorRT'], 'upload', 'Convert To', { noInt8: true })
+                    : renderExportSettings(['PyTorch', 'TensorRT'], 'upload', 'Convert To')}
+                  {uploadIsOnnx && selectedFormat === 'TensorRT' && (
+                    <ScriptInfo style={{ marginTop: '8px', marginBottom: '16px' }}>
+                      <i className="fas fa-info-circle"></i>
+                      Non-YOLO ONNX models need a custom inference script to show results.
+                    </ScriptInfo>
+                  )}
+                </>
+              )}
+
               <CustomScriptSection>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <label style={{ margin: 0 }}>
@@ -3531,7 +4082,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     >
                       <i className="fas fa-cogs"></i>
                       <span>Default</span>
-                      <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
+                      <small>Built-in handler (YOLO, TensorRT, PyTorch)</small>
                     </ScriptOption>
                     
                     <ScriptOption
@@ -3579,13 +4130,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                         </button>
                       )}
                     </CustomScriptUpload>
-                  )}
-
-                  {scriptOption === 'default' && (
-                    <ScriptInfo>
-                      <i className="fas fa-info-circle"></i>
-                      No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
-                    </ScriptInfo>
                   )}
                 </CustomScriptSection>
             </div>
@@ -3663,116 +4207,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     )}
                   </FormGroup>
 
-                  <FormatSelector>
-                    <label>Target Format</label>
-                    <div className="format-grid">
-                      {selectedYOLO.formats.map((format) => (
-                        <div
-                          key={format}
-                          className={`format-option ${selectedFormat === format ? 'selected' : ''}`}
-                          onClick={() => chooseFormat(format)}
-                        >
-                          {format}
-                        </div>
-                      ))}
-                    </div>
-                  </FormatSelector>
-
-                  <FormatSelector>
-                    <label>Precision</label>
-                    <div className="format-grid">
-                      {(PRECISION_OPTIONS[selectedFormat] || []).map(option => (
-                        <div
-                          key={option.value}
-                          className={`format-option ${precision === option.value ? 'selected' : ''}`}
-                          onClick={() => setPrecision(option.value)}
-                          title={option.hint}
-                        >
-                          {option.label}
-                        </div>
-                      ))}
-                    </div>
-                    <ScriptInfo style={{ marginTop: '8px' }}>
-                      <i className="fas fa-info-circle"></i>
-                      {(PRECISION_OPTIONS[selectedFormat] || []).find(o => o.value === precision)?.hint}
-                      {selectedFormat === 'PyTorch' && ' (applied when the model runs; no conversion)'}
-                      {selectedFormat === 'ONNX' && '. Note: JDBoard can\'t run ONNX models on Jetson (ONNX Runtime is disabled), so use this to take the model to another machine.'}
-                    </ScriptInfo>
-
-                    {precision === 'int8' && (
-                      <div style={{ marginTop: '10px' }}>
-                        <label>Calibration images</label>
-                        <div className="format-grid">
-                          <div
-                            className={`format-option ${calibrationSource === 'coco' ? 'selected' : ''}`}
-                            onClick={() => { setCalibrationSource('coco'); setCalibrationZip(null); }}
-                            title="Ultralytics' COCO sample - fine for the stock COCO-trained YOLO models"
-                          >
-                            Built-in COCO sample
-                          </div>
-                          <div
-                            className={`format-option ${calibrationSource === 'upload' ? 'selected' : ''}`}
-                            onClick={() => setCalibrationSource('upload')}
-                            title="A .zip of 100-500 images like the ones the model will see"
-                          >
-                            Upload .zip
-                          </div>
-                        </div>
-                        {calibrationSource === 'upload' && (
-                          <CustomScriptUpload style={{ marginTop: '8px' }}>
-                            <input
-                              type="file"
-                              accept=".zip"
-                              id="calibration-zip-upload"
-                              style={{ display: 'none' }}
-                              onChange={(e) => setCalibrationZip(e.target.files?.[0] || null)}
-                            />
-                            <label htmlFor="calibration-zip-upload" className="upload-button">
-                              <i className="fas fa-file-archive"></i>
-                              {calibrationZip ? calibrationZip.name : 'Choose .zip of images (100-500 recommended)'}
-                            </label>
-                            {calibrationZip && (
-                              <button onClick={() => setCalibrationZip(null)} className="remove-button">
-                                <i className="fas fa-times"></i>
-                              </button>
-                            )}
-                          </CustomScriptUpload>
-                        )}
-                      </div>
-                    )}
-
-                    <div style={{ marginTop: '12px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setShowAdvanced(v => !v)}
-                        style={{ background: 'transparent', border: 'none', color: '#76b900', cursor: 'pointer', padding: 0, fontSize: '13px' }}
-                      >
-                        <i className={`fas fa-chevron-${showAdvanced ? 'down' : 'right'}`}></i> Advanced
-                      </button>
-                      {showAdvanced && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginTop: '8px' }}>
-                          <div>
-                            <label>Image size</label>
-                            <select value={imageSize} onChange={(e) => setImageSize(Number(e.target.value))}>
-                              {IMAGE_SIZES.map(size => (
-                                <option key={size} value={size}>{size}px{size === 640 ? ' (default)' : ''}</option>
-                              ))}
-                            </select>
-                          </div>
-                          {selectedFormat === 'TensorRT' && (
-                            <div>
-                              <label>TensorRT workspace</label>
-                              <select value={trtWorkspace} onChange={(e) => setTrtWorkspace(Number(e.target.value))}>
-                                {[0.5, 1, 2, 3, 4].map(gb => (
-                                  <option key={gb} value={gb}>{gb} GB{gb === 2 ? ' (default)' : ''}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </FormatSelector>
+                  {renderExportSettings(selectedYOLO.formats, 'yolo')}
 
                   <CustomScriptSection>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -3816,7 +4251,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       >
                         <i className="fas fa-cogs"></i>
                         <span>Default</span>
-                        <small>Built-in handler (YOLO, ONNX, PyTorch)</small>
+                        <small>Built-in handler (YOLO, TensorRT, PyTorch)</small>
                       </ScriptOption>
                       
                       <ScriptOption
@@ -3865,13 +4300,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                         )}
                       </CustomScriptUpload>
                     )}
-
-                    {scriptOption === 'default' && (
-                      <ScriptInfo>
-                        <i className="fas fa-info-circle"></i>
-                        No script needed. Ultralytics YOLO models (.pt, .onnx, .engine) get detection boxes automatically; other models use the generic ONNX/PyTorch/TensorFlow handler. Pick Custom for segmentation, pose, or models with their own pre/post-processing.
-                      </ScriptInfo>
-                    )}
                   </CustomScriptSection>
                 </>
               )}
@@ -3889,9 +4317,10 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <Button 
                     variant="primary" 
                     onClick={handleFileUpload}
-                    disabled={loading || !selectedFile || !modelName.trim() || !!nameError || (scriptOption === 'custom' && !customScript)}
+                    disabled={loading || !selectedFile || !modelName.trim() || !!nameError || (scriptOption === 'custom' && !customScript)
+                              || (isConvertibleUpload && precision === 'int8' && calibrationSource === 'upload' && !calibrationZip)}
                   >
-                    {loading ? <LoadingSpinner /> : 'Upload Model'}
+                    {loading ? <LoadingSpinner /> : (uploadConverting ? 'Upload & Convert' : 'Upload Model')}
                   </Button>
                 </>
               ) : (
@@ -3914,27 +4343,26 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </Modal>
       )}
       
-      {/* Custom Script Viewer Modal */}
+      {/* Inference Script Editor Modal */}
       {viewingScript && (
-        <Modal isOpen={true} onClose={() => setViewingScript(null)}>
+        <Modal isOpen={true} onClose={closeScriptEditor}>
           <ModalHeader>
             <h3>
               <i className="fas fa-code"></i>
-              Custom Inference Script - {viewingScript.modelName}
+              Inference Script - {viewingScript.modelName}
             </h3>
-            <ModalCloseButton onClick={() => setViewingScript(null)}>
+            <ModalCloseButton onClick={closeScriptEditor}>
               <i className="fas fa-times"></i>
             </ModalCloseButton>
           </ModalHeader>
 
           <ModalBody>
-            <ScriptInfoBanner>
-              <i className="fas fa-info-circle"></i>
-              <p>
-                This is the custom inference script used by this model. You can copy it to create similar scripts for other models.
-              </p>
-            </ScriptInfoBanner>
-            
+            {!viewingScript.isCustom && (
+              <ScriptInfoBanner>
+                <i className="fas fa-info-circle"></i>
+                <p>This model uses the default handler. Edit the template below and save to give it a custom script.</p>
+              </ScriptInfoBanner>
+            )}
             <CodeViewerContainer>
               <CodeViewerHeader>
                 <h4>
@@ -3943,19 +4371,86 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                 </h4>
                 <CopyButton onClick={handleCopyScript}>
                   <i className="fas fa-copy"></i>
-                  Copy to Clipboard
+                  Copy
                 </CopyButton>
               </CodeViewerHeader>
-              <CodeContent>
-                {highlightPythonSyntax(viewingScript.scriptContent)}
-              </CodeContent>
+              <ScriptEditorFrame>
+                <ScriptGutter>
+                  <div ref={scriptGutterRef}>
+                    {viewingScript.draft.split('\n').map((_, i) => (
+                      <div key={i} className={viewingScript.errorLine === i + 1 ? 'error' : ''}>{i + 1}</div>
+                    ))}
+                  </div>
+                </ScriptGutter>
+                <ScriptEditorArea>
+                  <div ref={scriptLayerRef} className="layer" aria-hidden="true">
+                    {viewingScript.errorLine && (
+                      <div className="error-line"
+                           style={{ top: SCRIPT_PAD + (viewingScript.errorLine - 1) * SCRIPT_LINE_HEIGHT }} />
+                    )}
+                    <SyntaxHighlighter
+                      language="python"
+                      style={vscDarkPlus}
+                      customStyle={SCRIPT_HIGHLIGHT_STYLE}
+                      codeTagProps={{ style: SCRIPT_FONT_STYLE }}
+                    >
+                      {viewingScript.draft + '\n'}
+                    </SyntaxHighlighter>
+                  </div>
+                  <ScriptEditor
+                    ref={scriptEditorRef}
+                    value={viewingScript.draft}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setViewingScript(prev => prev && { ...prev, draft: value });
+                    }}
+                    onScroll={syncScriptScroll}
+                    onKeyDown={handleScriptKeyDown}
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    wrap="off"
+                  />
+                </ScriptEditorArea>
+              </ScriptEditorFrame>
             </CodeViewerContainer>
+            {viewingScript.error && (
+              <ScriptErrorPanel>
+                <div className="message">
+                  <i className="fas fa-exclamation-triangle"></i>
+                  <span>
+                    {viewingScript.errorLine && (
+                      <button type="button" onClick={() => scrollScriptToLine(viewingScript.errorLine!)}>
+                        Line {viewingScript.errorLine}
+                      </button>
+                    )}
+                    {viewingScript.error}
+                  </span>
+                </div>
+                {viewingScript.traceback && (
+                  <details>
+                    <summary>Traceback</summary>
+                    <pre>{viewingScript.traceback}</pre>
+                  </details>
+                )}
+              </ScriptErrorPanel>
+            )}
           </ModalBody>
 
           <ModalFooter>
             <ActionButtons>
-              <Button variant="secondary" onClick={() => setViewingScript(null)}>
-                Close
+              {viewingScript.isCustom && (
+                <Button variant="secondary" onClick={handleResetScript} disabled={viewingScript.saving}
+                        style={{ marginRight: 'auto' }}>
+                  Reset to Default
+                </Button>
+              )}
+              <Button variant="secondary" onClick={closeScriptEditor} disabled={viewingScript.saving}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleSaveScript}
+                      disabled={viewingScript.saving || (viewingScript.isCustom && viewingScript.draft === viewingScript.scriptContent)}>
+                {viewingScript.saving ? <LoadingSpinner /> : 'Save'}
               </Button>
             </ActionButtons>
           </ModalFooter>
@@ -3979,20 +4474,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
           <ModalBody>
             <div style={{ padding: '30px 20px' }}>
-              <div style={{ 
-                background: 'rgba(255, 165, 0, 0.1)', 
-                border: '1px solid rgba(255, 165, 0, 0.3)',
-                borderRadius: '8px',
-                padding: '20px',
-                marginBottom: '25px'
-              }}>
-                <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.8', color: '#ffa500' }}>
-                  <i className="fas fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
-                  <strong>Warning:</strong> If you change the model ID, all applications and code that use this model ID for inference will be affected and may fail until updated with the new ID.
-                </p>
-              </div>
               <p style={{ marginBottom: '20px', fontSize: '15px', lineHeight: '1.8' }}>
-                You are about to change the model ID from <strong>{pendingRename.modelId}</strong> to <strong>{pendingRename.newName}</strong>.
+                You are about to change the model ID:
+                <br />
+                From: <strong>{pendingRename.modelId}</strong>
+                <br />
+                To: <strong>{pendingRename.newName}</strong>
               </p>
               <p style={{ margin: 0, fontSize: '14px', color: '#999', lineHeight: '1.6' }}>
                 Are you sure you want to continue?
@@ -4005,8 +4492,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
               <Button variant="secondary" onClick={handleCancelRename}>
                 Cancel
               </Button>
-              <Button variant="primary" onClick={handleConfirmRename}>
-                Confirm
+              <Button variant="primary" disabled={renaming}
+                      onClick={async () => { setRenaming(true); try { await handleConfirmRename(); } finally { setRenaming(false); } }}>
+                {renaming ? <LoadingSpinner /> : 'Confirm'}
               </Button>
             </ActionButtons>
           </ModalFooter>

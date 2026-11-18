@@ -43,6 +43,44 @@ except Exception:  # pragma: no cover - only on non-Jetson hosts
 
 logger = logging.getLogger(__name__)
 
+
+def _patch_jtop_library_versions():
+    """jtop's client looks up the cuDNN/TensorRT/VPI versions by loading those
+    libraries into this process with ctypes. TensorRT's library initializes
+    itself on load, which costs ~250 MB of RAM for the life of the process -
+    in JDBoard's always-on main process, which otherwise never needs it. Do
+    the same lookup in a short-lived subprocess instead (same results)."""
+    try:
+        import json
+        import sys
+        import jtop  # noqa: F401  (loads the jtop.jtop module)
+        # The package exports a class named `jtop` that shadows the module of
+        # the same name, so fetch the module itself
+        jtop_module = sys.modules['jtop.jtop']
+    except Exception:
+        return
+    cache = {}
+
+    def get_libraries_isolated():
+        if 'libraries' not in cache:
+            code = ("import json\n"
+                    "from jtop.core.jetson_libraries import get_libraries\n"
+                    "print(json.dumps(get_libraries()))")
+            try:
+                out = subprocess.run([sys.executable, '-c', code], capture_output=True,
+                                     text=True, timeout=30)
+                cache['libraries'] = json.loads(out.stdout.strip().splitlines()[-1])
+            except Exception as e:
+                logger.debug(f"Library version lookup failed: {e}")
+                cache['libraries'] = {}
+        return dict(cache['libraries'])
+
+    jtop_module.get_libraries = get_libraries_isolated
+
+
+if JTOP_AVAILABLE:
+    _patch_jtop_library_versions()
+
 JTOP_INTERVAL = 0.5          # seconds between jtop samples
 RECONNECT_MIN_DELAY = 1.0     # seconds
 RECONNECT_MAX_DELAY = 10.0    # seconds

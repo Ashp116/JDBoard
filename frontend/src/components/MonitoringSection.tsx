@@ -643,21 +643,12 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
       labels: bufferedData.fan.map(d => d.time).slice(-maxDataPoints),
       datasets: [
         {
-          label: 'Fan RPM',
-          data: bufferedData.fan.map(d => d.rpm).slice(-maxDataPoints),
-          borderColor: '#FF6B6B',
-          backgroundColor: 'rgba(255, 107, 107, 0.1)',
-          fill: true,
-          tension: 0.4
-        },
-        {
           label: 'Fan Speed (%)',
           data: bufferedData.fan.map(d => d.speed).slice(-maxDataPoints),
           borderColor: '#4ECDC4',
           backgroundColor: 'rgba(78, 205, 196, 0.1)',
-          fill: false,
-          tension: 0.4,
-          yAxisID: 'y1'
+          fill: true,
+          tension: 0.4
         },
         {
           label: 'Total Power (W)',
@@ -666,7 +657,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           backgroundColor: 'rgba(255, 215, 0, 0.1)',
           fill: false,
           tension: 0.4,
-          yAxisID: 'y2'
+          yAxisID: 'y1'
         }
       ]
     };
@@ -695,7 +686,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
     return systemData.cpu.cores;
   };
 
-  const getChartOptions = (title: string, hasSecondaryAxis: boolean = false, startFromZero: boolean = false, maxValue: number | null = null): any => ({
+  const getChartOptions = (title: string, hasSecondaryAxis: boolean = false, startFromZero: boolean = false, maxValue: number | null = null, secondaryRange: [number, number] | null = null): any => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
@@ -743,6 +734,8 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           type: 'linear',
           display: true,
           position: 'right',
+          // Fixed range (e.g. 0-100 °C) instead of auto-scaling to the data
+          ...(secondaryRange && { min: secondaryRange[0], max: secondaryRange[1] }),
           ticks: {
             color: '#CCCCCC'
           },
@@ -852,7 +845,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.cpu} 
-            options={getChartOptions('CPU Usage & Temperature', true, true, 100)} 
+            options={getChartOptions('CPU Usage & Temperature', true, true, 100, [0, 100])} 
           />
         </ChartContainer>
       </ChartSection>
@@ -898,7 +891,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.gpu} 
-            options={getChartOptions('GPU Usage & Temperature', true, true, 100)} 
+            options={getChartOptions('GPU Usage & Temperature', true, true, 100, [0, 100])} 
           />
         </ChartContainer>
       </ChartSection>
@@ -1089,7 +1082,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.fan}
-            options={getChartOptions('Fan Performance', true, true, 5000)} 
+            options={getChartOptions('Fan Performance', true, true, 100)} 
           />
         </ChartContainer>
       </ChartSection>
