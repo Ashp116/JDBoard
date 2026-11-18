@@ -2282,6 +2282,29 @@ def revoke_api_key(key_id):
     return jsonify({'success': True})
 
 
+@app.route('/system/ml-libraries', methods=['GET'])
+def get_ml_libraries():
+    """Installed PyTorch / TensorRT / Ultralytics versions (read from package
+    metadata, so nothing is imported into this always-on process)."""
+    import importlib.metadata as metadata
+    import re as _re
+
+    def version(name):
+        try:
+            return metadata.version(name)
+        except metadata.PackageNotFoundError:
+            return None
+
+    torch_version = version('torch')
+    cuda_build = None
+    match = _re.search(r'\+cu(\d+)(\d)$', torch_version or '')
+    if match:
+        cuda_build = f"{match.group(1)}.{match.group(2)}"
+    return jsonify({'success': True, 'torch': torch_version, 'torch_cuda': cuda_build,
+                    'torchvision': version('torchvision'), 'ultralytics': version('ultralytics'),
+                    'tensorrt': version('tensorrt')})
+
+
 @app.route('/system/privileges', methods=['GET'])
 def get_privileges():
     """Whether admin actions (reboot, shutdown, jtop service, cache) need a

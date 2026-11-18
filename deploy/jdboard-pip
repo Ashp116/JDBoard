@@ -22,8 +22,13 @@ if [ "${1:-}" = "install" ]; then
             opencv-python|opencv-contrib-python|opencv-python-headless|opencv-contrib-python-headless)
                 echo "Refusing $arg: it would hide JetPack's CUDA-enabled OpenCV (cv2 is already available)." >&2
                 exit 1 ;;
-            torch|torchvision|numpy)
-                echo "Refusing $arg: JDBoard needs the installed version (see $CONSTRAINTS)." >&2
+            torch|torchvision)
+                echo "Use jdboard-pytorch for PyTorch: it picks a build for this Jetson's CUDA," >&2
+                echo "checks the GPU works afterwards and keeps numpy in place:" >&2
+                echo "  sudo jdboard-pytorch install [VERSION] [--index-url URL] [--wheel FILE]" >&2
+                exit 1 ;;
+            numpy)
+                echo "Refusing $arg: JetPack's OpenCV needs the installed numpy 1.x (see $CONSTRAINTS)." >&2
                 exit 1 ;;
         esac
     done

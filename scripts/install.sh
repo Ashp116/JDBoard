@@ -90,7 +90,7 @@ as_admin() { sudo -u "$ADMIN_USER" -H bash -c "$1"; }
 if [ "$UNINSTALL" -eq 1 ]; then
     step "Removing JDBoard"
     systemctl disable --now "$SERVICE" 2>/dev/null || true
-    rm -f "$UNIT" "$SUDOERS" /usr/local/bin/jdboard-pip /usr/local/bin/jdboard-passwd
+    rm -f "$UNIT" "$SUDOERS" /usr/local/bin/jdboard-pip /usr/local/bin/jdboard-passwd /usr/local/bin/jdboard-pytorch
     if [ -f /etc/fail2ban/jail.d/jdboard.conf ]; then
         rm -f /etc/fail2ban/jail.d/jdboard.conf
         systemctl reload fail2ban 2>/dev/null || true
@@ -179,6 +179,7 @@ chown -R root:root "$APP/backend"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-admin" "$APP/bin/jdboard-admin"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-web" "$APP/bin/jdboard-web"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-pip" /usr/local/bin/jdboard-pip
+install -m 755 -o root -g root "$REPO/deploy/jdboard-pytorch" /usr/local/bin/jdboard-pytorch
 install -m 755 -o root -g root "$REPO/deploy/jdboard-passwd" /usr/local/bin/jdboard-passwd
 install -m 644 -o root -g root "$REPO/requirements.txt" "$APP/requirements.txt"
 git -C "$REPO" rev-parse --short HEAD > "$APP/VERSION" 2>/dev/null || echo unknown > "$APP/VERSION"
@@ -207,9 +208,10 @@ fi
 if "$VENV/bin/python" -c "import torch, ultralytics" 2>/dev/null; then
     echo "PyTorch + Ultralytics: installed"
 elif [ "$WITH_PYTORCH" -eq 1 ]; then
-    echo "Installing PyTorch (CUDA 13.2) and Ultralytics - this downloads ~3 GB"
-    "$VENV/bin/python" -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132
-    "$VENV/bin/python" -m pip install ultralytics --no-deps
+    echo "Installing PyTorch and Ultralytics - this downloads ~3 GB"
+    # Picks the build for this JetPack (PyTorch's CUDA 13 builds on JetPack 7,
+    # NVIDIA's Jetson builds on JetPack 6) and checks the GPU works afterwards
+    /usr/local/bin/jdboard-pytorch install --no-restart || echo "⚠️  PyTorch didn't install cleanly; see above (sudo jdboard-pytorch status)"
     "$VENV/bin/python" -m pip install -q -r "$APP/requirements.txt"
 else
     echo "PyTorch/Ultralytics not installed - monitoring works, model inference won't."
@@ -468,6 +470,7 @@ Restart:           sudo systemctl restart jdboard
 Change login:      sudo jdboard-passwd
 Admin password:    sudo jdboard-passwd --admin   (asked before reboot/shutdown/...; --admin --remove to drop)
 Add a library:     sudo jdboard-pip install <package> && sudo systemctl restart jdboard
+PyTorch:           jdboard-pytorch status   (sudo jdboard-pytorch install / uninstall)
 Update:            git pull && sudo ./scripts/install.sh
 Models/data:       $DATA (you're in the 'jdboard' group after logging in again)
 EOF
