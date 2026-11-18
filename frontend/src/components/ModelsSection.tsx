@@ -19,6 +19,10 @@ interface ModelInfo {
   loaded?: boolean;
   status?: string;
   upload_date?: string;
+  created_at?: string;      // when it was added (registry)
+  last_used?: string | null;
+  inference_count?: number;
+  original_filename?: string;
   custom_script_path?: string | null;
   inference_handler?: 'default' | 'custom';
   script_status?: 'none' | 'pending' | 'active' | 'failed';
@@ -143,6 +147,52 @@ const PRECISION_OPTIONS: Record<string, { value: Precision; label: string; hint:
   ],
 };
 const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', TensorRT: 'fp16' };
+// Models tab: sort and filter options (remembered per browser)
+type ModelSort = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc'
+               | 'recently-used' | 'most-used' | 'loaded-first';
+const MODEL_SORTS: { value: ModelSort; label: string }[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'name-asc', label: 'Name (A–Z)' },
+  { value: 'name-desc', label: 'Name (Z–A)' },
+  { value: 'size-desc', label: 'Largest first' },
+  { value: 'size-asc', label: 'Smallest first' },
+  { value: 'recently-used', label: 'Recently used' },
+  { value: 'most-used', label: 'Most used' },
+  { value: 'loaded-first', label: 'Loaded first' },
+];
+type ModelView = { sort: ModelSort; framework: string; status: 'all' | 'loaded' | 'unloaded'; handler: 'all' | 'custom' | 'default' };
+const DEFAULT_MODEL_VIEW: ModelView = { sort: 'newest', framework: 'all', status: 'all', handler: 'all' };
+const MODEL_VIEW_KEY = 'jdboard.models.view';
+const FRAMEWORK_LABELS: Record<string, string> = { tensorrt: 'TensorRT', pytorch: 'PyTorch', onnx: 'ONNX', tensorflow: 'TensorFlow', keras: 'Keras' };
+
+const loadModelView = (): ModelView => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MODEL_VIEW_KEY) || '{}');
+    return { ...DEFAULT_MODEL_VIEW, ...saved };
+  } catch {
+    return DEFAULT_MODEL_VIEW;
+  }
+};
+
+const addedAt = (m: ModelInfo) => Date.parse(m.created_at || m.upload_date || '') || 0;
+
+const compareModels = (sort: ModelSort) => (a: ModelInfo, b: ModelInfo): number => {
+  const byName = a.id.localeCompare(b.id, undefined, { sensitivity: 'base', numeric: true });
+  switch (sort) {
+    case 'oldest': return addedAt(a) - addedAt(b) || byName;
+    case 'name-asc': return byName;
+    case 'name-desc': return -byName;
+    case 'size-desc': return (b.file_size || 0) - (a.file_size || 0) || byName;
+    case 'size-asc': return (a.file_size || 0) - (b.file_size || 0) || byName;
+    case 'recently-used': return (Date.parse(b.last_used || '') || 0) - (Date.parse(a.last_used || '') || 0) || byName;
+    case 'most-used': return (b.inference_count || 0) - (a.inference_count || 0) || byName;
+    case 'loaded-first': return Number(!!b.loaded) - Number(!!a.loaded) || byName;
+    case 'newest':
+    default: return addedAt(b) - addedAt(a) || byName;
+  }
+};
+
 // Background for selected options/buttons in the Add Model dialog. The theme's
 // NVIDIA green (#76B900) is too light for white text (2.4:1); this is 5.1:1.
 const SELECTED_GREEN = '#4E7A00';
@@ -224,6 +274,78 @@ const SearchAndActions = styled.div`
     align-items: stretch;
     gap: 10px;
     width: 100%;
+  }
+`;
+
+const ModelsToolbar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: -14px 0 20px;
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: ${props => props.theme.colors.text.secondary};
+
+    i {
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+
+  select {
+    padding: 7px 10px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    background: ${props => props.theme.colors.background.secondary};
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 13px;
+    cursor: pointer;
+
+    &:focus {
+      outline: none;
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+
+  .count {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: ${props => props.theme.colors.text.secondary};
+
+    button {
+      background: none;
+      border: none;
+      padding: 0;
+      color: #76b900;
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+  }
+
+  ${props => props.theme.media.mobile} {
+    margin-top: -6px;
+
+    label {
+      flex: 1 1 45%;
+    }
+
+    select {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .count {
+      margin-left: 0;
+      width: 100%;
+    }
   }
 `;
 
@@ -2107,6 +2229,14 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [filteredModels, setFilteredModels] = useState<ModelInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [modelView, setModelView] = useState<ModelView>(loadModelView);
+  const updateModelView = (change: Partial<ModelView>) => {
+    setModelView(prev => {
+      const next = { ...prev, ...change };
+      try { localStorage.setItem(MODEL_VIEW_KEY, JSON.stringify(next)); } catch { /* private mode etc. */ }
+      return next;
+    });
+  };
   const [loading, setLoading] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(true); // Track initial model fetch
   const [dragOver, setDragOver] = useState(false);
@@ -2578,19 +2708,28 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     };
   }, [activeDownloads.size > 0, socket]);
 
-  // Filter models based on search query
+  // Search, filter and sort the model list
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFilteredModels(models);
-    } else {
-      const filtered = models.filter(model => 
-        model.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        model.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        model.framework.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredModels(filtered);
-    }
-  }, [models, searchQuery]);
+    const query = searchQuery.trim().toLowerCase();
+    const filtered = models.filter(model => {
+      if (query && ![model.id, model.type, model.framework, FRAMEWORK_LABELS[model.framework],
+                     model.original_filename, model.precision]
+            .some(field => field && field.toLowerCase().includes(query))) {
+        return false;
+      }
+      if (modelView.framework !== 'all' && model.framework !== modelView.framework) return false;
+      if (modelView.status === 'loaded' && !model.loaded) return false;
+      if (modelView.status === 'unloaded' && model.loaded) return false;
+      if (modelView.handler === 'custom' && !model.custom_script_path) return false;
+      if (modelView.handler === 'default' && model.custom_script_path) return false;
+      return true;
+    });
+    filtered.sort(compareModels(modelView.sort));
+    setFilteredModels(filtered);
+  }, [models, searchQuery, modelView]);
+
+  const frameworksPresent = Array.from(new Set(models.map(m => m.framework))).sort();
+  const viewIsFiltered = modelView.framework !== 'all' || modelView.status !== 'all' || modelView.handler !== 'all';
 
   // Search handlers
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3613,6 +3752,51 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </SearchAndActions>
       </SectionHeader>
 
+      {models.length > 0 && (
+        <ModelsToolbar>
+          <label>
+            <i className="fas fa-sort-amount-down"></i>
+            <select value={modelView.sort} onChange={(e) => updateModelView({ sort: e.target.value as ModelSort })}
+                    aria-label="Sort models">
+              {MODEL_SORTS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Framework</span>
+            <select value={modelView.framework} onChange={(e) => updateModelView({ framework: e.target.value })}>
+              <option value="all">All</option>
+              {frameworksPresent.map(fw => <option key={fw} value={fw}>{FRAMEWORK_LABELS[fw] || fw}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select value={modelView.status} onChange={(e) => updateModelView({ status: e.target.value as ModelView['status'] })}>
+              <option value="all">All</option>
+              <option value="loaded">Loaded</option>
+              <option value="unloaded">Not loaded</option>
+            </select>
+          </label>
+          <label>
+            <span>Inference</span>
+            <select value={modelView.handler} onChange={(e) => updateModelView({ handler: e.target.value as ModelView['handler'] })}>
+              <option value="all">All</option>
+              <option value="custom">Custom script</option>
+              <option value="default">Default</option>
+            </select>
+          </label>
+          <div className="count">
+            {filteredModels.length === models.length
+              ? `${models.length} model${models.length === 1 ? '' : 's'}`
+              : `Showing ${filteredModels.length} of ${models.length}`}
+            {viewIsFiltered && (
+              <button type="button" onClick={() => updateModelView({ framework: 'all', status: 'all', handler: 'all' })}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        </ModelsToolbar>
+      )}
+
       {/* Active Downloads Section */}
       {activeDownloads.size > 0 && (
         <DownloadsSection>
@@ -3727,8 +3911,16 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       ) : filteredModels.length === 0 ? (
         <EmptyState>
           <i className="fas fa-search"></i>
-          <h3>No Models Match Your Search</h3>
-          <p>Try adjusting your search terms or clear the search to see all models</p>
+          <h3>No Models Match</h3>
+          <p>No model matches your search{viewIsFiltered ? ' and filters' : ''}.</p>
+          <button
+            type="button"
+            onClick={() => { setSearchQuery(''); updateModelView({ framework: 'all', status: 'all', handler: 'all' }); }}
+            style={{ marginTop: '12px', background: 'none', border: '1px solid #76b900', color: '#76b900',
+                     padding: '8px 14px', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            Show all models
+          </button>
         </EmptyState>
       ) : (
         <ModelsList>
@@ -3855,10 +4047,19 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                     <span className="value" style={{ whiteSpace: 'normal', textAlign: 'right' }}>{model.load_problem}</span>
                   </div>
                 )}
-                {model.upload_date && (
+                {(model.created_at || model.upload_date) && (
                   <div className="info-row">
                     <span className="label">Added:</span>
-                    <span className="value">{new Date(model.upload_date).toLocaleDateString()}</span>
+                    <span className="value">{new Date((model.created_at || model.upload_date)!).toLocaleDateString()}</span>
+                  </div>
+                )}
+                {!!model.inference_count && (
+                  <div className="info-row">
+                    <span className="label">Runs:</span>
+                    <span className="value">
+                      {model.inference_count}
+                      {model.last_used ? ` · last ${new Date(model.last_used).toLocaleDateString()}` : ''}
+                    </span>
                   </div>
                 )}
               </div>
