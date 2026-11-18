@@ -80,21 +80,27 @@ Programs use an API key instead of the dashboard login. Create one in
 | Read only | every read (monitoring, models, logs, live Socket.IO updates); no changes |
 | Full access | everything except the web terminal and managing keys (admin actions still need the admin password) |
 
-Send it as a Bearer token, and trust the Jetson's certificate
-(copy `/etc/jdboard/tls/jdboard.crt` to the machine running the bot):
+Send it as a Bearer token. The Jetson's certificate is self-signed, so tell the
+client not to verify it (`-k` / `verify=False`); the connection and the key are
+still encrypted:
 
 ```bash
-curl --cacert jdboard.crt -H "Authorization: Bearer jdb_..." https://jetson.local/api/models/list
-curl --cacert jdboard.crt -H "Authorization: Bearer jdb_..." -F image=@photo.jpg https://jetson.local/api/inference/YOLOv11n
+curl -k -H "Authorization: Bearer jdb_..." https://jetson.local/api/models/list
+curl -k -H "Authorization: Bearer jdb_..." -F image=@photo.jpg https://jetson.local/api/inference/YOLOv11n
 ```
 
 ```python
-import requests
+import requests, urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)   # self-signed certificate
+
 r = requests.post("https://jetson.local/api/inference/YOLOv11n",
                   headers={"Authorization": "Bearer jdb_..."},
-                  files={"image": open("photo.jpg", "rb")}, verify="jdboard.crt")
+                  files={"image": open("photo.jpg", "rb")}, verify=False)
 print(r.json()["data"]["result"]["predictions"])
 ```
+
+To also check that you're talking to *your* Jetson, copy `/etc/jdboard/tls/jdboard.crt`
+to the bot's machine and use `--cacert jdboard.crt` / `verify="jdboard.crt"` instead.
 
 Keys are stored hashed in `/var/lib/jdboard/config/api_keys.json` and can be revoked
 any time; a client sending 10 wrong keys in a minute has its keys refused for 10 minutes.

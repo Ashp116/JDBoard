@@ -339,7 +339,7 @@ const ApiKeysCard: React.FC = () => {
             <PrimaryButton onClick={() => copy(created.key)}><i className="fas fa-copy"></i> Copy</PrimaryButton>
           </div>
           <div>Example:</div>
-          <pre>{`curl --cacert jdboard.crt -H "Authorization: Bearer ${created.key}" ${origin}/api/models/list`}</pre>
+          <pre>{`curl -k -H "Authorization: Bearer ${created.key}" ${origin}/api/models/list`}</pre>
           <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 0 }}>
             <button className="plain" onClick={() => setCreated(null)}>Done</button>
           </div>
