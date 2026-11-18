@@ -1,16 +1,61 @@
 #!/bin/bash
-# jdboard-passwd - set or change the JDBoard login (checked by nginx).
+# jdboard-passwd - set the JDBoard passwords.
 #
-#   sudo jdboard-passwd            # asks for a username and password
-#   sudo jdboard-passwd admin      # change the password for user admin
+#   sudo jdboard-passwd                  # dashboard login: asks for a username and password
+#   sudo jdboard-passwd admin            # change the dashboard password for user admin
+#   sudo jdboard-passwd --admin          # set the admin password asked before reboot,
+#                                        # shutdown, clear cache, jtop service, start on boot
+#   sudo jdboard-passwd --admin --remove # those actions stop asking for a password
 #
-# Writes /etc/jdboard/htpasswd (one user) and reloads nginx.
+# The dashboard login is /etc/jdboard/htpasswd (checked by nginx); the admin
+# password is /etc/jdboard/admin-password (checked by the backend).
 set -euo pipefail
 HTPASSWD=/etc/jdboard/htpasswd
+ADMIN_FILE=/etc/jdboard/admin-password
+VENV_PYTHON=/opt/jdboard/venv/bin/python
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run with sudo: sudo jdboard-passwd $*" >&2
     exit 1
+fi
+
+ask_new_password() {   # sets PW1
+    while true; do
+        read -rsp "$1: " PW1; echo
+        read -rsp "Repeat password: " PW2; echo
+        if [ "$PW1" != "$PW2" ]; then
+            echo "Passwords don't match, try again."
+        elif [ "${#PW1}" -lt 8 ]; then
+            echo "Use at least 8 characters."
+        else
+            unset PW2
+            return
+        fi
+    done
+}
+
+if [ "${1:-}" = "--admin" ]; then
+    if [ "${2:-}" = "--remove" ]; then
+        rm -f "$ADMIN_FILE"
+        echo "✅ Admin password removed: reboot, shutdown and the other admin actions no longer ask for one."
+        exit 0
+    fi
+    if [ ! -t 0 ]; then
+        echo "jdboard-passwd needs to ask for a password - run it in a terminal (SSH or the desktop)." >&2
+        exit 1
+    fi
+    echo "The admin password is asked before reboot, shutdown, clearing caches, fixing the jtop"
+    echo "service and changing start-on-boot. Use something different from your Linux password."
+    ask_new_password "New admin password"
+    # werkzeug hash (what the backend checks); the password goes in on stdin
+    HASH="$(printf '%s' "$PW1" | "$VENV_PYTHON" -c 'import sys; from werkzeug.security import generate_password_hash; print(generate_password_hash(sys.stdin.read()))')"
+    unset PW1
+    umask 077
+    printf '%s\n' "$HASH" > "$ADMIN_FILE"
+    chown root:jdboard "$ADMIN_FILE"
+    chmod 640 "$ADMIN_FILE"
+    echo "✅ Admin password set. The dashboard asks for it before admin actions (remembered for 15 minutes)."
+    exit 0
 fi
 
 if [ ! -t 0 ]; then
@@ -32,21 +77,11 @@ if ! [[ "$LOGIN" =~ ^[A-Za-z0-9._-]+$ ]]; then
     exit 1
 fi
 
-while true; do
-    read -rsp "New JDBoard password: " PW1; echo
-    read -rsp "Repeat password: " PW2; echo
-    if [ "$PW1" != "$PW2" ]; then
-        echo "Passwords don't match, try again."
-    elif [ "${#PW1}" -lt 8 ]; then
-        echo "Use at least 8 characters."
-    else
-        break
-    fi
-done
+ask_new_password "New JDBoard password"
 
 # SHA-512 crypt hash; the password goes to openssl on stdin, never on a command line
 HASH="$(printf '%s\n' "$PW1" | openssl passwd -6 -stdin)"
-unset PW1 PW2
+unset PW1
 
 install -d -m 755 /etc/jdboard   # nginx (www-data) must be able to reach htpasswd
 umask 077

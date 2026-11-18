@@ -35,12 +35,15 @@ What it sets up:
 | `/var/lib/jdboard` | Models, logs and settings (owned by the `jdboard` user) |
 | `/etc/jdboard` | `jdboard.env` (settings) and `htpasswd` (the dashboard login) |
 | `jdboard.service` | The backend, running as the unprivileged **`jdboard`** user on `127.0.0.1` only |
-| nginx | Serves the frontend, forwards `/api` to the backend, and checks the login |
+| nginx | HTTPS (self-signed certificate in `/etc/jdboard/tls`; plain HTTP redirects to it), serves the frontend, forwards `/api` to the backend, and checks the login |
+| fail2ban | Blocks an IP for 15 minutes after 5 wrong logins within 10 minutes |
 
 The `jdboard` user has no password or login shell and can't read your home folder.
 Its only root access is `/opt/jdboard/bin/jdboard-admin`, which can reboot, power off,
-drop caches and manage `jtop.service` and nothing else, so those dashboard actions
-don't ask for a password. The installer adds you to the `jdboard` group so you can
+drop caches, manage `jtop.service` and turn start-on-boot on/off, and nothing else.
+Those dashboard actions don't ask for a password unless you set an **admin password**
+(`sudo jdboard-passwd --admin`); then the dashboard asks for it first, remembers it for
+15 minutes, and locks a client out for 5 minutes after 5 wrong tries. The installer adds you to the `jdboard` group so you can
 reach the models folder over SSH (log in again first).
 
 If you already have a checkout with a `.venv` and models, the installer copies them
@@ -50,17 +53,21 @@ If you already have a checkout with a `.venv` and models, the installer copies t
 journalctl -u jdboard -f                              # logs
 sudo systemctl restart jdboard                        # restart
 sudo jdboard-passwd                                   # change the dashboard login
+sudo jdboard-passwd --admin                           # set the admin password (--admin --remove to drop it)
 sudo jdboard-pip install <package>                    # add a library for a custom script
 git pull && sudo ./scripts/install.sh --rebuild-frontend   # update
 sudo ./scripts/install.sh --uninstall                 # remove (keeps models; --purge removes them too)
 ```
 
-Other options: `--port N` (nginx port, default 80), `--backend-port N` (default 5001),
+Other options: `--https-port N` (default 443), `--port N` (HTTP, default 80), `--no-https`,
+`--renew-cert` (e.g. after the IP changed), `--no-fail2ban`, `--backend-port N` (default 5001),
 `--fresh-venv`, `--no-migrate`.
 
+The certificate is self-signed, so the browser warns the first time; accept it once, or put
+your own certificate at `/etc/jdboard/tls/jdboard.crt` / `jdboard.key` and reload nginx.
+
 > **Security:** JDBoard has a web terminal and can reboot the device. Keep the login,
-> and to reach it from outside your network add HTTPS to the nginx site (or use a VPN)
-> rather than forwarding the port.
+> and to reach it from outside your network use a VPN rather than forwarding the port.
 
 ### Development
 

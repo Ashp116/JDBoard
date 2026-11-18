@@ -6,18 +6,24 @@
 #   sudo ./scripts/install.sh --uninstall         # remove the service (keeps data and login)
 #   sudo ./scripts/install.sh --uninstall --purge # remove everything, including models
 #
-# Options: --port N (nginx port, default 80), --backend-port N (default 5001),
-#          --rebuild-frontend, --fresh-venv, --no-migrate
+# Options: --port N (HTTP port, default 80), --https-port N (default 443),
+#          --no-https (plain HTTP only), --renew-cert (new self-signed certificate),
+#          --no-fail2ban (don't block IPs after repeated wrong logins),
+#          --admin-password / --no-admin-password (set one now / don't ask),
+#          --backend-port N (default 5001), --rebuild-frontend, --fresh-venv, --no-migrate
 #
 # Layout
 #   /opt/jdboard            app: backend, built frontend, Python venv (owned by root)
 #   /etc/jdboard            jdboard.env (settings), htpasswd (login)
 #   /var/lib/jdboard        models, logs, settings (owned by the 'jdboard' user)
 #   jdboard.service         backend, runs as the unprivileged 'jdboard' user on 127.0.0.1
-#   nginx                   serves the frontend, proxies /api, checks the login
+#   nginx                   HTTPS (self-signed certificate in /etc/jdboard/tls unless you
+#                           put your own there), serves the frontend, proxies /api, checks
+#                           the login; HTTP redirects to HTTPS
+#   fail2ban                blocks an IP for 15 minutes after 5 wrong logins in 10 minutes
 #   /etc/sudoers.d/jdboard  lets the service run /opt/jdboard/bin/jdboard-admin
 #                           (reboot, poweroff, drop caches, manage jtop) - nothing else
-#   jdboard-passwd / jdboard-pip   commands to change the login / add Python packages
+#   jdboard-passwd / jdboard-pip   change the login or admin password / add Python packages
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,6 +37,11 @@ SUDOERS=/etc/sudoers.d/jdboard
 RELEASE_REPO="${JDBOARD_RELEASE_REPO:-Ashp116/JDBoard}"
 
 PORT=80
+HTTPS_PORT=443
+HTTPS=1
+RENEW_CERT=0
+FAIL2BAN=1
+ADMIN_PASSWORD=ask    # ask on a fresh install | yes (--admin-password) | no (--no-admin-password)
 BACKEND_PORT=5001
 WITH_PYTORCH=0
 REBUILD_FRONTEND=0
@@ -39,10 +50,16 @@ MIGRATE=1
 UNINSTALL=0
 PURGE=0
 
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --port) PORT="${2:?--port needs a number}"; shift 2 ;;
+        --https-port) HTTPS_PORT="${2:?--https-port needs a number}"; shift 2 ;;
+        --no-https) HTTPS=0; shift ;;
+        --renew-cert) RENEW_CERT=1; shift ;;
+        --no-fail2ban) FAIL2BAN=0; shift ;;
+        --admin-password) ADMIN_PASSWORD=yes; shift ;;
+        --no-admin-password) ADMIN_PASSWORD=no; shift ;;
         --backend-port) BACKEND_PORT="${2:?--backend-port needs a number}"; shift 2 ;;
         --with-pytorch) WITH_PYTORCH=1; shift ;;
         --rebuild-frontend) REBUILD_FRONTEND=1; shift ;;
@@ -59,7 +76,7 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "Run with sudo: sudo $0 $*" >&2
     exit 1
 fi
-for p in "$PORT" "$BACKEND_PORT"; do
+for p in "$PORT" "$HTTPS_PORT" "$BACKEND_PORT"; do
     if ! [[ "$p" =~ ^[0-9]+$ ]] || [ "$p" -lt 1 ] || [ "$p" -gt 65535 ]; then
         echo "Invalid port: $p" >&2; exit 1
     fi
@@ -74,6 +91,10 @@ if [ "$UNINSTALL" -eq 1 ]; then
     step "Removing JDBoard"
     systemctl disable --now "$SERVICE" 2>/dev/null || true
     rm -f "$UNIT" "$SUDOERS" /usr/local/bin/jdboard-pip /usr/local/bin/jdboard-passwd
+    if [ -f /etc/fail2ban/jail.d/jdboard.conf ]; then
+        rm -f /etc/fail2ban/jail.d/jdboard.conf
+        systemctl reload fail2ban 2>/dev/null || true
+    fi
     systemctl daemon-reload
     if [ -L /etc/nginx/sites-enabled/jdboard ] || [ -f "$NGINX_SITE" ]; then
         rm -f /etc/nginx/sites-enabled/jdboard "$NGINX_SITE"
@@ -296,9 +317,47 @@ else
     /usr/local/bin/jdboard-passwd
 fi
 
+# Optional second password for reboot/shutdown/cache/jtop/start-on-boot.
+# Asked once (the first install run with this option), or with --admin-password.
+if [ -s "$ETC/admin-password" ]; then
+    echo "Keeping the existing admin password (change it: sudo jdboard-passwd --admin)"
+elif [ "$ADMIN_PASSWORD" = ask ] && [ -t 0 ] && [ ! -e "$ETC/.admin-password-asked" ]; then
+    echo
+    echo "Optional: an admin password the dashboard asks for before reboot, shutdown,"
+    echo "clearing caches, fixing the jtop service and changing start-on-boot."
+    read -rp "Set an admin password now? [Y/n] " REPLY_ADMIN
+    if [[ ! "$REPLY_ADMIN" =~ ^[Nn] ]]; then
+        /usr/local/bin/jdboard-passwd --admin
+    else
+        echo "Skipped - those actions won't ask for a password. Add one any time: sudo jdboard-passwd --admin"
+    fi
+    touch "$ETC/.admin-password-asked"
+elif [ "$ADMIN_PASSWORD" = yes ]; then
+    /usr/local/bin/jdboard-passwd --admin
+fi
+
 step "nginx"
-sed -e "s/@LISTEN_PORT@/$PORT/g" -e "s/@BACKEND_PORT@/$BACKEND_PORT/g" \
-    "$REPO/deploy/nginx-jdboard.conf" > "$NGINX_SITE"
+if [ "$HTTPS" -eq 1 ]; then
+    TLS_DIR="$ETC/tls"
+    install -d -m 755 -o root -g root "$TLS_DIR"
+    if [ "$RENEW_CERT" -eq 1 ] || [ ! -s "$TLS_DIR/jdboard.crt" ] || [ ! -s "$TLS_DIR/jdboard.key" ]; then
+        # Self-signed, valid 10 years, for this device's names and current addresses
+        HOST="$(hostname)"
+        SAN="DNS:$HOST,DNS:$HOST.local,DNS:localhost,IP:127.0.0.1"
+        for ip in $(hostname -I); do SAN="$SAN,IP:$ip"; done
+        openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+            -subj "/CN=$HOST" -addext "subjectAltName=$SAN" \
+            -keyout "$TLS_DIR/jdboard.key" -out "$TLS_DIR/jdboard.crt" 2>/dev/null
+        chmod 600 "$TLS_DIR/jdboard.key"
+        chmod 644 "$TLS_DIR/jdboard.crt"
+        echo "Created a self-signed certificate for $SAN"
+        echo "  (browsers warn once; replace $TLS_DIR/jdboard.crt/.key with your own to avoid that)"
+    else
+        echo "Using the certificate in $TLS_DIR"
+    fi
+fi
+python3 "$REPO/deploy/render-nginx-site.py" "$REPO/deploy/nginx-jdboard.conf" "$NGINX_SITE" \
+    "$HTTPS" "$PORT" "$HTTPS_PORT" "$BACKEND_PORT" "$ETC/tls"
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/jdboard
 # nginx's stock welcome site also claims the default server on port 80
 if [ "$PORT" = 80 ] && [ -L /etc/nginx/sites-enabled/default ]; then
@@ -309,6 +368,25 @@ nginx -t
 systemctl enable nginx >/dev/null
 systemctl reload nginx 2>/dev/null || systemctl restart nginx
 
+if [ "$FAIL2BAN" -eq 1 ]; then
+    step "Blocking repeated wrong logins (fail2ban)"
+    if ! command -v fail2ban-client >/dev/null; then
+        apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q fail2ban
+    fi
+    PORTS="$PORT"
+    [ "$HTTPS" -eq 1 ] && PORTS="$PORT,$HTTPS_PORT"
+    install -d -m 755 /etc/fail2ban/jail.d
+    sed -e "s/@PORTS@/$PORTS/" "$REPO/deploy/fail2ban-jdboard.conf" > /etc/fail2ban/jail.d/jdboard.conf
+    systemctl enable fail2ban >/dev/null
+    systemctl restart fail2ban
+    sleep 2
+    if fail2ban-client status nginx-http-auth >/dev/null 2>&1; then
+        echo "fail2ban is watching the dashboard login (unban: sudo fail2ban-client set nginx-http-auth unbanip <ip>)"
+    else
+        echo "⚠️  fail2ban didn't start its JDBoard jail; check: sudo fail2ban-client status"
+    fi
+fi
+
 # --- 9. start and check ----------------------------------------------------------------
 step "Starting JDBoard"
 systemctl restart "$SERVICE"
@@ -317,16 +395,24 @@ for _ in $(seq 1 40); do
     [ "$BACKEND" = 200 ] && break
     sleep 1
 done
-FRONT="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)"
+if [ "$HTTPS" -eq 1 ]; then
+    FRONT="$(curl -sk -o /dev/null -w '%{http_code}' "https://127.0.0.1:$HTTPS_PORT/" || true)"
+    SCHEME=https; URL_PORT=""; [ "$HTTPS_PORT" -ne 443 ] && URL_PORT=":$HTTPS_PORT"
+else
+    FRONT="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)"
+    SCHEME=http; URL_PORT=""; [ "$PORT" -ne 80 ] && URL_PORT=":$PORT"
+fi
 
 echo
 if [ "$BACKEND" = 200 ] && [ "$FRONT" = 401 ]; then
     echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")) and starts on boot."
-    URL_PORT=""; [ "$PORT" -ne 80 ] && URL_PORT=":$PORT"
     for ip in $(hostname -I); do
         [[ "$ip" == *:* || "$ip" == 169.254.* || "$ip" == 172.17.* ]] && continue
-        echo "   http://$ip$URL_PORT"
+        echo "   $SCHEME://$ip$URL_PORT"
     done
+    if [ "$HTTPS" -eq 1 ]; then
+        echo "   (self-signed certificate: your browser asks you to accept it the first time)"
+    fi
 else
     echo "❌ Something isn't answering (backend: $BACKEND, nginx: $FRONT - expected 200 and 401)."
     journalctl -u "$SERVICE" -n 30 --no-pager || true
@@ -337,6 +423,7 @@ cat <<EOF
 Logs:              journalctl -u jdboard -f
 Restart:           sudo systemctl restart jdboard
 Change login:      sudo jdboard-passwd
+Admin password:    sudo jdboard-passwd --admin   (asked before reboot/shutdown/...; --admin --remove to drop)
 Add a library:     sudo jdboard-pip install <package> && sudo systemctl restart jdboard
 Update:            git pull && sudo ./scripts/install.sh --rebuild-frontend
 Models/data:       $DATA (you're in the 'jdboard' group after logging in again)

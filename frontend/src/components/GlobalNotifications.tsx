@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import styled, { keyframes } from 'styled-components';
 import { useNotifications, Notification } from '../contexts/NotificationContext';
 import { getBackendUrl } from '../utils/api';
-import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
+import { isPasswordlessSudo, PASSWORDLESS, usePasswordLabel } from '../utils/privileges';
 import { useSocket } from '../hooks/useSocket';
 
 const slideIn = keyframes`
@@ -489,6 +489,7 @@ const getNotificationIcon = (type: Notification['type']) => {
 
 const GlobalNotifications: React.FC = () => {
   const { notifications, removeNotification, addNotification, systemError, setSystemError } = useNotifications();
+  const passwordLabel = usePasswordLabel();
   const { socket } = useSocket();
   const [isResolving, setIsResolving] = useState(false);
   const [showSudoModal, setShowSudoModal] = useState(false);
@@ -650,7 +651,7 @@ const GlobalNotifications: React.FC = () => {
       } else {
         // Handle different types of errors
         if (response.status === 401) {
-          showError('Invalid sudo password. Please try again.');
+          showError(result.error || `Wrong ${passwordLabel}. Please try again.`);
         } else {
           showError(result.error || 'Failed to authenticate or execute command. Please check your password.');
         }
@@ -760,11 +761,11 @@ const GlobalNotifications: React.FC = () => {
               Administrator Authentication Required
             </h3>
             <p>
-              Enter your sudo password to {pendingAction.actionText}:
+              Enter your {passwordLabel} to {pendingAction.actionText}:
             </p>
             <SudoPasswordInput
               type="password"
-              placeholder="Enter sudo password"
+              placeholder={`Enter ${passwordLabel}`}
               value={sudoPassword}
               onChange={(e) => setSudoPassword(e.target.value)}
               className={sudoError ? 'error' : ''}

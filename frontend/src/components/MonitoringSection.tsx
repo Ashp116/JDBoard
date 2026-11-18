@@ -16,7 +16,7 @@ import {
 import { Line, Bar } from 'react-chartjs-2';
 import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
-import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
+import { isPasswordlessSudo, PASSWORDLESS, usePasswordLabel } from '../utils/privileges';
 import { useNotifications } from '../contexts/NotificationContext';
 import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
@@ -396,6 +396,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
   const [sudoPassword, setSudoPassword] = useState('');
   //@ts-ignore
   const { showNotification } = useNotifications();
+  const passwordLabel = usePasswordLabel();
   const [historicalData, setHistoricalData] = useState<{
     cpu: { labels: string[]; datasets: any[] };
     gpu: { labels: string[]; datasets: any[] };
@@ -444,7 +445,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
       addNotification({
         type: 'error',
         title: 'Password Required',
-        message: 'Please enter your sudo password'
+        message: `Please enter your ${passwordLabel}`
       });
       return;
     }
@@ -1248,11 +1249,11 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
       </ModalHeader>
       <ModalBody>
         <p style={{ color: 'var(--text-secondary)', margin: '0 0 20px 0', lineHeight: '1.5' }}>
-          Enter your sudo password to clear system cache and free up memory:
+          Enter your {passwordLabel} to clear system cache and free up memory:
         </p>
         <SudoPasswordInput
           type="password"
-          placeholder="Enter sudo password"
+          placeholder={`Enter ${passwordLabel}`}
           value={sudoPassword}
           onChange={(e) => setSudoPassword(e.target.value)}
           onKeyDown={(e) => {
