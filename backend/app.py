@@ -22,7 +22,10 @@ from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 from system_monitor import SystemMonitor
-from ai_inference import AIModelManager, terminate_active_exports, log_failure, normalize_export_options
+from ai_inference import terminate_active_exports, log_failure, normalize_export_options
+# Model loading/inference runs in a separate worker process that only exists
+# while a model is loaded (see inference_client.py / inference_worker.py)
+from inference_client import ManagedModelManager
 import atexit
 import signal
 from request_logger import RequestLogger
@@ -182,7 +185,7 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 # Initialize components
 system_monitor = SystemMonitor()
-ai_manager = AIModelManager()
+ai_manager = ManagedModelManager()
 request_logger = RequestLogger()
 
 # Logging setup
@@ -3342,8 +3345,13 @@ def kill_process(pid):
         }), 500
 
 def _shutdown(*_args):
-    """Stop running TensorRT builds with the backend instead of orphaning them."""
+    """Stop running TensorRT builds and the inference worker with the backend
+    instead of orphaning them."""
     terminate_active_exports()
+    try:
+        ai_manager.shutdown()
+    except Exception as e:
+        logger.warning(f"Stopping the inference worker failed: {e}")
 
 def _handle_sigterm(signum, frame):
     _shutdown()

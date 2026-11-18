@@ -20,45 +20,59 @@ from pathlib import Path
 import hashlib
 import importlib.util
 
-# AI/ML imports with fallbacks
+# AI/ML libraries. PyTorch, TensorRT and Ultralytics cost ~850 MB once
+# imported, and Python never releases an imported library. So they are only
+# imported inside the inference worker process (inference_worker.py), which is
+# started when a model is loaded and stopped when the last one is unloaded.
+# The always-on main process only checks whether they are installed.
+IN_INFERENCE_WORKER = os.environ.get('JDBOARD_INFERENCE_WORKER') == '1'
+
+
+def _installed(module):
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 # ONNX Runtime can cause bus errors on some Jetson devices
 # Disable it entirely to avoid crashes
 ONNX_AVAILABLE = False
-# try:
-#     import onnxruntime as ort
-#     ONNX_AVAILABLE = True
-# except ImportError:
-#     ONNX_AVAILABLE = False
+PYCUDA_INITIALIZED = False
 
-try:
-    import tensorrt as trt
-    # Don't import pycuda to avoid context issues
-    # TensorRT models will use Ultralytics YOLO which handles CUDA internally
-    TENSORRT_AVAILABLE = True
-    PYCUDA_INITIALIZED = False
-except ImportError:
-    TENSORRT_AVAILABLE = False
-    PYCUDA_INITIALIZED = False
+if IN_INFERENCE_WORKER:
+    try:
+        import tensorrt as trt
+        TENSORRT_AVAILABLE = True
+    except ImportError:
+        TENSORRT_AVAILABLE = False
 
-try:
-    import torch
-    import torchvision.transforms as transforms
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
+    try:
+        import torch
+        import torchvision.transforms as transforms
+        TORCH_AVAILABLE = True
+    except ImportError:
+        TORCH_AVAILABLE = False
 
-try:
-    import tensorflow as tf
-    TF_AVAILABLE = True
-except (ImportError, AttributeError, TypeError) as e:
-    TF_AVAILABLE = False
-    # Skip TensorFlow due to NumPy compatibility issues
+    try:
+        import tensorflow as tf
+        TF_AVAILABLE = True
+    except (ImportError, AttributeError, TypeError):
+        TF_AVAILABLE = False  # TensorFlow is incompatible with JetPack's NumPy
 
-try:
-    from ultralytics import YOLO
-    ULTRALYTICS_AVAILABLE = True
-except ImportError:
-    ULTRALYTICS_AVAILABLE = False
+    try:
+        from ultralytics import YOLO
+        ULTRALYTICS_AVAILABLE = True
+    except ImportError:
+        ULTRALYTICS_AVAILABLE = False
+else:
+    TENSORRT_AVAILABLE = _installed('tensorrt')
+    TORCH_AVAILABLE = _installed('torch') and _installed('torchvision')
+    TF_AVAILABLE = False      # never importable alongside JetPack's NumPy (see above)
+    ULTRALYTICS_AVAILABLE = _installed('ultralytics')
+
+# torch is only actually imported (usable) in the worker
+TORCH_IMPORTED = IN_INFERENCE_WORKER and TORCH_AVAILABLE
 
 # Import garbage collection for memory management
 import gc
@@ -91,7 +105,7 @@ class CUDAMemoryManager:
         
     def get_gpu_memory_info(self):
         """Get current GPU memory usage with percentage calculations"""
-        if not TORCH_AVAILABLE or not torch.cuda.is_available():
+        if not TORCH_IMPORTED or not torch.cuda.is_available():
             return {"total": 0, "allocated": 0, "free": 0, "usage_percent": 0}
         
         try:
@@ -118,7 +132,7 @@ class CUDAMemoryManager:
     
     def clear_cuda_cache(self, aggressive=False):
         """Clear CUDA cache to free up GPU memory"""
-        if TORCH_AVAILABLE and torch.cuda.is_available():
+        if TORCH_IMPORTED and torch.cuda.is_available():
             try:
                 if aggressive:
                     # More aggressive cleanup
@@ -166,7 +180,7 @@ class CUDAMemoryManager:
             self.clear_cuda_cache(aggressive=True)
             
             # Additional PyTorch cleanup
-            if TORCH_AVAILABLE and torch.cuda.is_available():
+            if TORCH_IMPORTED and torch.cuda.is_available():
                 try:
                     torch.cuda.ipc_collect()
                 except:
@@ -554,7 +568,7 @@ class AIModelManager:
             
             # Validate the script
             try:
-                self.script_loader.validate_script(custom_script_path)
+                self.validate_script_file(custom_script_path)
                 logger.info(f"Validated custom inference script: {custom_script_path.name}")
             except Exception as e:
                 raise ValueError(f"Invalid custom script: {e}")
@@ -653,6 +667,20 @@ class AIModelManager:
             error.line = cls.lineno
             raise error
 
+    def validate_script_file(self, script_path):
+        """Import a custom script once to catch errors (syntax, missing
+        libraries, no CustomModelInference). Raises ScriptError with the line.
+        Runs in this process - the main process overrides it to use a
+        throwaway subprocess, so the script's libraries never load there."""
+        try:
+            self.script_loader.validate_script(script_path)
+        except Exception as e:
+            line, trace = script_error_details(e, script_path)
+            message = str(e).replace('Invalid custom script: ', '').replace('Failed to load custom inference script: ', '')
+            if 'No module named' in message:
+                message += " - install the library into JDBoard's .venv, then save again"
+            raise ScriptError(message, line=line, traceback_text=trace)
+
     def _refresh_handler(self, model_id):
         """Re-create a loaded model's custom handler after its script changed,
         without reloading the model weights."""
@@ -694,14 +722,10 @@ class AIModelManager:
         new_path = self.models_dir / f"{uuid.uuid4().hex}_{safe}_script.py"
         new_path.write_text(content, encoding='utf-8')
         try:
-            self.script_loader.validate_script(new_path)
-        except Exception as e:
-            line, trace = script_error_details(e, new_path)
+            self.validate_script_file(new_path)
+        except ScriptError:
             self._remove_custom_script(new_path)
-            message = str(e).replace('Invalid custom script: Failed to load custom inference script: ', '')
-            if 'No module named' in message:
-                message += " - install the library into JDBoard's .venv, then save again"
-            raise ScriptError(message, line=line, traceback_text=trace)
+            raise
 
         old_path = info.get('custom_script_path')
         info['custom_script_path'] = str(new_path.resolve())
@@ -2044,6 +2068,21 @@ class AIModelManager:
             specs.append(f"{inp.name}:{n or 1}x{c or 3}x{h or imgsz}x{w or imgsz}")
         return ','.join(specs) if dynamic else None
 
+    @staticmethod
+    def _onnx_ultralytics_metadata(source_path):
+        """Metadata Ultralytics stores in an ONNX export (names, stride, imgsz,
+        task, ...), parsed the way Ultralytics does - without importing it."""
+        import ast
+        import onnx
+        model = onnx.load(str(source_path), load_external_data=False)
+        metadata = {}
+        for prop in model.metadata_props:
+            try:
+                metadata[prop.key] = ast.literal_eval(prop.value)
+            except (ValueError, SyntaxError):
+                metadata[prop.key] = prop.value
+        return metadata
+
     def _convert_onnx_with_trtexec(self, source_path, progress_callback=None, cancel_check_callback=None, export_options=None):
         """Build a TensorRT engine from any ONNX model with trtexec.
 
@@ -2137,8 +2176,7 @@ class AIModelManager:
             # hand the whole file to TensorRT.
             metadata = {}
             try:
-                from ultralytics.nn.backends.base import BaseBackend
-                metadata = BaseBackend.read_metadata(source_path) or {}
+                metadata = self._onnx_ultralytics_metadata(source_path)
             except Exception as e:
                 logger.info(f"No Ultralytics metadata read from {source_path.name}: {e}")
             if not ('names' in metadata and ('task' in metadata or 'stride' in metadata)):
@@ -2188,7 +2226,91 @@ class AIModelManager:
             self._remove_files_with_stem(source_path)
             raise
     
-    def _prepare_calibration_data(self, source_path, opts, model=None):
+    def _yolo_cli(self):
+        """The Ultralytics `yolo` command belonging to this interpreter (.venv/bin/yolo);
+        it isn't on PATH when the backend is started as `.venv/bin/python app.py`."""
+        yolo_cli = os.path.join(os.path.dirname(sys.executable), 'yolo')
+        if not os.path.exists(yolo_cli):
+            yolo_cli = shutil.which('yolo')
+        if not yolo_cli:
+            raise RuntimeError("The Ultralytics 'yolo' command was not found next to the backend's Python. "
+                               f"Reinstall it: {self.ULTRALYTICS_INSTALL_HINT}")
+        return yolo_cli
+
+    def _run_yolo_export(self, cmd, label, cancel_check_callback=None):
+        """Run a `yolo export` command as a subprocess (so PyTorch is never loaded
+        into the always-on main process), forwarding its log lines. Checks for
+        cancel every second and is stopped when the backend shuts down."""
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   universal_newlines=True, bufsize=1)
+
+        def monitor_output():
+            try:
+                for line in iter(process.stdout.readline, ''):
+                    clean_line = line.strip()
+                    if not clean_line:
+                        continue
+                    if any(k in clean_line for k in ['[TRT]', 'TensorRT:', 'ONNX:', 'Tactic Name:', 'Chose Runner Type:']):
+                        logger.info(clean_line)
+                    elif 'export success' in clean_line.lower():
+                        logger.info(f"✓ {clean_line}")
+                    elif any(k in clean_line for k in ['WARNING', 'ERROR', 'WARN']):
+                        logger.warning(clean_line)
+                    elif any(k in clean_line for k in ['building', 'input', 'output', 'shape', 'DataType']):
+                        logger.info(clean_line)
+            except Exception as e:
+                logger.error(f"Error monitoring {label} export output: {e}")
+            finally:
+                if process.stdout:
+                    process.stdout.close()
+
+        output_thread = threading.Thread(target=monitor_output, daemon=True)
+        output_thread.start()
+
+        # The build can run for minutes without printing anything, so cancel is
+        # checked on a timer, not only on output lines
+        with _ACTIVE_EXPORTS_LOCK:
+            _ACTIVE_EXPORTS.add(process)
+        cancelled = False
+        try:
+            while True:
+                try:
+                    return_code = process.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel_check_callback and cancel_check_callback():
+                        cancelled = True
+                        logger.info(f"Stopping {label} export (cancelled)")
+                        stop_process(process)
+        finally:
+            with _ACTIVE_EXPORTS_LOCK:
+                _ACTIVE_EXPORTS.discard(process)
+        output_thread.join(timeout=2.0)
+
+        if cancelled or (cancel_check_callback and cancel_check_callback()):
+            raise Exception(f"{label} conversion cancelled by user")
+        if return_code == -9:
+            raise RuntimeError(
+                f"{label} export was killed by the system because it ran out of memory. "
+                "This model is too large to convert on this device; "
+                "use a smaller size (n/s/m) or the PyTorch format.")
+        if return_code != 0:
+            raise RuntimeError(f"{label} export failed with return code {return_code}")
+
+    @staticmethod
+    def _yolo_class_names(source_path):
+        """Class names of an Ultralytics .pt file, read in a short-lived
+        subprocess so PyTorch isn't loaded into the main process."""
+        code = ("import json, sys\n"
+                "from ultralytics import YOLO\n"
+                "print(json.dumps({int(k): str(v) for k, v in YOLO(sys.argv[1]).names.items()}))")
+        out = subprocess.run([sys.executable, '-c', code, str(source_path)],
+                             capture_output=True, text=True, timeout=300)
+        if out.returncode != 0:
+            raise RuntimeError(f"Could not read the model's class names: {out.stderr.strip()[-300:]}")
+        return {int(k): v for k, v in json.loads(out.stdout.strip().splitlines()[-1]).items()}
+
+    def _prepare_calibration_data(self, source_path, opts):
         """Return the `data=` argument for INT8 calibration.
 
         'coco' -> Ultralytics' built-in COCO sample (downloaded on first use).
@@ -2201,10 +2323,7 @@ class AIModelManager:
         images_dir = Path(calibration)
         if not images_dir.is_dir():
             raise ValueError("Calibration images folder not found")
-        if model is None:
-            from ultralytics import YOLO
-            model = YOLO(str(source_path))
-        names = dict(getattr(model, 'names', {}) or {0: 'object'})
+        names = self._yolo_class_names(source_path) or {0: 'object'}
         yaml_path = source_path.parent / f"{source_path.stem}_calibration.yaml"
         lines = [f"path: {images_dir}", "train: .", "val: .", "names:"]
         lines += [f"  {int(k)}: {json.dumps(str(v))}" for k, v in sorted(names.items())]
@@ -2380,34 +2499,21 @@ class AIModelManager:
             if not ULTRALYTICS_AVAILABLE:
                 raise ImportError("ultralytics not available")
                 
-            from ultralytics import YOLO
-            
             file_size = source_path.stat().st_size / (1024 * 1024)  # MB
             logger.info(f"Starting ONNX conversion for {source_path} ({file_size:.1f} MB)")
-            
-            update_progress(83, 'Loading model for ONNX conversion...')
-            check_cancelled()
-            
-            # Load the model
-            model = YOLO(str(source_path))
-            logger.info(f"Model loaded successfully")
-            
             update_progress(85, 'Converting to ONNX format...')
             check_cancelled()
-            
-            # Direct export - much faster
-            logger.info("Starting ONNX export...")
             start_time = time.time()
-            
+
             opts = export_options or normalize_export_options('ONNX')
-            export_kwargs = dict(format='onnx', verbose=False, simplify=True,
-                                 imgsz=opts['imgsz'], quantize=QUANTIZE_ARG[opts['precision']])
+            cmd = [self._yolo_cli(), 'export', f'model={source_path}', 'format=onnx', 'simplify=True',
+                   f"imgsz={opts['imgsz']}", f"quantize={QUANTIZE_ARG[opts['precision']]}"]
             if opts['precision'] == 'fp16':
-                export_kwargs['device'] = 0  # FP16 ONNX export runs on the GPU
+                cmd.append('device=0')  # FP16 ONNX export runs on the GPU
             if opts['precision'] == 'int8':
-                export_kwargs['data'] = self._prepare_calibration_data(source_path, opts, model)
+                cmd.append(f"data={self._prepare_calibration_data(source_path, opts)}")
             logger.info(f"ONNX export settings: {opts['precision'].upper()}, imgsz {opts['imgsz']}")
-            result = model.export(**export_kwargs)
+            self._run_yolo_export(cmd, 'ONNX', cancel_check_callback)
             
             conversion_time = time.time() - start_time
             logger.info(f"ONNX conversion completed in {conversion_time:.1f}s")
@@ -2422,13 +2528,6 @@ class AIModelManager:
                 logger.info(f"Successfully converted to ONNX: {expected_onnx} ({file_size_mb:.1f} MB)")
                 update_progress(90, f'ONNX: Conversion successful - {file_size_mb:.1f}MB ONNX model created')
                 return expected_onnx
-            elif isinstance(result, (str, Path)) and Path(result).exists():
-                # Sometimes ultralytics returns the path directly
-                result_path = Path(result)
-                if result_path.suffix == '.onnx':
-                    file_size_mb = result_path.stat().st_size / (1024 * 1024)
-                    logger.info(f"Successfully converted to ONNX: {result_path} ({file_size_mb:.1f} MB)")
-                    return result_path
             
             raise RuntimeError("ONNX conversion completed but file not found")
                 
@@ -2489,12 +2588,7 @@ class AIModelManager:
             # Build command for YOLO export. Use the `yolo` CLI that belongs to
             # this interpreter (.venv/bin/yolo) - it isn't on PATH when the
             # backend is started as `.venv/bin/python app.py`.
-            yolo_cli = os.path.join(os.path.dirname(sys.executable), 'yolo')
-            if not os.path.exists(yolo_cli):
-                yolo_cli = shutil.which('yolo')
-            if not yolo_cli:
-                raise RuntimeError("The Ultralytics 'yolo' command was not found next to the backend's Python. "
-                                   f"Reinstall it: {self.ULTRALYTICS_INSTALL_HINT}")
+            yolo_cli = self._yolo_cli()
             opts = export_options or normalize_export_options('TensorRT')
             cmd = [
                 yolo_cli, 'export',
@@ -2511,87 +2605,8 @@ class AIModelManager:
             logger.info(f"TensorRT build settings: {opts['precision'].upper()}, imgsz {opts['imgsz']}, "
                         f"workspace {opts.get('workspace', TRT_WORKSPACE_GB)} GB")
             
-            # Start subprocess with real-time output capture
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # Merge stderr into stdout
-                universal_newlines=True,
-                bufsize=1
-            )
-            
-            def monitor_output():
-                """Monitor subprocess output and forward TensorRT logs"""
-                try:
-                    for line in iter(process.stdout.readline, ''):
-                        if line.strip():
-                            clean_line = line.strip()
-                            
-                            # Forward TensorRT verbose output directly
-                            if any(keyword in clean_line for keyword in ['[TRT]', 'TensorRT:', 'Tactic Name:', 'Chose Runner Type:']):
-                                logger.info(clean_line)  # Direct TensorRT output
-                            elif 'building FP16 engine' in clean_line:
-                                logger.info(clean_line)
-                            elif 'export success' in clean_line.lower():
-                                logger.info(f"✓ {clean_line}")
-                            elif any(keyword in clean_line for keyword in ['WARNING', 'ERROR', 'WARN']):
-                                logger.warning(clean_line)
-                            elif any(keyword in clean_line for keyword in ['input', 'output', 'shape', 'DataType']):
-                                logger.info(clean_line)  # Model structure info
-                        
-                        # Check for cancellation
-                        if cancel_check_callback and cancel_check_callback():
-                            logger.info("TensorRT conversion cancellation requested")
-                            try:
-                                process.terminate()
-                            except:
-                                pass
-                            break
-                except Exception as e:
-                    logger.error(f"Error monitoring TensorRT output: {e}")
-                finally:
-                    if process.stdout:
-                        process.stdout.close()
-            
-            # Start output monitoring in separate thread
-            output_thread = threading.Thread(target=monitor_output, daemon=True)
-            output_thread.start()
-            
-            # Wait for the build, checking for cancel every second: the engine
-            # build can run for minutes without printing anything, so checking
-            # only on output lines (monitor_output) is not enough.
-            with _ACTIVE_EXPORTS_LOCK:
-                _ACTIVE_EXPORTS.add(process)
-            cancelled = False
-            try:
-                while True:
-                    try:
-                        return_code = process.wait(timeout=1)
-                        break
-                    except subprocess.TimeoutExpired:
-                        if cancel_check_callback and cancel_check_callback():
-                            cancelled = True
-                            logger.info("Stopping TensorRT export (download cancelled)")
-                            stop_process(process)
-            finally:
-                with _ACTIVE_EXPORTS_LOCK:
-                    _ACTIVE_EXPORTS.discard(process)
-            
-            # Wait for output thread to finish
-            output_thread.join(timeout=2.0)
-
-            if cancelled or (cancel_check_callback and cancel_check_callback()):
-                raise Exception("Download cancelled by user")
-            
+            self._run_yolo_export(cmd, 'TensorRT', cancel_check_callback)
             conversion_time = time.time() - start_time
-            
-            if return_code != 0:
-                if return_code == -9:
-                    raise RuntimeError(
-                        "TensorRT export was killed by the system because it ran out of memory. "
-                        "This model is too large to build a TensorRT engine on this device; "
-                        "use a smaller size (n/s/m) or the PyTorch format.")
-                raise RuntimeError(f"TensorRT export failed with return code {return_code}")
             
             logger.info(f"TensorRT conversion completed in {conversion_time:.1f}s")
             update_progress(90, f'TensorRT conversion completed in {conversion_time:.1f}s')
