@@ -409,6 +409,14 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     uptime: '00:00:00',
     kernelVersion: 'Unknown'
   });
+  // Installed ML libraries (manage PyTorch with: sudo jdboard-pytorch)
+  const [mlLibs, setMlLibs] = useState<{ torch: string | null; torch_cuda: string | null; tensorrt: string | null } | null>(null);
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/system/ml-libraries`)
+      .then(response => response.json())
+      .then(data => { if (data.success) setMlLibs(data); })
+      .catch(() => { /* leave unknown */ });
+  }, []);
 
   // Populated from jtop via the backend (/system/power-modes, /system/fan-mode)
   const [availablePowerModes, setAvailablePowerModes] = useState<string[]>([]);
@@ -1003,6 +1011,19 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <InfoItem>
             <div className="label">Kernel Version</div>
             <div className="value">{systemInfo.kernelVersion}</div>
+          </InfoItem>
+          <InfoItem>
+            <div className="label">PyTorch</div>
+            <div className="value" title="Manage with: sudo jdboard-pytorch status | install | uninstall">
+              {!mlLibs ? 'Unknown'
+                : mlLibs.torch
+                  ? `${mlLibs.torch.split('+')[0]}${mlLibs.torch_cuda ? ` (CUDA ${mlLibs.torch_cuda})` : ''}`
+                  : 'Not installed'}
+            </div>
+          </InfoItem>
+          <InfoItem>
+            <div className="label">TensorRT</div>
+            <div className="value">{!mlLibs ? 'Unknown' : (mlLibs.tensorrt || 'Not installed')}</div>
           </InfoItem>
         </InfoGrid>
       </InfoCard>

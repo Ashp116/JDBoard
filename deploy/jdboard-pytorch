@@ -1,0 +1,257 @@
+#!/bin/bash
+# jdboard-pytorch - manage PyTorch in JDBoard's Python environment.
+#
+#   jdboard-pytorch status                          versions, whether CUDA works, what needs it
+#   sudo jdboard-pytorch install                    recommended build for this JetPack
+#   sudo jdboard-pytorch install 2.16.0             a specific torch version
+#   sudo jdboard-pytorch install --index-url URL    from your own package index
+#   sudo jdboard-pytorch install --wheel torch.whl [--wheel torchvision.whl]
+#   sudo jdboard-pytorch uninstall                  remove torch + torchvision
+#
+# Options: --torchvision VERSION, --no-restart, --dry-run (show what would run), --yes
+#
+# Recommended builds: JetPack 7 (CUDA 13) uses PyTorch's own CUDA builds from
+# download.pytorch.org, pinned to versions tested with JDBoard; JetPack 6
+# (CUDA 12.6) uses NVIDIA's Jetson builds from pypi.jetson-ai-lab.io.
+# numpy stays at JDBoard's pinned version (JetPack's OpenCV needs numpy 1.x),
+# and after an install the new versions are what jdboard-pip protects.
+set -euo pipefail
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+VENV="${JDBOARD_VENV:-/opt/jdboard/venv}"
+CONSTRAINTS="${JDBOARD_CONSTRAINTS:-/opt/jdboard/constraints.txt}"
+REGISTRY="${JDBOARD_REGISTRY:-/var/lib/jdboard/models/models_registry.json}"
+PY="$VENV/bin/python"
+
+# Versions tested with JDBoard, per PyTorch CUDA index
+declare -A PINNED_TORCH=([cu132]=2.15.0)
+declare -A PINNED_TORCHVISION=([cu132]=0.29.2)
+JETSON_INDEX_JP6="https://pypi.jetson-ai-lab.io/jp6/cu126"
+
+usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+say() { echo "$*"; }
+die() { echo "❌ $*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- detection
+cuda_version() {   # e.g. 13.2
+    local v=""
+    if [ -f /usr/local/cuda/version.json ]; then
+        v="$(python3 -c 'import json; print(json.load(open("/usr/local/cuda/version.json"))["cuda"]["version"])' 2>/dev/null || true)"
+    fi
+    if [ -z "$v" ] && [ -x /usr/local/cuda/bin/nvcc ]; then
+        v="$(/usr/local/cuda/bin/nvcc --version | sed -n 's/.*release \([0-9.]*\),.*/\1/p')"
+    fi
+    echo "$v" | cut -d. -f1,2
+}
+
+l4t_release() {    # e.g. 39 (JetPack 7) or 36 (JetPack 6)
+    sed -n 's/^# R\([0-9]*\) .*/\1/p' /etc/nv_tegra_release 2>/dev/null || true
+}
+
+jetpack_name() {
+    case "$(l4t_release)" in
+        36) echo "JetPack 6" ;;
+        38|39|4[0-9]) echo "JetPack 7" ;;
+        "") echo "not a Jetson" ;;
+        *) echo "L4T R$(l4t_release)" ;;
+    esac
+}
+
+# Prints "<index-url> <tag>" for the recommended source, tag being e.g. cu132 or jp6
+recommended_source() {
+    local cuda major minor tag
+    cuda="$(cuda_version)"
+    major="${cuda%%.*}"; minor="${cuda#*.}"
+    if [ "$major" = 12 ] && [ "$(l4t_release)" = 36 ]; then
+        echo "$JETSON_INDEX_JP6 jp6"
+        return
+    fi
+    if [ -n "$major" ] && [ "$major" -ge 13 ] 2>/dev/null; then
+        tag="cu${major}${minor}"
+        if curl -fsS -o /dev/null -m 15 "https://download.pytorch.org/whl/$tag/torch/"; then
+            echo "https://download.pytorch.org/whl/$tag $tag"
+        else
+            echo "https://download.pytorch.org/whl/cu${major}0 cu${major}0"
+        fi
+        return
+    fi
+    echo ""
+}
+
+installed() { "$PY" -c "import importlib.metadata as m; print(m.version('$1'))" 2>/dev/null || true; }
+
+# ---------------------------------------------------------------- commands
+cmd_status() {
+    [ -x "$PY" ] || die "JDBoard's Python environment ($VENV) isn't installed"
+    say "Device:       $(jetpack_name), CUDA $(cuda_version)"
+    local torch tv ul
+    torch="$(installed torch)"; tv="$(installed torchvision)"; ul="$(installed ultralytics)"
+    say "torch:        ${torch:-not installed}"
+    say "torchvision:  ${tv:-not installed}"
+    say "ultralytics:  ${ul:-not installed}"
+    if [ -n "$torch" ]; then
+        local gpu
+        gpu="$("$PY" -c 'import torch; print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "")' 2>/dev/null || true)"
+        if [ -n "$gpu" ]; then
+            say "CUDA:         ✅ works ($gpu, built for CUDA $("$PY" -c 'import torch; print(torch.version.cuda)' 2>/dev/null))"
+        else
+            say "CUDA:         ⚠️  not available to this PyTorch - models would run on the CPU or fail"
+        fi
+    fi
+    local rec
+    rec="$(recommended_source)"
+    if [ -n "$rec" ]; then
+        local tag="${rec#* }"
+        say "Recommended:  ${PINNED_TORCH[$tag]:+torch ${PINNED_TORCH[$tag]} from }${rec% *}"
+    else
+        say "Recommended:  none for this device (use --index-url or --wheel)"
+    fi
+    if [ -f "$REGISTRY" ]; then
+        local counts
+        counts="$(python3 - "$REGISTRY" <<'PY' 2>/dev/null || true
+import json, sys
+models = json.load(open(sys.argv[1])).values()
+by = {}
+for m in models:
+    by[m.get('framework', '?')] = by.get(m.get('framework', '?'), 0) + 1
+print(', '.join(f"{n} {fw}" for fw, n in sorted(by.items())) or 'none')
+PY
+)"
+        say "Models:       ${counts:-none} (PyTorch and TensorRT models both need PyTorch to load)"
+    fi
+}
+
+refresh_constraints() {
+    "$PY" -m pip freeze 2>/dev/null | grep -iE '^(numpy|torch|torchvision|ml-dtypes)==' > "$CONSTRAINTS.tmp" || true
+    mv "$CONSTRAINTS.tmp" "$CONSTRAINTS"
+    chmod 644 "$CONSTRAINTS"
+}
+
+restart_jdboard() {
+    if [ "$NO_RESTART" -eq 0 ] && systemctl is-active --quiet jdboard.service; then
+        say "Restarting JDBoard so it uses the new PyTorch"
+        systemctl restart jdboard.service
+    fi
+}
+
+run() {
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "would run: $*"
+    else
+        "$@"
+    fi
+}
+
+cmd_install() {
+    [ -x "$PY" ] || die "JDBoard's Python environment ($VENV) isn't installed"
+    local spec_torch="torch" spec_tv="torchvision" index="" tag="" args=()
+    if [ "${#WHEELS[@]}" -gt 0 ]; then
+        for w in "${WHEELS[@]}"; do [ -f "$w" ] || die "No such wheel: $w"; done
+        args=("${WHEELS[@]}")
+        say "Installing from wheel file(s): ${WHEELS[*]}"
+    else
+        if [ -n "$INDEX_URL" ]; then
+            index="$INDEX_URL"
+        else
+            local rec
+            rec="$(recommended_source)"
+            [ -n "$rec" ] || die "No recommended PyTorch build for $(jetpack_name) / CUDA $(cuda_version). Use --index-url or --wheel."
+            index="${rec% *}"; tag="${rec#* }"
+        fi
+        if [ -n "$TORCH_VERSION" ]; then
+            spec_torch="torch==$TORCH_VERSION"
+        elif [ -n "$tag" ] && [ -n "${PINNED_TORCH[$tag]:-}" ]; then
+            spec_torch="torch==${PINNED_TORCH[$tag]}"
+        fi
+        if [ -n "$TV_VERSION" ]; then
+            spec_tv="torchvision==$TV_VERSION"
+        elif [ -z "$TORCH_VERSION" ] && [ -n "$tag" ] && [ -n "${PINNED_TORCHVISION[$tag]:-}" ]; then
+            spec_tv="torchvision==${PINNED_TORCHVISION[$tag]}"
+        fi
+        args=("$spec_torch" "$spec_tv" --index-url "$index")
+        say "Installing $spec_torch and $spec_tv from $index"
+    fi
+
+    # Keep numpy (and ml-dtypes) where JDBoard needs them; torch itself may change
+    local keep
+    keep="$(mktemp)"
+    grep -ivE '^(torch|torchvision)==' "$CONSTRAINTS" 2>/dev/null > "$keep" || true
+    grep -qi '^numpy==' "$keep" || echo 'numpy==1.26.4' >> "$keep"
+
+    # Only the chosen index: PyPI also has torch, but not built for the Jetson's
+    # CUDA, and pip could pick it. The PyTorch / Jetson indexes carry torch's own
+    # dependencies (sympy, networkx, ...); wheel files resolve those from PyPI.
+    run "$PY" -m pip install --upgrade -c "$keep" "${args[@]}"
+    rm -f "$keep"
+
+    if [ -z "$(installed ultralytics)" ]; then
+        say "Installing Ultralytics (without dependencies, so it can't replace PyTorch or OpenCV)"
+        run "$PY" -m pip install ultralytics --no-deps
+    fi
+    [ "$DRY_RUN" -eq 1 ] && return 0
+
+    refresh_constraints
+    say
+    if "$PY" -c 'import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null; then
+        say "✅ PyTorch $(installed torch) works with the GPU."
+    else
+        say "⚠️  PyTorch $(installed torch) is installed but CUDA isn't available to it."
+        say "   Models would run on the CPU or fail. Reinstall the recommended build with:"
+        say "     sudo jdboard-pytorch install"
+        restart_jdboard
+        exit 2
+    fi
+    restart_jdboard
+}
+
+cmd_uninstall() {
+    [ -x "$PY" ] || die "JDBoard's Python environment ($VENV) isn't installed"
+    if [ -z "$(installed torch)" ]; then
+        say "PyTorch isn't installed."
+        return 0
+    fi
+    say "Removing PyTorch stops every model from loading in JDBoard - PyTorch and TensorRT"
+    say "models (Ultralytics loads engines with PyTorch) and custom scripts that use torch."
+    say "Monitoring and the rest of the dashboard keep working."
+    if [ "$YES" -eq 0 ]; then
+        [ -t 0 ] || die "Run it in a terminal to confirm, or add --yes"
+        read -rp "Remove torch and torchvision? [y/N] " answer
+        [[ "$answer" =~ ^[Yy] ]] || { say "Nothing removed."; return 0; }
+    fi
+    run "$PY" -m pip uninstall -y torch torchvision
+    [ "$DRY_RUN" -eq 1 ] && return 0
+    refresh_constraints
+    say "✅ Removed. Install it again with: sudo jdboard-pytorch install"
+    restart_jdboard
+}
+
+# ---------------------------------------------------------------- arguments
+COMMAND="${1:-}"
+[ -n "$COMMAND" ] || usage 1
+shift
+TORCH_VERSION="" TV_VERSION="" INDEX_URL="" NO_RESTART=0 DRY_RUN=0 YES=0
+WHEELS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --index-url) INDEX_URL="${2:?--index-url needs a URL}"; shift 2 ;;
+        --wheel) WHEELS+=("${2:?--wheel needs a file}"); shift 2 ;;
+        --torchvision) TV_VERSION="${2:?--torchvision needs a version}"; shift 2 ;;
+        --no-restart) NO_RESTART=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
+        --yes|-y) YES=1; shift ;;
+        -h|--help) usage 0 ;;
+        -*) die "Unknown option: $1" ;;
+        *) [ -z "$TORCH_VERSION" ] || die "Only one version, please"; TORCH_VERSION="$1"; shift ;;
+    esac
+done
+
+case "$COMMAND" in
+    status) cmd_status ;;
+    install|uninstall)
+        if [ "$(id -u)" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
+            die "Run with sudo: sudo jdboard-pytorch $COMMAND ..."
+        fi
+        "cmd_$COMMAND" ;;
+    -h|--help|help) usage 0 ;;
+    *) die "Unknown command: $COMMAND (status, install, uninstall)" ;;
+esac

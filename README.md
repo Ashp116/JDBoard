@@ -41,6 +41,11 @@ sudo ./scripts/install.sh                  # dashboard on https://<jetson-ip>/
 sudo ./scripts/install.sh --with-pytorch   # also install PyTorch + Ultralytics (~3 GB) for model inference
 ```
 
+`--with-pytorch` installs the PyTorch build for your JetPack: on JetPack 7 (CUDA 13),
+PyTorch's own CUDA builds pinned to a tested version (currently torch 2.15.0 /
+torchvision 0.29.2 for CUDA 13.2); on JetPack 6 (CUDA 12.6), NVIDIA's Jetson builds
+from `pypi.jetson-ai-lab.io`. It then checks that PyTorch can use the GPU.
+
 What it sets up:
 
 | Where | What |
@@ -72,8 +77,23 @@ git pull && sudo ./scripts/install.sh        # update (rebuilds the frontend if 
 sudo jdboard-passwd                          # change the dashboard login
 sudo jdboard-passwd --admin                  # set the admin password (--admin --remove to drop it)
 sudo jdboard-pip install <package>           # add a library for a custom inference script
+jdboard-pytorch status                       # PyTorch version and whether it can use the GPU
 sudo ./scripts/install.sh --uninstall        # remove (keeps models; add --purge to remove them too)
 ```
+
+To use a different PyTorch, `jdboard-pytorch` installs it into JDBoard's environment, keeps
+numpy and JetPack's OpenCV untouched, checks the GPU works and restarts JDBoard:
+
+```bash
+sudo jdboard-pytorch install                         # the recommended build for this JetPack
+sudo jdboard-pytorch install 2.14.0                  # a specific version
+sudo jdboard-pytorch install --index-url <URL>       # from your own package index
+sudo jdboard-pytorch install --wheel torch-....whl   # a wheel file (repeat --wheel for torchvision)
+sudo jdboard-pytorch uninstall                       # remove it (models stop loading; monitoring keeps working)
+```
+
+Add `--dry-run` to see what would run. Re-running the installer never replaces a PyTorch
+that's already there. Settings → System Information shows the installed version.
 
 Other options: `--https-port N` (default 443), `--port N` (HTTP, default 80), `--no-https`,
 `--renew-cert` (e.g. after the IP changed), `--no-fail2ban`, `--admin-password` /
