@@ -161,15 +161,27 @@ const MODEL_SORTS: { value: ModelSort; label: string }[] = [
   { value: 'most-used', label: 'Most used' },
   { value: 'loaded-first', label: 'Loaded first' },
 ];
-type ModelView = { sort: ModelSort; framework: string; status: 'all' | 'loaded' | 'unloaded'; handler: 'all' | 'custom' | 'default' };
-const DEFAULT_MODEL_VIEW: ModelView = { sort: 'newest', framework: 'all', status: 'all', handler: 'all' };
-const MODEL_VIEW_KEY = 'jdboard.models.view';
+// Filters are checkbox lists; an empty list means "all"
+type ModelView = {
+  sort: ModelSort;
+  framework: string[];
+  status: ('loaded' | 'unloaded')[];
+  handler: ('custom' | 'default')[];
+};
+const DEFAULT_MODEL_VIEW: ModelView = { sort: 'newest', framework: [], status: [], handler: [] };
+const MODEL_VIEW_KEY = 'jdboard.models.view.v2';
 const FRAMEWORK_LABELS: Record<string, string> = { tensorrt: 'TensorRT', pytorch: 'PyTorch', onnx: 'ONNX', tensorflow: 'TensorFlow', keras: 'Keras' };
 
 const loadModelView = (): ModelView => {
   try {
     const saved = JSON.parse(localStorage.getItem(MODEL_VIEW_KEY) || '{}');
-    return { ...DEFAULT_MODEL_VIEW, ...saved };
+    const list = (value: unknown) => (Array.isArray(value) ? value.filter(v => typeof v === 'string') : []);
+    return {
+      sort: MODEL_SORTS.some(o => o.value === saved.sort) ? saved.sort : DEFAULT_MODEL_VIEW.sort,
+      framework: list(saved.framework),
+      status: list(saved.status) as ModelView['status'],
+      handler: list(saved.handler) as ModelView['handler'],
+    };
   } catch {
     return DEFAULT_MODEL_VIEW;
   }
@@ -264,88 +276,164 @@ const SectionHeader = styled.div`
   }
 `;
 
-const SearchAndActions = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  
-  ${props => props.theme.media.mobile} {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-    width: 100%;
-  }
-`;
-
 const ModelsToolbar = styled.div`
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
-  margin: -14px 0 20px;
+  gap: 10px 12px;
+  margin: -10px 0 22px;
+
+  .count {
+    margin-left: auto;
+    font-size: 13px;
+    color: ${props => props.theme.colors.text.secondary};
+    white-space: nowrap;
+  }
+
+  ${props => props.theme.media.mobile} {
+    margin-top: -4px;
+
+    .count {
+      margin-left: 0;
+      order: 3;
+      width: 100%;
+    }
+  }
+`;
+
+const FiltersWrapper = styled.div`
+  position: relative;
+`;
+
+const FiltersButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 6px;
+  border: 1px solid ${props => props.$active ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  background: ${props => props.theme.colors.background.secondary};
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+
+  i {
+    color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  .badge {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #4E7A00;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+`;
+
+const FiltersPanel = styled.div`
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  width: min(460px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  background: ${props => props.theme.colors.background.secondary};
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+
+  fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  legend {
+    padding: 0;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: ${props => props.theme.colors.text.secondary};
+  }
 
   label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 13px;
-    color: ${props => props.theme.colors.text.secondary};
-
-    i {
-      color: ${props => props.theme.colors.nvidia.green};
-    }
-  }
-
-  select {
-    padding: 7px 10px;
-    border: 1px solid ${props => props.theme.colors.border.secondary};
-    border-radius: 6px;
-    background: ${props => props.theme.colors.background.secondary};
     color: ${props => props.theme.colors.text.primary};
-    font-size: 13px;
     cursor: pointer;
-
-    &:focus {
-      outline: none;
-      border-color: ${props => props.theme.colors.nvidia.green};
-    }
   }
 
-  .count {
-    margin-left: auto;
+  input {
+    accent-color: #4E7A00;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .filters {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .none {
+    font-size: 12px;
     color: ${props => props.theme.colors.text.secondary};
+  }
+
+  .footer {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px solid ${props => props.theme.colors.border.secondary};
 
     button {
       background: none;
       border: none;
-      padding: 0;
+      padding: 4px 0;
       color: #76b900;
       font-size: 13px;
       cursor: pointer;
-      text-decoration: underline;
+
+      &:disabled {
+        color: ${props => props.theme.colors.text.secondary};
+        cursor: default;
+      }
+    }
+
+    .done {
+      padding: 6px 16px;
+      border-radius: 6px;
+      background: #4E7A00;
+      color: #fff;
     }
   }
 
   ${props => props.theme.media.mobile} {
-    margin-top: -6px;
-
-    label {
-      flex: 1 1 45%;
-    }
-
-    select {
-      flex: 1;
-      min-width: 0;
-    }
-
-    .count {
-      margin-left: 0;
-      width: 100%;
-    }
+    grid-template-columns: 1fr;
   }
 `;
 
@@ -2230,6 +2318,12 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [filteredModels, setFilteredModels] = useState<ModelInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [modelView, setModelView] = useState<ModelView>(loadModelView);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersRef = useRef<HTMLDivElement>(null);
+  const toggleInList = <K extends 'framework' | 'status' | 'handler'>(key: K, value: ModelView[K][number]) => {
+    const current = modelView[key] as string[];
+    updateModelView({ [key]: current.includes(value) ? current.filter(v => v !== value) : [...current, value] } as Partial<ModelView>);
+  };
   const updateModelView = (change: Partial<ModelView>) => {
     setModelView(prev => {
       const next = { ...prev, ...change };
@@ -2717,11 +2811,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             .some(field => field && field.toLowerCase().includes(query))) {
         return false;
       }
-      if (modelView.framework !== 'all' && model.framework !== modelView.framework) return false;
-      if (modelView.status === 'loaded' && !model.loaded) return false;
-      if (modelView.status === 'unloaded' && model.loaded) return false;
-      if (modelView.handler === 'custom' && !model.custom_script_path) return false;
-      if (modelView.handler === 'default' && model.custom_script_path) return false;
+      if (modelView.framework.length && !modelView.framework.includes(model.framework)) return false;
+      if (modelView.status.length && !modelView.status.includes(model.loaded ? 'loaded' : 'unloaded')) return false;
+      if (modelView.handler.length && !modelView.handler.includes(model.custom_script_path ? 'custom' : 'default')) return false;
       return true;
     });
     filtered.sort(compareModels(modelView.sort));
@@ -2729,7 +2821,24 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   }, [models, searchQuery, modelView]);
 
   const frameworksPresent = Array.from(new Set(models.map(m => m.framework))).sort();
-  const viewIsFiltered = modelView.framework !== 'all' || modelView.status !== 'all' || modelView.handler !== 'all';
+  const activeFilterCount = modelView.framework.length + modelView.status.length + modelView.handler.length;
+  const viewIsFiltered = activeFilterCount > 0;
+  const clearFilters = () => updateModelView({ framework: [], status: [], handler: [] });
+
+  // Close the filters panel on an outside click or Escape
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+    const onClick = (e: MouseEvent) => {
+      if (filtersRef.current && !filtersRef.current.contains(e.target as Node)) setFiltersOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFiltersOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [filtersOpen]);
 
   // Search handlers
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3727,75 +3836,108 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <i className="fas fa-brain"></i>
           AI Models
         </h2>
-        <SearchAndActions>
-          <SearchContainer>
-            <SearchInput
-              type="text"
-              placeholder="Search models by name, type, or framework..."
-              value={searchQuery}
-              onChange={handleSearchChange}
-            />
-            {searchQuery ? (
-              <ClearSearch onClick={clearSearch}>
-                <i className="fas fa-times"></i>
-              </ClearSearch>
-            ) : (
-              <SearchIcon>
-                <i className="fas fa-search"></i>
-              </SearchIcon>
-            )}
-          </SearchContainer>
-          <AddButton onClick={() => setShowModal(true)}>
-            <i className="fas fa-plus"></i>
-            Add Model
-          </AddButton>
-        </SearchAndActions>
       </SectionHeader>
 
-      {models.length > 0 && (
-        <ModelsToolbar>
-          <label>
-            <i className="fas fa-sort-amount-down"></i>
-            <select value={modelView.sort} onChange={(e) => updateModelView({ sort: e.target.value as ModelSort })}
-                    aria-label="Sort models">
-              {MODEL_SORTS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Framework</span>
-            <select value={modelView.framework} onChange={(e) => updateModelView({ framework: e.target.value })}>
-              <option value="all">All</option>
-              {frameworksPresent.map(fw => <option key={fw} value={fw}>{FRAMEWORK_LABELS[fw] || fw}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Status</span>
-            <select value={modelView.status} onChange={(e) => updateModelView({ status: e.target.value as ModelView['status'] })}>
-              <option value="all">All</option>
-              <option value="loaded">Loaded</option>
-              <option value="unloaded">Not loaded</option>
-            </select>
-          </label>
-          <label>
-            <span>Inference</span>
-            <select value={modelView.handler} onChange={(e) => updateModelView({ handler: e.target.value as ModelView['handler'] })}>
-              <option value="all">All</option>
-              <option value="custom">Custom script</option>
-              <option value="default">Default</option>
-            </select>
-          </label>
-          <div className="count">
-            {filteredModels.length === models.length
-              ? `${models.length} model${models.length === 1 ? '' : 's'}`
-              : `Showing ${filteredModels.length} of ${models.length}`}
-            {viewIsFiltered && (
-              <button type="button" onClick={() => updateModelView({ framework: 'all', status: 'all', handler: 'all' })}>
-                Clear filters
-              </button>
-            )}
-          </div>
-        </ModelsToolbar>
-      )}
+      <ModelsToolbar>
+        <SearchContainer>
+          <SearchInput
+            type="text"
+            placeholder="Search models by name, file, framework..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+          {searchQuery ? (
+            <ClearSearch onClick={clearSearch}>
+              <i className="fas fa-times"></i>
+            </ClearSearch>
+          ) : (
+            <SearchIcon>
+              <i className="fas fa-search"></i>
+            </SearchIcon>
+          )}
+        </SearchContainer>
+
+        <FiltersWrapper ref={filtersRef}>
+          <FiltersButton
+            type="button"
+            $active={filtersOpen || viewIsFiltered}
+            onClick={() => setFiltersOpen(open => !open)}
+            aria-expanded={filtersOpen}
+          >
+            <i className="fas fa-sliders-h"></i>
+            Filters
+            {activeFilterCount > 0 && <span className="badge">{activeFilterCount}</span>}
+          </FiltersButton>
+          {filtersOpen && (
+            <FiltersPanel role="dialog" aria-label="Sort and filter models">
+              <fieldset>
+                <legend>Sort by</legend>
+                {MODEL_SORTS.map(option => (
+                  <label key={option.value}>
+                    <input type="radio" name="model-sort" checked={modelView.sort === option.value}
+                           onChange={() => updateModelView({ sort: option.value })} />
+                    {option.label}
+                  </label>
+                ))}
+              </fieldset>
+              <div className="filters">
+                <fieldset>
+                  <legend>Framework</legend>
+                  {frameworksPresent.length === 0 && <span className="none">No models yet</span>}
+                  {frameworksPresent.map(fw => (
+                    <label key={fw}>
+                      <input type="checkbox" checked={modelView.framework.includes(fw)}
+                             onChange={() => toggleInList('framework', fw)} />
+                      {FRAMEWORK_LABELS[fw] || fw}
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset>
+                  <legend>Status</legend>
+                  <label>
+                    <input type="checkbox" checked={modelView.status.includes('loaded')}
+                           onChange={() => toggleInList('status', 'loaded')} />
+                    Loaded
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={modelView.status.includes('unloaded')}
+                           onChange={() => toggleInList('status', 'unloaded')} />
+                    Not loaded
+                  </label>
+                </fieldset>
+                <fieldset>
+                  <legend>Inference</legend>
+                  <label>
+                    <input type="checkbox" checked={modelView.handler.includes('custom')}
+                           onChange={() => toggleInList('handler', 'custom')} />
+                    Custom script
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={modelView.handler.includes('default')}
+                           onChange={() => toggleInList('handler', 'default')} />
+                    Default
+                  </label>
+                </fieldset>
+              </div>
+              <div className="footer">
+                <button type="button" onClick={clearFilters} disabled={!viewIsFiltered}>Clear filters</button>
+                <button type="button" className="done" onClick={() => setFiltersOpen(false)}>Done</button>
+              </div>
+            </FiltersPanel>
+          )}
+        </FiltersWrapper>
+
+        <div className="count">
+          {filteredModels.length === models.length
+            ? `${models.length} model${models.length === 1 ? '' : 's'}`
+            : `Showing ${filteredModels.length} of ${models.length}`}
+        </div>
+
+        <AddButton onClick={() => setShowModal(true)}>
+          <i className="fas fa-plus"></i>
+          Add Model
+        </AddButton>
+      </ModelsToolbar>
 
       {/* Active Downloads Section */}
       {activeDownloads.size > 0 && (
@@ -3915,7 +4057,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <p>No model matches your search{viewIsFiltered ? ' and filters' : ''}.</p>
           <button
             type="button"
-            onClick={() => { setSearchQuery(''); updateModelView({ framework: 'all', status: 'all', handler: 'all' }); }}
+            onClick={() => { setSearchQuery(''); clearFilters(); }}
             style={{ marginTop: '12px', background: 'none', border: '1px solid #76b900', color: '#76b900',
                      padding: '8px 14px', borderRadius: '6px', cursor: 'pointer' }}
           >
