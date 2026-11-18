@@ -4594,7 +4594,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <option value="">Select YOLO Version</option>
                   {YOLO_VERSIONS.map((version) => (
                     <option key={version.version} value={version.version}>
-                      {version.version} - {version.description}
+                      {version.version}
                     </option>
                   ))}
                 </select>
