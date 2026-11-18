@@ -38,6 +38,96 @@ interface ModelInfo {
 const DOWNLOAD_TOAST_PREFIX = 'download-';
 const downloadToastId = (downloadId: string) => `${DOWNLOAD_TOAST_PREFIX}${downloadId}`;
 
+// Uploads (model files, calibration zips) the browser is still sending.
+// Kept at module level, not in component state, so they survive the Models
+// page being unmounted when switching dashboard tabs. The backend only learns
+// about an upload once the whole file has arrived.
+type SendState = { name: string; progress: number; status: string };
+type SendEvent =
+  | { kind: 'progress'; id: string; progress: number; status: string }
+  | { kind: 'failed'; id: string; name: string; error: string }
+  | { kind: 'accepted'; id: string }
+  | { kind: 'cancelled'; id: string; name: string };
+const sendingUploads = new Map<string, SendState>();
+const sendListeners = new Set<(e: SendEvent) => void>();
+const unreportedSendFailures = new Map<string, { name: string; error: string }>();
+const sendingRequests = new Map<string, XMLHttpRequest>();
+const cancelledSends = new Set<string>();
+
+// Stop sending a file (the backend never saw the request, so nothing to clean up there)
+const abortSend = (id: string): boolean => {
+  const xhr = sendingRequests.get(id);
+  if (!xhr) return false;
+  cancelledSends.add(id);
+  xhr.abort();
+  return true;
+};
+
+const emitSend = (e: SendEvent) => {
+  if (e.kind === 'failed' && sendListeners.size === 0) {
+    unreportedSendFailures.set(e.id, { name: e.name, error: e.error });
+  }
+  sendListeners.forEach(listener => listener(e));
+};
+
+// POST form data with upload progress (fetch can't report it)
+const sendFormWithProgress = (url: string, formData: FormData, id: string, name: string) => {
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', url);
+  sendingUploads.set(id, { name, progress: 0, status: 'Sending file to the Jetson...' });
+  let lastPercent = -1;
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable || e.total === 0) return;
+    const percent = Math.floor((e.loaded / e.total) * 100);
+    if (percent === lastPercent) return;
+    lastPercent = percent;
+    const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(0);
+    // The backend reports 30%+ once it has the file; sending is the first quarter
+    const state = { name, progress: Math.round(percent / 4),
+                    status: `Sending file to the Jetson: ${percent}% (${mb(e.loaded)}/${mb(e.total)} MB)` };
+    sendingUploads.set(id, state);
+    emitSend({ kind: 'progress', id, progress: state.progress, status: state.status });
+  };
+  const fail = (error: string) => { sendingUploads.delete(id); emitSend({ kind: 'failed', id, name, error }); };
+  xhr.onload = () => {
+    let data: any;
+    try {
+      data = JSON.parse(xhr.responseText);
+    } catch {
+      fail(`Backend returned ${xhr.status}: ${xhr.responseText.slice(0, 200)}`);
+      return;
+    }
+    sendingUploads.delete(id);
+    if (!data.success && !data.download_started) {
+      emitSend({ kind: 'failed', id, name, error: data.error || 'Upload failed' });
+    } else {
+      emitSend({ kind: 'accepted', id });   // backend progress (socket/polling) takes over
+    }
+  };
+  xhr.onerror = () => fail('The connection to the Jetson dropped while sending the file');
+  xhr.onabort = () => {
+    if (cancelledSends.delete(id)) {
+      sendingUploads.delete(id);
+      emitSend({ kind: 'cancelled', id, name });
+    } else {
+      fail('Sending the file was interrupted');
+    }
+  };
+  xhr.addEventListener('loadend', () => sendingRequests.delete(id));
+  sendingRequests.set(id, xhr);
+  xhr.send(formData);
+};
+
+// Leaving or reloading the page cancels a file that's still being sent
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    if (sendingUploads.size > 0) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+}
+
 // Export precision choices per target format (must match the backend's
 // PRECISIONS_BY_FORMAT / DEFAULT_PRECISION in ai_inference.py)
 type Precision = 'fp32' | 'fp16' | 'int8';
@@ -2164,7 +2254,19 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           restoredLogsState.set(downloadId, true);
         });
         
+        // Uploads still being sent from this browser (the backend doesn't know them yet)
+        sendingUploads.forEach((send, downloadId) => {
+          if (restoredDownloads.has(downloadId)) return;
+          restoredDownloads.set(downloadId, {
+            name: send.name, progress: send.progress, status: send.status,
+            notificationId: downloadToastId(downloadId)
+          });
+          addNotification({ id: downloadToastId(downloadId), type: 'info', title: 'Downloading Model',
+                            message: send.status, persistent: true });
+        });
+        
         if (restoredDownloads.size > 0) {
+          activeDownloadsRef.current = restoredDownloads;
           setActiveDownloads(restoredDownloads);
           setShowLogs(restoredLogsState); // Restore logs state
           
@@ -2176,7 +2278,8 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         // look up how each one ended, report it, and close the progress toast.
         const stale = notifications.filter(n =>
           n.id.startsWith(DOWNLOAD_TOAST_PREFIX) &&
-          !(n.id.slice(DOWNLOAD_TOAST_PREFIX.length) in data.active_downloads));
+          !(n.id.slice(DOWNLOAD_TOAST_PREFIX.length) in data.active_downloads) &&
+          !sendingUploads.has(n.id.slice(DOWNLOAD_TOAST_PREFIX.length)));
         for (const toast of stale) {
           const downloadId = toast.id.slice(DOWNLOAD_TOAST_PREFIX.length);
           removeNotification(toast.id);
@@ -2375,53 +2478,33 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     };
   }, [socket]); // handlers read state through refs, so no re-subscribing mid-download
 
-  // Requests whose body (model file, calibration zip) the browser is still
-  // sending. The backend only learns about an upload once the whole file has
-  // arrived, so these must not be polled - a large file over Wi-Fi takes far
-  // longer than the "unknown" grace period below.
-  const sendingRef = useRef<Set<string>>(new Set());
-  const [sendingCount, setSendingCount] = useState(0);
-
-  // POST form data with upload progress (fetch can't report it). Resolves with
-  // the parsed JSON response.
-  const postFormWithProgress = (url: string, formData: FormData, downloadId: string): Promise<any> =>
-    new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-      let lastPercent = -1;
-      xhr.upload.onprogress = (e) => {
-        if (!e.lengthComputable || e.total === 0) return;
-        const percent = Math.floor((e.loaded / e.total) * 100);
-        if (percent === lastPercent) return;
-        lastPercent = percent;
-        const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(0);
-        // The backend reports 30%+ once it has the file; sending is the first quarter
-        updateDownloadProgress(downloadId, Math.round(percent / 4),
-          `Sending file to the Jetson: ${percent}% (${mb(e.loaded)}/${mb(e.total)} MB)`);
-      };
-      xhr.onload = () => {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch {
-          reject(new Error(`Backend returned ${xhr.status}: ${xhr.responseText.slice(0, 200)}`));
-        }
-      };
-      xhr.onerror = () => reject(new Error('The connection to the Jetson dropped while sending the file'));
-      xhr.onabort = () => reject(new Error('Sending the file was interrupted'));
-      sendingRef.current.add(downloadId);
-      setSendingCount(sendingRef.current.size);
-      const done = () => { sendingRef.current.delete(downloadId); setSendingCount(sendingRef.current.size); };
-      xhr.addEventListener('loadend', done);
-      xhr.send(formData);
-    });
-
-  // Leaving or reloading the page cancels a file that's still being sent
+  // Uploads still being sent are tracked outside this component (see
+  // sendingUploads), so they survive switching dashboard tabs. Route their
+  // progress/result events to the current instance's handlers.
+  const sendHandlerRef = useRef<(e: SendEvent) => void>(() => {});
+  sendHandlerRef.current = (e: SendEvent) => {
+    if (e.kind === 'progress') {
+      updateDownloadProgress(e.id, e.progress, e.status);
+    } else if (e.kind === 'failed') {
+      completeDownload(e.id, false, e.error, { modelName: e.name });
+    } else if (e.kind === 'cancelled') {
+      const download = activeDownloadsRef.current.get(e.id);
+      if (download) removeNotification(download.notificationId);
+      const remaining = new Map(activeDownloadsRef.current);
+      remaining.delete(e.id);
+      activeDownloadsRef.current = remaining;
+      setActiveDownloads(remaining);
+      addNotification({ type: 'info', title: 'Upload Cancelled', message: `${e.name}: the file was not sent` });
+    }
+  };
   useEffect(() => {
-    if (sendingCount === 0) return undefined;
-    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [sendingCount]);
+    const listener = (e: SendEvent) => sendHandlerRef.current(e);
+    sendListeners.add(listener);
+    // Report sends that failed while this page wasn't open
+    unreportedSendFailures.forEach((f, id) => completeDownload(id, false, f.error, { modelName: f.name }));
+    unreportedSendFailures.clear();
+    return () => { sendListeners.delete(listener); };
+  }, []);
 
   // Safety net for missed socket events (reconnects, very fast failures, the
   // socket being down): poll the outcome of every download still shown as active.
@@ -2431,7 +2514,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
 
     const checkDownloads = async () => {
       for (const [downloadId, download] of activeDownloadsRef.current) {
-        if (sendingRef.current.has(downloadId)) continue;  // backend doesn't have it yet
+        if (sendingUploads.has(downloadId)) continue;  // backend doesn't have it yet
         try {
           const response = await fetch(`${getBackendUrl()}/models/downloads/${encodeURIComponent(downloadId)}/status`);
           if (!response.ok) continue;
@@ -2595,6 +2678,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const cancelDownload = async (downloadId: string) => {
     const download = activeDownloadsRef.current.get(downloadId);
     if (!download) return;
+
+    // Still sending the file: stop the transfer here, the backend hasn't seen it
+    if (abortSend(downloadId)) return;
 
     try {
       // Send cancel request to backend
@@ -2765,41 +2851,25 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     const uploadId = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     startDownload(uploadId, modelName.trim());
     
-    setLoading(true);
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      formData.append('model_name', modelName.trim());
-      formData.append('model_type', modelType);
-      formData.append('download_id', uploadId); // Send download ID to backend
-      // .pt files can be converted (Ultralytics YOLO); other files are used as-is
-      if (isConvertibleUpload) {
-        appendExportSettings(formData);
-      }
-      
-      // Only a custom script is sent; otherwise the backend uses its default handler
-      if (scriptOption === 'custom' && customScript) {
-        formData.append('custom_script', customScript);
-      }
-
-      // Close modal immediately to allow user to continue
-      resetModal();
-
-      updateDownloadProgress(uploadId, 0, 'Sending file to the Jetson...');
-      const data = await postFormWithProgress(`${getBackendUrl()}/models/upload`, formData, uploadId);
-      
-      if (!data.success && !data.download_started) {
-        // If upload failed immediately (validation error, etc.)
-        completeDownload(uploadId, false, data.error || 'Upload failed');
-      }
-      // If successful or download started, progress will be handled by WebSocket
-    } catch (error) {
-      console.error('Upload error:', error);
-      completeDownload(uploadId, false, `Upload failed: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      setLoading(false);
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('model_name', modelName.trim());
+    formData.append('model_type', modelType);
+    formData.append('download_id', uploadId); // Send download ID to backend
+    // .pt files can be converted (Ultralytics YOLO); .onnx to TensorRT; others are used as-is
+    if (isConvertibleUpload) {
+      appendExportSettings(formData);
     }
+    // Only a custom script is sent; otherwise the backend uses its default handler
+    if (scriptOption === 'custom' && customScript) {
+      formData.append('custom_script', customScript);
+    }
+
+    // Close the dialog right away; the toast shows progress, also after
+    // switching tabs (the send is tracked outside this page)
+    resetModal();
+    updateDownloadProgress(uploadId, 0, 'Sending file to the Jetson...');
+    sendFormWithProgress(`${getBackendUrl()}/models/upload`, formData, uploadId, modelName.trim());
   };
 
   const handleYOLODownload = async () => {
@@ -2815,38 +2885,22 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     const downloadId = `yolo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     startDownload(downloadId, yoloModelName.trim()); // Use user-entered name, not template name
 
-    setLoading(true);
-
-    try {
-      // Close modal immediately to allow user to continue
-      resetModal();
-
-      // Use FormData to support custom script upload
-      const formData = new FormData();
-      formData.append('model_url', selectedYOLO.url);
-      formData.append('model_name', yoloModelName.trim());
-      appendExportSettings(formData);
-      formData.append('original_format', 'PyTorch');
-      formData.append('download_id', downloadId);
-      
-      // Only a custom script is sent; otherwise the backend uses its default handler
-      if (scriptOption === 'custom' && customScript) {
-        formData.append('custom_script', customScript);
-      }
-
-      const data = await postFormWithProgress(`${getBackendUrl()}/models/download-yolo`, formData, downloadId);
-
-      if (!data.success && !data.download_started) {
-        // If download failed immediately (validation error, etc.)
-        completeDownload(downloadId, false, data.error || 'Download failed');
-      }
-      // If successful or download started, progress will be handled by WebSocket
-    } catch (error) {
-      console.error('Download error:', error);
-      completeDownload(downloadId, false, `Download failed: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      setLoading(false);
+    // Use FormData to support custom script upload
+    const formData = new FormData();
+    formData.append('model_url', selectedYOLO.url);
+    formData.append('model_name', yoloModelName.trim());
+    appendExportSettings(formData);
+    formData.append('original_format', 'PyTorch');
+    formData.append('download_id', downloadId);
+    
+    // Only a custom script is sent; otherwise the backend uses its default handler
+    if (scriptOption === 'custom' && customScript) {
+      formData.append('custom_script', customScript);
     }
+
+    // Close the dialog right away; progress shows in the toast
+    resetModal();
+    sendFormWithProgress(`${getBackendUrl()}/models/download-yolo`, formData, downloadId, yoloModelName.trim());
   };
 
   // Target format, precision, INT8 calibration and advanced export settings.
