@@ -29,4 +29,5 @@ ultralytics-platform
 onnx
 onnxslim
 ml-dtypes>=0.5,<0.6   # 0.6+ requires numpy 2
+cryptography          # API keys stored encrypted so they can be shown again (Ubuntu ships it)
 # TensorRT Python bindings come from JetPack (system site-packages).

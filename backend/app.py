@@ -2222,7 +2222,9 @@ def list_api_keys():
     if error:
         return error
     return jsonify({'success': True, 'keys': api_key_store.list(),
-                    'scopes': [{'value': k, 'label': v} for k, v in API_KEY_SCOPES.items()]})
+                    'scopes': [{'value': k, 'label': v} for k, v in API_KEY_SCOPES.items()],
+                    # Creating and viewing keys need it when one is set
+                    'admin_password': admin_password_required()})
 
 
 @app.route('/api-keys', methods=['POST'])
@@ -2231,13 +2233,40 @@ def create_api_key():
     if error:
         return error
     data = request.json or {}
+    # A key is a lasting way in, so creating one needs the admin password (if set)
+    if admin_password_required():
+        ok, error = verify_admin_password(data.get('admin_password', ''), get_client_ip())
+        if not ok:
+            return error
     try:
         key, info = api_key_store.create(data.get('name'), data.get('scope'))
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
     logger.info(f"API key '{info['name']}' created by {get_client_ip()}")
-    # The only time the full key is ever returned
     return jsonify({'success': True, 'key': key, 'info': info})
+
+
+@app.route('/api-keys/<key_id>/reveal', methods=['POST'])
+def reveal_api_key(key_id):
+    """Show a key again - only with the admin password, so one must be set."""
+    error = _key_management_error()
+    if error:
+        return error
+    if not admin_password_required():
+        return jsonify({'success': False, 'needs_admin_password': True,
+                        'error': 'Set an admin password first (sudo jdboard-passwd --admin) '
+                                 'to be able to view keys again'}), 400
+    ok, error = verify_admin_password((request.json or {}).get('admin_password', ''), get_client_ip())
+    if not ok:
+        return error
+    try:
+        key = api_key_store.reveal(key_id)
+    except KeyError:
+        return jsonify({'success': False, 'error': 'Key not found'}), 404
+    except LookupError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    logger.info(f"API key {key_id} viewed by {get_client_ip()}")
+    return jsonify({'success': True, 'key': key})
 
 
 @app.route('/api-keys/<key_id>', methods=['DELETE'])

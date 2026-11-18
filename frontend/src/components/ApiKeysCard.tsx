@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { getBackendUrl } from '../utils/api';
 import { useNotifications } from '../contexts/NotificationContext';
+import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
 // Settings > API Keys: keys for bots and scripts (see backend/api_keys.py).
 // Programs send "Authorization: Bearer <key>" instead of the dashboard login.
@@ -14,6 +15,7 @@ interface ApiKey {
   created_at: string;
   last_used_at: string | null;
   last_used_ip: string | null;
+  viewable: boolean;   // stored so it can be shown again (keys created before that can't)
 }
 
 const SCOPE_INFO: Record<string, { label: string; hint: string }> = {
@@ -58,8 +60,14 @@ const CreateRow = styled.div`
   gap: 12px;
   margin-bottom: 18px;
 
+  .top {
+    display: flex;
+    gap: 10px;
+  }
+
   input[type='text'] {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     box-sizing: border-box;
     padding: 9px 12px;
     border: 1px solid ${props => props.theme.colors.border.secondary};
@@ -80,10 +88,7 @@ const CreateRow = styled.div`
     gap: 8px 16px;
   }
 
-  .actions {
-    display: flex;
-    justify-content: flex-end;
-  }
+
 
   label {
     display: flex;
@@ -190,8 +195,9 @@ const KeyList = styled.div`
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      'title revoke'
-      'meta  revoke';
+      'title buttons'
+      'meta  buttons'
+      'shown shown';
     align-items: center;
     gap: 4px 12px;
     padding: 10px 12px;
@@ -237,8 +243,57 @@ const KeyList = styled.div`
     font-family: 'Courier New', monospace;
   }
 
+  .buttons {
+    grid-area: buttons;
+    display: flex;
+    gap: 6px;
+  }
+
+  button.view {
+    background: none;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    color: ${props => props.theme.colors.text.primary};
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+  }
+
+  .shown {
+    grid-area: shown;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 6px;
+
+    code {
+      flex: 1;
+      min-width: 0;
+      overflow-x: auto;
+      white-space: nowrap;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    button {
+      background: none;
+      border: 1px solid ${props => props.theme.colors.border.secondary};
+      color: ${props => props.theme.colors.text.primary};
+      border-radius: 6px;
+      padding: 5px 9px;
+      cursor: pointer;
+    }
+  }
+
   button.revoke {
-    grid-area: revoke;
     background: none;
     border: 1px solid rgba(255, 82, 82, 0.6);
     color: #ff6b6b;
@@ -253,6 +308,49 @@ const KeyList = styled.div`
   }
 `;
 
+const PromptBody = styled.div`
+  font-size: 14px;
+  color: ${props => props.theme.colors.text.primary};
+
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    background: ${props => props.theme.colors.background.tertiary};
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+
+    &:focus {
+      outline: none;
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+
+  .error {
+    margin-top: 8px;
+    color: #ff6b6b;
+    font-size: 13px;
+  }
+`;
+
+const PromptButtons = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+
+  button.cancel {
+    background: none;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    color: ${props => props.theme.colors.text.primary};
+    border-radius: 6px;
+    padding: 9px 16px;
+    cursor: pointer;
+  }
+`;
+
 const ApiKeysCard: React.FC = () => {
   const { addNotification } = useNotifications();
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -262,12 +360,22 @@ const ApiKeysCard: React.FC = () => {
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [created, setCreated] = useState<{ key: string; name: string } | null>(null);
+  // Creating and viewing keys need the admin password when one is set
+  const [adminPassword, setAdminPassword] = useState(false);
+  const [prompt, setPrompt] = useState<{ purpose: 'create' | 'view'; key?: ApiKey } | null>(null);
+  const [promptPassword, setPromptPassword] = useState('');
+  const [promptError, setPromptError] = useState('');
+  const [promptBusy, setPromptBusy] = useState(false);
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
 
   const loadKeys = async () => {
     try {
       const response = await fetch(`${getBackendUrl()}/api-keys`);
       const data = await response.json();
-      if (data.success) setKeys(data.keys);
+      if (data.success) {
+        setKeys(data.keys);
+        setAdminPassword(!!data.admin_password);
+      }
     } catch (error) {
       console.error('Error loading API keys:', error);
     } finally {
@@ -277,24 +385,82 @@ const ApiKeysCard: React.FC = () => {
 
   useEffect(() => { loadKeys(); }, []);
 
+  const openPrompt = (purpose: 'create' | 'view', key?: ApiKey) => {
+    setPrompt({ purpose, key });
+    setPromptPassword('');
+    setPromptError('');
+  };
+
+  const closePrompt = () => {
+    if (promptBusy) return;
+    setPrompt(null);
+    setPromptPassword('');
+    setPromptError('');
+  };
+
+  // Returns an error message, or null when it worked
+  const sendCreate = async (password?: string): Promise<string | null> => {
+    const response = await fetch(`${getBackendUrl()}/api-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), scope, admin_password: password }),
+    });
+    const data = await response.json();
+    if (!data.success) return data.error || 'Could not create the key';
+    setCreated({ key: data.key, name: data.info.name });
+    setName('');
+    loadKeys();
+    return null;
+  };
+
   const createKey = async () => {
     if (!name.trim() || creating) return;
+    if (adminPassword) {
+      openPrompt('create');
+      return;
+    }
     setCreating(true);
     try {
-      const response = await fetch(`${getBackendUrl()}/api-keys`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), scope }),
-      });
-      const data = await response.json();
-      if (!data.success) throw new Error(data.error || 'Could not create the key');
-      setCreated({ key: data.key, name: data.info.name });
-      setName('');
-      loadKeys();
+      const error = await sendCreate();
+      if (error) addNotification({ type: 'error', title: 'API Keys', message: error });
     } catch (error) {
       addNotification({ type: 'error', title: 'API Keys', message: error instanceof Error ? error.message : String(error) });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const submitPrompt = async () => {
+    if (!prompt || !promptPassword || promptBusy) return;
+    setPromptBusy(true);
+    setPromptError('');
+    try {
+      if (prompt.purpose === 'create') {
+        const error = await sendCreate(promptPassword);
+        if (error) {
+          setPromptError(error);
+          return;
+        }
+      } else if (prompt.key) {
+        const response = await fetch(`${getBackendUrl()}/api-keys/${encodeURIComponent(prompt.key.id)}/reveal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ admin_password: promptPassword }),
+        });
+        const data = await response.json();
+        if (!data.success) {
+          setPromptError(data.error || 'Could not show the key');
+          return;
+        }
+        const keyId = prompt.key.id;
+        setRevealed(prev => ({ ...prev, [keyId]: data.key }));
+      }
+      setPrompt(null);
+      setPromptPassword('');
+    } catch (error) {
+      setPromptError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPromptBusy(false);
     }
   };
 
@@ -306,6 +472,7 @@ const ApiKeysCard: React.FC = () => {
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Could not revoke the key');
       setKeys(prev => prev.filter(k => k.id !== key.id));
+      setRevealed(prev => { const next = { ...prev }; delete next[key.id]; return next; });
       addNotification({ type: 'success', title: 'API Keys', message: `"${key.name}" revoked` });
     } catch (error) {
       addNotification({ type: 'error', title: 'API Keys', message: error instanceof Error ? error.message : String(error) });
@@ -331,14 +498,20 @@ const ApiKeysCard: React.FC = () => {
       </h3>
 
       <CreateRow>
-        <input
-          type="text"
-          placeholder="Key name, e.g. door-camera"
-          value={name}
-          maxLength={60}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') createKey(); }}
-        />
+        <div className="top">
+          <input
+            type="text"
+            placeholder="Key name, e.g. door-camera"
+            value={name}
+            maxLength={60}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') createKey(); }}
+          />
+          <PrimaryButton onClick={createKey} disabled={!name.trim() || creating}>
+            <i className={creating ? 'fas fa-spinner fa-spin' : 'fas fa-plus'}></i>
+            Create Key
+          </PrimaryButton>
+        </div>
         <div className="scopes" role="radiogroup" aria-label="What the key may do">
           {Object.entries(SCOPE_INFO).map(([value, info]) => (
             <label key={value} title={info.hint}>
@@ -347,17 +520,16 @@ const ApiKeysCard: React.FC = () => {
             </label>
           ))}
         </div>
-        <div className="actions">
-          <PrimaryButton onClick={createKey} disabled={!name.trim() || creating}>
-            <i className={creating ? 'fas fa-spinner fa-spin' : 'fas fa-plus'}></i>
-            Create Key
-          </PrimaryButton>
-        </div>
       </CreateRow>
 
       {created && (
         <NewKey>
-          <div><strong>{created.name}</strong> - <span className="warn">copy this key now; it won't be shown again.</span></div>
+          <div>
+            <strong>{created.name}</strong> -{' '}
+            {adminPassword
+              ? 'copy it now; you can view it again later with the admin password.'
+              : <span className="warn">copy it now; set an admin password (sudo jdboard-passwd --admin) to be able to view it again.</span>}
+          </div>
           <div className="row">
             <code>{created.key}</code>
             <PrimaryButton onClick={() => copy(created.key)}><i className="fas fa-copy"></i> Copy</PrimaryButton>
@@ -385,12 +557,71 @@ const ApiKeysCard: React.FC = () => {
                 ? `used ${new Date(key.last_used_at).toLocaleString()}${key.last_used_ip ? ` from ${key.last_used_ip}` : ''}`
                 : 'never used'}
             </div>
-            <button className="revoke" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
-              {revoking === key.id ? <i className="fas fa-spinner fa-spin"></i> : 'Revoke'}
-            </button>
+            <div className="buttons">
+              <button
+                className="view"
+                onClick={() => (revealed[key.id]
+                  ? setRevealed(prev => { const next = { ...prev }; delete next[key.id]; return next; })
+                  : openPrompt('view', key))}
+                disabled={!revealed[key.id] && (!key.viewable || !adminPassword)}
+                title={revealed[key.id] ? 'Hide the key'
+                  : !key.viewable ? 'Created before keys could be shown again'
+                  : !adminPassword ? 'Set an admin password (sudo jdboard-passwd --admin) to view keys again'
+                  : 'Show the key (needs the admin password)'}
+              >
+                <i className={revealed[key.id] ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+              </button>
+              <button className="revoke" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
+                {revoking === key.id ? <i className="fas fa-spinner fa-spin"></i> : 'Revoke'}
+              </button>
+            </div>
+            {revealed[key.id] && (
+              <div className="shown">
+                <code>{revealed[key.id]}</code>
+                <button onClick={() => copy(revealed[key.id])} title="Copy"><i className="fas fa-copy"></i></button>
+              </div>
+            )}
           </div>
         ))}
       </KeyList>
+      {prompt && (
+        <Modal isOpen={true} onClose={closePrompt} maxWidth="420px">
+          <ModalHeader>
+            <h3>
+              <i className="fas fa-lock"></i>
+              Admin password
+            </h3>
+            <ModalCloseButton onClick={closePrompt}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
+          <ModalBody>
+            <PromptBody>
+              {prompt.purpose === 'create'
+                ? <>Enter the admin password to create the key <strong>{name.trim()}</strong>.</>
+                : <>Enter the admin password to show the key <strong>{prompt.key?.name}</strong>.</>}
+              <input
+                type="password"
+                autoFocus
+                placeholder="Admin password"
+                value={promptPassword}
+                onChange={(e) => setPromptPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitPrompt(); }}
+              />
+              {promptError && <div className="error">{promptError}</div>}
+            </PromptBody>
+          </ModalBody>
+          <ModalFooter>
+            <PromptButtons>
+              <button className="cancel" onClick={closePrompt} disabled={promptBusy}>Cancel</button>
+              <PrimaryButton onClick={submitPrompt} disabled={!promptPassword || promptBusy}>
+                {promptBusy && <i className="fas fa-spinner fa-spin"></i>}
+                {prompt.purpose === 'create' ? 'Create Key' : 'Show Key'}
+              </PrimaryButton>
+            </PromptButtons>
+          </ModalFooter>
+        </Modal>
+      )}
     </Card>
   );
 };

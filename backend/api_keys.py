@@ -7,9 +7,10 @@ instead, sent as ``Authorization: Bearer <key>``: nginx asks the backend
 whether its scope allows the requested path, so a key never needs anyone's
 password and can be revoked on its own.
 
-Keys look like ``jdb_<id>_<secret>``. Only a SHA-256 of the secret is stored
-(the secret is 256 random bits, so a slow hash isn't needed); the full key is
-shown once, when it is created.
+Keys look like ``jdb_<id>_<secret>``. Checking uses only a SHA-256 of the
+secret (256 random bits, so a slow hash isn't needed). So a key can be shown
+again later (behind the admin password), it is also stored encrypted with a
+key in ``api-keys.vault`` next to the key file, readable only by the service.
 
 Scopes
     inference   list models, load/unload them, run inference
@@ -80,6 +81,8 @@ def _hash(secret):
 class ApiKeyStore:
     def __init__(self, path):
         self.path = path
+        self.vault_path = os.path.join(os.path.dirname(path), 'api-keys.vault')
+        self._cipher = None
         self._lock = threading.Lock()
         self._keys = self._load()
         self._dirty_since = None
@@ -109,8 +112,28 @@ class ApiKeyStore:
 
     @staticmethod
     def _public(entry):
-        return {k: entry.get(k) for k in ('id', 'name', 'scope', 'prefix', 'created_at',
+        info = {k: entry.get(k) for k in ('id', 'name', 'scope', 'prefix', 'created_at',
                                           'last_used_at', 'last_used_ip')}
+        info['viewable'] = bool(entry.get('secret_enc'))
+        return info
+
+    def _vault(self):
+        """Fernet cipher for storing keys so they can be shown again, or None
+        if the cryptography package isn't available."""
+        if self._cipher is None:
+            try:
+                from cryptography.fernet import Fernet
+            except ImportError:
+                logger.warning("cryptography isn't installed: new API keys can't be shown again later")
+                return None
+            if not os.path.exists(self.vault_path):
+                os.makedirs(os.path.dirname(self.vault_path), exist_ok=True)
+                fd = os.open(self.vault_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, 'wb') as f:
+                    f.write(Fernet.generate_key())
+            with open(self.vault_path, 'rb') as f:
+                self._cipher = Fernet(f.read().strip())
+        return self._cipher
 
     # --- management -------------------------------------------------------------
     def list(self):
@@ -135,12 +158,34 @@ class ApiKeyStore:
             self._keys[key_id] = {
                 'id': key_id, 'name': name, 'scope': scope,
                 'prefix': full_key[:12], 'hash': _hash(secret),
+                'secret_enc': self._encrypt(full_key),
                 'created_at': datetime.now().isoformat(timespec='seconds'),
                 'last_used_at': None, 'last_used_ip': None,
             }
             self._save()
             logger.info(f"API key '{name}' ({scope}) created")
             return full_key, self._public(self._keys[key_id])
+
+    def _encrypt(self, full_key):
+        try:
+            cipher = self._vault()
+            return cipher.encrypt(full_key.encode()).decode() if cipher else None
+        except OSError as e:
+            logger.warning(f"Could not store the API key for viewing later: {e}")
+            return None
+
+    def reveal(self, key_id):
+        """The full key, for showing it again. Raises KeyError (no such key) or
+        LookupError (created before keys could be shown again)."""
+        with self._lock:
+            entry = self._keys.get(key_id)
+            if entry is None:
+                raise KeyError(key_id)
+            token = entry.get('secret_enc')
+        cipher = self._vault()
+        if not token or cipher is None:
+            raise LookupError("This key was created before keys could be shown again; create a new one if you need it")
+        return cipher.decrypt(token.encode()).decode()
 
     def revoke(self, key_id):
         with self._lock:
