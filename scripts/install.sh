@@ -282,6 +282,12 @@ systemctl enable "$SERVICE" >/dev/null
 step "Login"
 if [ -s "$ETC/htpasswd" ]; then
     echo "Keeping the existing login (change it with: sudo jdboard-passwd)"
+elif [ ! -t 0 ]; then
+    echo "❌ The dashboard login has to be typed in, but this isn't an interactive terminal."
+    echo "   Everything up to here is installed. Open a terminal (SSH or the desktop) and run:"
+    echo "     cd $REPO && sudo ./scripts/install.sh"
+    echo "   It picks up where this left off."
+    exit 1
 else
     echo "Choose the username and password for the dashboard (not your Linux account)."
     /usr/local/bin/jdboard-passwd

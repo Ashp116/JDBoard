@@ -13,6 +13,12 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+if [ ! -t 0 ]; then
+    echo "jdboard-passwd needs to ask for a password - run it in a terminal (SSH or the desktop)," >&2
+    echo "not through a tool that can't type into it." >&2
+    exit 1
+fi
+
 LOGIN="${1:-}"
 if [ -z "$LOGIN" ]; then
     DEFAULT="$(cut -d: -f1 "$HTPASSWD" 2>/dev/null | head -1)"
