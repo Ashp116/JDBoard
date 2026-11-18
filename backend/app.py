@@ -83,6 +83,78 @@ def sudo_run(cmd, password, capture_output=True, text=True, timeout=None):
                           capture_output=capture_output, text=text, timeout=timeout)
 
 
+# Optional admin password for the dangerous dashboard actions (reboot,
+# shutdown, cache, jtop service, start on boot) in the installed service.
+# Set with `sudo jdboard-passwd --admin`; stored as a werkzeug hash, readable
+# by the service only. Without it those actions need no password.
+ADMIN_PASSWORD_FILE = os.environ.get('JDBOARD_ADMIN_PASSWORD_FILE', '/etc/jdboard/admin-password')
+ADMIN_MAX_FAILURES = 5          # wrong passwords allowed per client...
+ADMIN_FAILURE_WINDOW_S = 60     # ...within this many seconds,
+ADMIN_LOCKOUT_S = 300           # then that client is locked out for 5 minutes
+_admin_failures = {}            # client ip -> [timestamps of recent failures]
+_admin_lockouts = {}            # client ip -> locked until (epoch seconds)
+_admin_lock = threading.Lock()
+
+
+def _admin_password_hash():
+    try:
+        with open(ADMIN_PASSWORD_FILE, encoding='utf-8') as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def admin_password_required():
+    return passwordless_privileges() and _admin_password_hash() is not None
+
+
+def verify_admin_password(password, client_ip):
+    """(ok, error_response). Rate-limited per client IP."""
+    from werkzeug.security import check_password_hash
+    now = time.time()
+    with _admin_lock:
+        locked_until = _admin_lockouts.get(client_ip, 0)
+        if locked_until > now:
+            wait = int(locked_until - now) + 1
+            return False, (jsonify({'success': False, 'locked': True,
+                                    'error': f'Too many wrong admin passwords. Try again in {wait} s.'}), 429)
+    pw_hash = _admin_password_hash()
+    if pw_hash and password and check_password_hash(pw_hash, password):
+        with _admin_lock:
+            _admin_failures.pop(client_ip, None)
+        return True, None
+    with _admin_lock:
+        recent = [t for t in _admin_failures.get(client_ip, []) if now - t < ADMIN_FAILURE_WINDOW_S] + [now]
+        _admin_failures[client_ip] = recent
+        if len(recent) >= ADMIN_MAX_FAILURES:
+            _admin_lockouts[client_ip] = now + ADMIN_LOCKOUT_S
+            _admin_failures.pop(client_ip, None)
+            logger.warning(f"Admin password: {client_ip} locked out for {ADMIN_LOCKOUT_S} s after "
+                           f"{ADMIN_MAX_FAILURES} wrong attempts")
+            return False, (jsonify({'success': False, 'locked': True,
+                                    'error': f'Too many wrong admin passwords. Try again in {ADMIN_LOCKOUT_S // 60} minutes.'}), 429)
+    logger.warning(f"Wrong admin password from {client_ip}")
+    left = ADMIN_MAX_FAILURES - len(recent)
+    return False, (jsonify({'success': False, 'error': f'Wrong admin password ({left} attempt{"s" if left != 1 else ""} left)'}), 401)
+
+
+def privileged_auth_error(password):
+    """None if an admin action may run, else the error response to return.
+
+    Installed service: the admin password if one is set, otherwise nothing.
+    Development checkout: a sudo password must be given (sudo checks it)."""
+    if passwordless_privileges():
+        if _admin_password_hash() is None:
+            return None
+        ok, error = verify_admin_password(password, get_client_ip())
+        return None if ok else error
+    if is_running_as_root():
+        return None
+    if not password:
+        return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+    return None
+
+
 app = Flask(__name__)
 
 CORS(app)
@@ -2114,14 +2186,26 @@ def handle_log_subscription(data):
 # System Settings API Endpoints
 @app.route('/system/privileges', methods=['GET'])
 def get_privileges():
-    """Whether admin actions (reboot, shutdown, jtop service, cache) need the
-    user's sudo password. The installed service doesn't."""
-    return jsonify({'success': True, 'passwordless': is_running_as_root() or passwordless_privileges()})
+    """Whether admin actions (reboot, shutdown, jtop service, cache) need a
+    password: the user's sudo password in a dev checkout, the optional admin
+    password in the installed service."""
+    admin = admin_password_required()
+    return jsonify({'success': True,
+                    'passwordless': is_running_as_root() or (passwordless_privileges() and not admin),
+                    'admin_password': admin})
 
 @app.route('/auth/sudo', methods=['POST'])
 def authenticate_sudo():
     """Authenticate sudo password"""
     try:
+        # Installed service with an admin password: check that instead of sudo
+        if admin_password_required():
+            ok, error = verify_admin_password((request.json or {}).get('password', ''), get_client_ip())
+            if not ok:
+                return error
+            return jsonify({'success': True, 'session_id': str(uuid.uuid4()),
+                            'message': 'Admin password accepted', 'is_root': False})
+
         # If already running as root (or the installed service, which has
         # password-less access to its admin helper), no password needed
         if is_running_as_root() or passwordless_privileges():
@@ -2342,8 +2426,9 @@ def set_autostart():
         if not installed:
             return jsonify({'success': False, 'error': "JDBoard isn't installed as a service "
                                                        "(sudo ./scripts/install.sh), so there's nothing to start on boot."}), 400
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         result = sudo_run(['systemctl', 'enable' if enabled else 'disable', 'jdboard.service'],
                           sudo_password, timeout=30)
         _, now_enabled = _autostart_state()
@@ -2366,8 +2451,9 @@ def reboot_system():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         
         # Use a background process to delay reboot slightly to allow response
         def delayed_reboot():
@@ -2395,8 +2481,9 @@ def shutdown_system():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         
         logger.warning("System shutdown requested")
         
@@ -2429,8 +2516,9 @@ def clear_system_cache():
         data = request.json if request.json else {}
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         
         logger.info("Clearing system cache")
         
@@ -2496,8 +2584,9 @@ def install_jtop_service():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         
         logger.info("Installing jtop service")
         
@@ -2607,8 +2696,9 @@ def restart_jtop_service():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password and not passwordless_privileges():
-            return jsonify({'success': False, 'error': 'Sudo password required'}), 400
+        auth_error = privileged_auth_error(sudo_password)
+        if auth_error:
+            return auth_error
         
         logger.info("Restarting jtop service to fix broken pipe")
         

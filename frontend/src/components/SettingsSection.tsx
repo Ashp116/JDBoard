@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
-import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
+import { isPasswordlessSudo, PASSWORDLESS, usePasswordLabel } from '../utils/privileges';
 import { useNotifications } from '../contexts/NotificationContext';
 import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
@@ -445,6 +445,8 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
 
   const { addNotification, setPopupsEnabled } = useNotifications();
 
+  const passwordLabel = usePasswordLabel();
+
   // Fetch current settings from backend
   const fetchSettings = async () => {
     try {
@@ -610,7 +612,7 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         setSudoModal(prev => ({ 
           ...prev, 
           loading: false,
-          error: result.error || 'Invalid sudo password'
+          error: result.error || `Wrong ${passwordLabel}`
         }));
       }
     } catch (error) {
@@ -1276,12 +1278,12 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
         </ModalHeader>
         <ModalBody>
           <p style={{ color: 'var(--text-secondary)', margin: '0 0 16px 0', lineHeight: '1.5' }}>
-            To {sudoModal.action}, please enter your sudo password:
+            To {sudoModal.action}, please enter your {passwordLabel}:
           </p>
           
           <PasswordInput
             type="password"
-            placeholder="Enter sudo password"
+            placeholder={`Enter ${passwordLabel}`}
             value={sudoModal.password}
             onChange={(e) => setSudoModal(prev => ({ 
               ...prev, 
