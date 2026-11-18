@@ -3938,24 +3938,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       </SectionHeader>
 
       <ModelsToolbar>
-        <SearchContainer>
-          <SearchInput
-            type="text"
-            placeholder="Search models by name, file, framework..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-          />
-          {searchQuery ? (
-            <ClearSearch onClick={clearSearch}>
-              <i className="fas fa-times"></i>
-            </ClearSearch>
-          ) : (
-            <SearchIcon>
-              <i className="fas fa-search"></i>
-            </SearchIcon>
-          )}
-        </SearchContainer>
-
         <FiltersWrapper ref={filtersRef}>
           <FiltersButton
             type="button"
@@ -4026,6 +4008,24 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
             </FiltersPanel>
           )}
         </FiltersWrapper>
+
+        <SearchContainer>
+          <SearchInput
+            type="text"
+            placeholder="Search models by name, file, framework..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+          {searchQuery ? (
+            <ClearSearch onClick={clearSearch}>
+              <i className="fas fa-times"></i>
+            </ClearSearch>
+          ) : (
+            <SearchIcon>
+              <i className="fas fa-search"></i>
+            </SearchIcon>
+          )}
+        </SearchContainer>
 
         <AddButton onClick={() => setShowModal(true)}>
           <i className="fas fa-plus"></i>
