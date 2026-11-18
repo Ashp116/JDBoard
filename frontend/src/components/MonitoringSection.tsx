@@ -695,7 +695,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
     return systemData.cpu.cores;
   };
 
-  const getChartOptions = (title: string, hasSecondaryAxis: boolean = false, startFromZero: boolean = false, maxValue: number | null = null): any => ({
+  const getChartOptions = (title: string, hasSecondaryAxis: boolean = false, startFromZero: boolean = false, maxValue: number | null = null, secondaryRange: [number, number] | null = null): any => ({
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
@@ -743,6 +743,8 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           type: 'linear',
           display: true,
           position: 'right',
+          // Fixed range (e.g. 0-100 °C) instead of auto-scaling to the data
+          ...(secondaryRange && { min: secondaryRange[0], max: secondaryRange[1] }),
           ticks: {
             color: '#CCCCCC'
           },
@@ -852,7 +854,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.cpu} 
-            options={getChartOptions('CPU Usage & Temperature', true, true, 100)} 
+            options={getChartOptions('CPU Usage & Temperature', true, true, 100, [0, 100])} 
           />
         </ChartContainer>
       </ChartSection>
@@ -898,7 +900,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
         <ChartContainer>
           <Line 
             data={historicalData.gpu} 
-            options={getChartOptions('GPU Usage & Temperature', true, true, 100)} 
+            options={getChartOptions('GPU Usage & Temperature', true, true, 100, [0, 100])} 
           />
         </ChartContainer>
       </ChartSection>
