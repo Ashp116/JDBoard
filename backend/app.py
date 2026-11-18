@@ -27,7 +27,6 @@ from ai_inference import terminate_active_exports, log_failure, normalize_export
 # while a model is loaded (see inference_client.py / inference_worker.py)
 from inference_client import ManagedModelManager
 from api_keys import ApiKeyStore, SCOPES as API_KEY_SCOPES
-from api_docs import build_route_docs
 import atexit
 import signal
 from request_logger import RequestLogger
@@ -649,9 +648,8 @@ def tensorrt_size_problem(source_name):
 
 @app.route('/models/upload', methods=['POST'])
 def upload_model():
-    """Upload a model file; Ultralytics .pt and any .onnx can be converted to TensorRT.
-
-    Same export options as the YOLO download; progress arrives over Socket.IO."""
+    """Upload a model, optionally converting an Ultralytics .pt file to ONNX or
+    TensorRT (same options as the YOLO download), with progress over Socket.IO."""
     client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -2188,13 +2186,6 @@ def handle_log_subscription(data):
         })
 
 # System Settings API Endpoints
-@app.route('/docs/routes', methods=['GET'])
-def api_route_docs():
-    """Every API route with its parameters and which key scopes may call it."""
-    return jsonify({'success': True, 'routes': build_route_docs(app),
-                    'scopes': [{'value': k, 'label': v} for k, v in API_KEY_SCOPES.items()]})
-
-
 # --- API keys for bots and scripts (see api_keys.py) ---------------------------
 
 @app.route('/_internal/key-check', methods=['GET'])
@@ -2227,7 +2218,6 @@ def _key_management_error():
 
 @app.route('/api-keys', methods=['GET'])
 def list_api_keys():
-    """List API keys (name, scope, prefix, last use) - never the keys themselves."""
     error = _key_management_error()
     if error:
         return error
@@ -2239,7 +2229,6 @@ def list_api_keys():
 
 @app.route('/api-keys', methods=['POST'])
 def create_api_key():
-    """Create an API key. The response contains the full key."""
     error = _key_management_error()
     if error:
         return error
@@ -2282,7 +2271,6 @@ def reveal_api_key(key_id):
 
 @app.route('/api-keys/<key_id>', methods=['DELETE'])
 def revoke_api_key(key_id):
-    """Revoke an API key; anything using it stops working at once."""
     error = _key_management_error()
     if error:
         return error
@@ -2296,10 +2284,9 @@ def revoke_api_key(key_id):
 
 @app.route('/system/privileges', methods=['GET'])
 def get_privileges():
-    """Whether admin actions (reboot, shutdown, jtop, cache) need a password.
-
-    The user's sudo password in a dev checkout, the optional admin password in
-    the installed service."""
+    """Whether admin actions (reboot, shutdown, jtop service, cache) need a
+    password: the user's sudo password in a dev checkout, the optional admin
+    password in the installed service."""
     admin = admin_password_required()
     return jsonify({'success': True,
                     'passwordless': is_running_as_root() or (passwordless_privileges() and not admin),

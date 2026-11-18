@@ -12,7 +12,6 @@ import ProcessMonitoring from './components/ProcessMonitoring';
 import TerminalSection from './components/TerminalSection';
 import LogsSection from './components/LogsSection';
 import SettingsSection from './components/SettingsSection';
-import ApiSection from './components/ApiSection';
 import GlobalNotifications from './components/GlobalNotifications';
 import SystemErrorDetector from './components/SystemErrorDetector';
 import { NotificationProvider } from './contexts/NotificationContext';
@@ -83,10 +82,7 @@ const ContentSection = styled.section<{ $active: boolean }>`
   }
 `;
 
-type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'processes' | 'terminal' | 'logs' | 'settings' | 'apidocs';
-
-// Sections whose URL isn't /<id> (anything under /api/ goes to the backend)
-const SECTION_PATHS: Partial<Record<SectionKey, string>> = { apidocs: '/api-docs' };
+type SectionKey = 'dashboard' | 'models' | 'inference' | 'monitoring' | 'processes' | 'terminal' | 'logs' | 'settings';
 
 interface RouteParams {
   section?: string;
@@ -117,13 +113,11 @@ const AppContent: React.FC = () => {
   // Update active section based on current route
   useEffect(() => {
     const pathSegments = location.pathname.split('/').filter(Boolean);
-    const firstSegment = `/${pathSegments[0] || ''}`;
-    const pathSection = (Object.keys(SECTION_PATHS) as SectionKey[]).find(k => SECTION_PATHS[k] === firstSegment);
-    const currentSection = (pathSection || pathSegments[0]) as SectionKey;
+    const currentSection = pathSegments[0] as SectionKey;
     
     if (location.pathname === '/') {
       setActiveSection('dashboard');
-    } else if (currentSection && ['models', 'inference', 'monitoring', 'processes', 'terminal', 'logs', 'settings', 'apidocs'].includes(currentSection)) {
+    } else if (currentSection && ['models', 'inference', 'monitoring', 'processes', 'terminal', 'logs', 'settings'].includes(currentSection)) {
       setActiveSection(currentSection);
     } else {
       setActiveSection('dashboard');
@@ -140,8 +134,7 @@ const AppContent: React.FC = () => {
       processes: 'Process Monitor',
       terminal: 'Terminal',
       logs: 'Logs',
-      settings: 'Settings',
-      apidocs: 'API'
+      settings: 'Settings'
     };
     
     let sectionTitle = sectionTitles[activeSection] || 'Dashboard';
@@ -189,8 +182,7 @@ const AppContent: React.FC = () => {
     processes: ProcessMonitoring,
     terminal: TerminalSection,
     logs: LogsSection,
-    settings: SettingsSection,
-    apidocs: ApiSection
+    settings: SettingsSection
   };
 
   const handleSectionChange = (section: string) => {
@@ -199,7 +191,7 @@ const AppContent: React.FC = () => {
     if (section === 'dashboard') {
       navigate('/');
     } else {
-      navigate(SECTION_PATHS[section as SectionKey] || `/${section}`);
+      navigate(`/${section}`);
     }
   };
 
@@ -282,10 +274,6 @@ const AppContent: React.FC = () => {
             <Route 
               path="/settings" 
               element={renderSectionWithProps(SettingsSection)} 
-            />
-            <Route 
-              path="/api-docs" 
-              element={renderSectionWithProps(ApiSection)} 
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
