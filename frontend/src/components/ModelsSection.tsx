@@ -1371,16 +1371,16 @@ const VersionSelector = styled.div`
 
 const ModelSizeGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-top: 15px;
   
   ${props => props.theme.media.tablet} {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   }
   
   ${props => props.theme.media.mobile} {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 8px;
   }
 `;
@@ -1399,10 +1399,9 @@ const ModelSizeCard = styled.div<{ selected?: boolean }>`
     ${props => !props.selected && `background: ${props.theme.colors.background.secondary};`}
   }
 
-  text-align: center;
-
   .model-name {
     font-weight: bold;
+    margin-bottom: 4px;
   }
 
   .model-size {
@@ -4618,6 +4617,13 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                           }}
                         >
                           <div className="model-name">{model.name}</div>
+                          <div className="model-size">Size: {model.size}</div>
+                          {model.parameters && (
+                            <div className="model-params">Parameters: {model.parameters}</div>
+                          )}
+                          {model.accuracy && (
+                            <div className="model-accuracy">Accuracy: {model.accuracy}</div>
+                          )}
                         </ModelSizeCard>
                       ))}
                     </ModelSizeGrid>
