@@ -65,6 +65,16 @@ const CreateRow = styled.div`
     gap: 10px;
   }
 
+  input.taken {
+    border-color: #ff6b6b;
+  }
+
+  .name-error {
+    margin-top: -4px;
+    font-size: 12px;
+    color: #ff6b6b;
+  }
+
   input[type='text'] {
     flex: 1;
     min-width: 0;
@@ -201,6 +211,24 @@ const KeyList = styled.div`
     color: ${props => props.theme.colors.text.secondary};
   }
 
+  button.view-all {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    padding: 4px 0;
+    color: #76b900;
+    font-size: 13px;
+    cursor: pointer;
+
+    i {
+      margin-right: 4px;
+    }
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
   .key {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -227,11 +255,27 @@ const KeyList = styled.div`
 
   .meta {
     grid-area: meta;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
     font-size: 12px;
     color: ${props => props.theme.colors.text.secondary};
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+
+  .last-used {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 6px;
+
+    i {
+      font-size: 11px;
+    }
+
+    .ip {
+      font-family: 'Courier New', monospace;
+    }
   }
 
   .name {
@@ -318,6 +362,28 @@ const KeyList = styled.div`
   }
 `;
 
+const AllKeys = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border: 1px solid ${props => props.theme.colors.border.secondary};
+    border-radius: 6px;
+    background: ${props => props.theme.colors.background.tertiary};
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 14px;
+
+    &:focus {
+      outline: none;
+      border-color: ${props => props.theme.colors.nvidia.green};
+    }
+  }
+`;
+
 const PromptBody = styled.div`
   font-size: 14px;
   color: ${props => props.theme.colors.text.primary};
@@ -361,6 +427,21 @@ const PromptButtons = styled.div`
   }
 `;
 
+// "just now", "5 min ago", "3 h ago", "2 days ago", then the date
+const timeAgo = (iso: string): string => {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'at an unknown time';
+  const seconds = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return `on ${new Date(iso).toLocaleDateString()}`;
+};
+
 const ApiKeysCard: React.FC = () => {
   const { addNotification } = useNotifications();
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -377,6 +458,8 @@ const ApiKeysCard: React.FC = () => {
   const [promptError, setPromptError] = useState('');
   const [promptBusy, setPromptBusy] = useState(false);
   const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [showAll, setShowAll] = useState(false);
+  const [keySearch, setKeySearch] = useState('');
 
   const loadKeys = async () => {
     try {
@@ -424,7 +507,7 @@ const ApiKeysCard: React.FC = () => {
   };
 
   const createKey = async () => {
-    if (!name.trim() || creating) return;
+    if (!name.trim() || creating || nameTaken) return;
     if (adminPassword) {
       openPrompt('create');
       return;
@@ -519,7 +602,76 @@ const ApiKeysCard: React.FC = () => {
   };
 
   const origin = window.location.origin;
+  // The card shows the newest key; "View all keys" opens the full list
+  const latestKey = keys.reduce<ApiKey | null>(
+    (newest, k) => (!newest || (k.created_at || '') > (newest.created_at || '') ? k : newest), null);
+  const shownInList = keys.filter(k => {
+    const q = keySearch.trim().toLowerCase();
+    return !q || [k.name, k.prefix, SCOPE_INFO[k.scope]?.label, k.last_used_ip]
+      .some(field => field && field.toLowerCase().includes(q));
+  });
+  // Checked while typing, so a taken name never gets as far as the password dialog
+  const nameTaken = !!name.trim() && keys.some(k => k.name.toLowerCase() === name.trim().toLowerCase());
   const curlExample = (key: string) => `curl -k -H "Authorization: Bearer ${key}" ${origin}/api/models/list`;
+
+  // One key: name + scope, prefix, last use (and creation in the full list), view/revoke
+  const renderKeyRow = (key: ApiKey, showCreated: boolean) => (
+    <div className="key" key={key.id}>
+      <div className="title">
+        <span className="name" title={key.name}>{key.name}</span>
+        <span className="scope" title={SCOPE_INFO[key.scope]?.hint}>{SCOPE_INFO[key.scope]?.label || key.scope}</span>
+      </div>
+      <div className="meta">
+        <span className="prefix">{key.prefix}…</span>
+        <span
+          className="last-used"
+          title={key.last_used_at
+            ? `Last used ${new Date(key.last_used_at).toLocaleString()}${key.last_used_ip ? ` from ${key.last_used_ip}` : ''}`
+            : 'This key has not been used yet'}
+        >
+          <i className="far fa-clock"></i>
+          {key.last_used_at ? (
+            <>
+              <span>Last used {timeAgo(key.last_used_at)}</span>
+              {key.last_used_ip && <span className="ip">· {key.last_used_ip}</span>}
+            </>
+          ) : (
+            <span>Never used</span>
+          )}
+        </span>
+      {showCreated && (
+        <span className="last-used" title={new Date(key.created_at).toLocaleString()}>
+          <i className="far fa-calendar"></i>
+          <span>Created {timeAgo(key.created_at)}</span>
+        </span>
+      )}
+      </div>
+      <div className="buttons">
+        <button
+          className="view"
+          onClick={() => (revealed[key.id]
+            ? setRevealed(prev => { const next = { ...prev }; delete next[key.id]; return next; })
+            : openPrompt('view', key))}
+          disabled={!revealed[key.id] && (!key.viewable || !adminPassword)}
+          title={revealed[key.id] ? 'Hide the key'
+            : !key.viewable ? 'Created before keys could be shown again'
+            : !adminPassword ? 'Set an admin password (sudo jdboard-passwd --admin) to view keys again'
+            : 'Show the key (needs the admin password)'}
+        >
+          <i className={revealed[key.id] ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+        </button>
+        <button className="revoke" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
+          {revoking === key.id ? <i className="fas fa-spinner fa-spin"></i> : 'Revoke'}
+        </button>
+      </div>
+      {revealed[key.id] && (
+        <div className="shown">
+          <code>{revealed[key.id]}</code>
+          <button onClick={() => copy(revealed[key.id])} title="Copy"><i className="fas fa-copy"></i></button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <Card>
@@ -537,12 +689,19 @@ const ApiKeysCard: React.FC = () => {
             maxLength={60}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') createKey(); }}
+            className={nameTaken ? 'taken' : ''}
+            aria-invalid={nameTaken}
           />
-          <PrimaryButton onClick={createKey} disabled={!name.trim() || creating}>
+          <PrimaryButton onClick={createKey} disabled={!name.trim() || creating || nameTaken}>
             <i className={creating ? 'fas fa-spinner fa-spin' : 'fas fa-plus'}></i>
             Create Key
           </PrimaryButton>
         </div>
+        {nameTaken && (
+          <div className="name-error">
+            <i className="fas fa-exclamation-circle"></i> A key named "{name.trim()}" already exists
+          </div>
+        )}
         <div className="scopes" role="radiogroup" aria-label="What the key may do">
           {Object.entries(SCOPE_INFO).map(([value, info]) => (
             <label key={value} title={info.hint}>
@@ -580,46 +739,46 @@ const ApiKeysCard: React.FC = () => {
 
       <KeyList>
         {loaded && keys.length === 0 && <div className="empty">No API keys yet.</div>}
-        {keys.map(key => (
-          <div className="key" key={key.id}>
-            <div className="title">
-              <span className="name" title={key.name}>{key.name}</span>
-              <span className="scope" title={SCOPE_INFO[key.scope]?.hint}>{SCOPE_INFO[key.scope]?.label || key.scope}</span>
-            </div>
-            <div className="meta">
-              <span className="prefix">{key.prefix}…</span>
-              {' · '}
-              {key.last_used_at
-                ? `used ${new Date(key.last_used_at).toLocaleString()}${key.last_used_ip ? ` from ${key.last_used_ip}` : ''}`
-                : 'never used'}
-            </div>
-            <div className="buttons">
-              <button
-                className="view"
-                onClick={() => (revealed[key.id]
-                  ? setRevealed(prev => { const next = { ...prev }; delete next[key.id]; return next; })
-                  : openPrompt('view', key))}
-                disabled={!revealed[key.id] && (!key.viewable || !adminPassword)}
-                title={revealed[key.id] ? 'Hide the key'
-                  : !key.viewable ? 'Created before keys could be shown again'
-                  : !adminPassword ? 'Set an admin password (sudo jdboard-passwd --admin) to view keys again'
-                  : 'Show the key (needs the admin password)'}
-              >
-                <i className={revealed[key.id] ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
-              </button>
-              <button className="revoke" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
-                {revoking === key.id ? <i className="fas fa-spinner fa-spin"></i> : 'Revoke'}
-              </button>
-            </div>
-            {revealed[key.id] && (
-              <div className="shown">
-                <code>{revealed[key.id]}</code>
-                <button onClick={() => copy(revealed[key.id])} title="Copy"><i className="fas fa-copy"></i></button>
-              </div>
-            )}
-          </div>
-        ))}
+        {latestKey && renderKeyRow(latestKey, false)}
+        {keys.length > 1 && (
+          <button className="view-all" onClick={() => { setShowAll(true); setKeySearch(''); }}>
+            <i className="fas fa-list"></i> View all keys ({keys.length})
+          </button>
+        )}
       </KeyList>
+      {showAll && (
+        <Modal isOpen={true} onClose={() => setShowAll(false)} maxWidth="720px">
+          <ModalHeader>
+            <h3>
+              <i className="fas fa-key"></i>
+              API Keys ({keys.length})
+            </h3>
+            <ModalCloseButton onClick={() => setShowAll(false)}>
+              <i className="fas fa-times"></i>
+            </ModalCloseButton>
+          </ModalHeader>
+          <ModalBody>
+            <AllKeys>
+              {keys.length > 5 && (
+                <input
+                  type="text"
+                  className="search"
+                  placeholder="Search by name, prefix, scope or IP"
+                  value={keySearch}
+                  onChange={(e) => setKeySearch(e.target.value)}
+                />
+              )}
+              <KeyList>
+                {shownInList.length === 0 && <div className="empty">No keys match.</div>}
+                {[...shownInList]
+                  .sort((x, y) => (y.created_at || '').localeCompare(x.created_at || ''))
+                  .map(key => renderKeyRow(key, true))}
+              </KeyList>
+            </AllKeys>
+          </ModalBody>
+        </Modal>
+      )}
+
       {prompt && (
         <Modal isOpen={true} onClose={closePrompt} maxWidth="420px">
           <ModalHeader>
