@@ -156,6 +156,16 @@ const NewKey = styled.div`
     font-size: 12px;
   }
 
+  .example {
+    align-items: flex-start;
+
+    pre {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+    }
+  }
+
   pre {
     margin: 8px 0 0;
     padding: 8px 10px;
@@ -481,14 +491,35 @@ const ApiKeysCard: React.FC = () => {
     }
   };
 
-  const copy = (text: string) => {
-    navigator.clipboard.writeText(text).then(
-      () => addNotification({ type: 'success', title: 'Copied', message: 'API key copied to the clipboard' }),
-      () => addNotification({ type: 'error', title: 'Copy Failed', message: 'Select the key and copy it manually' }),
-    );
+  const copy = (text: string, what = 'API key') => {
+    const done = () => addNotification({ type: 'success', title: 'Copied', message: `${what} copied to the clipboard` });
+    const failed = () => addNotification({ type: 'error', title: 'Copy Failed', message: 'Select it and copy it manually' });
+    // The clipboard API isn't available on every page (e.g. plain HTTP); fall back to a hidden text box
+    const fallback = () => {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      try {
+        if (document.execCommand('copy')) { done(); } else { failed(); }
+      } catch {
+        failed();
+      } finally {
+        document.body.removeChild(area);
+      }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
   };
 
   const origin = window.location.origin;
+  const curlExample = (key: string) => `curl -k -H "Authorization: Bearer ${key}" ${origin}/api/models/list`;
 
   return (
     <Card>
@@ -535,7 +566,12 @@ const ApiKeysCard: React.FC = () => {
             <PrimaryButton onClick={() => copy(created.key)}><i className="fas fa-copy"></i> Copy</PrimaryButton>
           </div>
           <div>Example:</div>
-          <pre>{`curl -k -H "Authorization: Bearer ${created.key}" ${origin}/api/models/list`}</pre>
+          <div className="row example">
+            <pre>{curlExample(created.key)}</pre>
+            <button className="plain" onClick={() => copy(curlExample(created.key), 'Example command')} title="Copy the command">
+              <i className="fas fa-copy"></i> Copy
+            </button>
+          </div>
           <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 0 }}>
             <button className="plain" onClick={() => setCreated(null)}>Done</button>
           </div>
