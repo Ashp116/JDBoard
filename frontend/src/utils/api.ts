@@ -4,7 +4,7 @@
  */
 
 // The backend is always reached on the same origin under /api: the Vite dev
-// server proxies it in development and nginx_proxy_TEMPLATE does in production.
+// server proxies it in development and nginx (deploy/nginx-jdboard.conf) does when installed.
 export const getBackendUrl = () => `${window.location.origin}/api`;
 
 // Create a configured axios instance if needed

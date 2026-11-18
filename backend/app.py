@@ -37,6 +37,50 @@ def is_running_as_root():
     """Check if the application is running with root privileges"""
     return os.geteuid() == 0
 
+# Installed service (scripts/install.sh): the backend runs as the unprivileged
+# 'jdboard' user, which may run exactly one root command without a password -
+# the jdboard-admin helper with a fixed set of actions (sudoers rule). In a
+# development checkout it is unset and sudo uses the password typed in the UI.
+PRIVILEGED_HELPER = os.environ.get('JDBOARD_PRIVILEGED_HELPER', '')
+
+
+def passwordless_privileges():
+    return bool(PRIVILEGED_HELPER) and os.path.exists(PRIVILEGED_HELPER)
+
+
+def _helper_action(cmd):
+    """jdboard-admin arguments for a sudo command line, or None if not allowed."""
+    if cmd == ['reboot']:
+        return ['reboot']
+    if cmd == ['shutdown', '-h', 'now']:
+        return ['poweroff']
+    if cmd == ['jtop', '--install-service']:
+        return ['jtop-install-service']
+    if len(cmd) == 3 and cmd[0] == 'systemctl' and cmd[2] == 'jtop.service' and cmd[1] in ('start', 'stop', 'restart'):
+        return [f'jtop-{cmd[1]}']
+    if len(cmd) == 3 and cmd[:2] == ['sh', '-c']:
+        import re as _re
+        match = _re.fullmatch(r'echo ([123]) > /proc/sys/vm/drop_caches', cmd[2])
+        if match:
+            return ['drop-caches', match.group(1)]
+    return None
+
+
+def sudo_run(cmd, password, capture_output=True, text=True, timeout=None):
+    """Run a command as root: via jdboard-admin in the installed service (no
+    password), else `sudo -S` with the password the user typed."""
+    if passwordless_privileges():
+        if cmd == ['-k', 'true']:   # "is the password right?" check - nothing to verify
+            return subprocess.CompletedProcess(cmd, 0, '', '')
+        action = _helper_action(cmd)
+        if action is None:
+            return subprocess.CompletedProcess(cmd, 1, '', f"Not permitted for the jdboard service: {' '.join(cmd)}")
+        return subprocess.run(['sudo', '-n', PRIVILEGED_HELPER] + action,
+                              capture_output=True, text=True, timeout=timeout or 120)
+    return subprocess.run(['sudo', '-S'] + list(cmd), input=(password or '') + '\n',
+                          capture_output=capture_output, text=text, timeout=timeout)
+
+
 app = Flask(__name__)
 
 CORS(app)
@@ -173,7 +217,15 @@ def get_client_ip():
     return fallback_ip
 
 # Configuration constants
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models')
+# Where models, logs and settings live: the repo checkout by default (./backend.sh),
+# /var/lib/jdboard for the installed service (JDBOARD_DATA_DIR)
+DATA_DIR = os.path.abspath(os.environ.get('JDBOARD_DATA_DIR')
+                           or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+MODELS_DIR = os.path.join(DATA_DIR, 'models')
+LOGS_DIR = os.path.join(DATA_DIR, 'logs')
+os.makedirs(os.path.join(MODELS_DIR, 'downloads'), exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
+UPLOAD_FOLDER = MODELS_DIR
 ALLOWED_EXTENSIONS = {'onnx', 'trt', 'engine', 'pb', 'pth', 'pt'}
 MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB max file size
 
@@ -185,15 +237,15 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
 # Initialize components
 system_monitor = SystemMonitor()
-ai_manager = ManagedModelManager()
-request_logger = RequestLogger()
+ai_manager = ManagedModelManager(models_dir=MODELS_DIR)
+request_logger = RequestLogger(logs_dir=LOGS_DIR)
 
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('../logs/dashboard.log'),
+        logging.FileHandler(os.path.join(LOGS_DIR, 'dashboard.log')),
         logging.StreamHandler()
     ]
 )
@@ -354,7 +406,7 @@ def get_system_logs():
         # If filtering parameters are provided, use enhanced log parsing
         if since_timestamp or filter_term:
             logs = []
-            log_file_path = '../logs/app.log'
+            log_file_path = os.path.join(LOGS_DIR, 'app.log')
             
             if os.path.exists(log_file_path):
                 with open(log_file_path, 'r') as f:
@@ -2000,7 +2052,7 @@ def handle_log_subscription(data):
         filter_term = data.get('filter', '')
         
         logs = []
-        log_file_path = '../logs/app.log'
+        log_file_path = os.path.join(LOGS_DIR, 'app.log')
         
         if os.path.exists(log_file_path):
             with open(log_file_path, 'r') as f:
@@ -2058,12 +2110,19 @@ def handle_log_subscription(data):
         })
 
 # System Settings API Endpoints
+@app.route('/system/privileges', methods=['GET'])
+def get_privileges():
+    """Whether admin actions (reboot, shutdown, jtop service, cache) need the
+    user's sudo password. The installed service doesn't."""
+    return jsonify({'success': True, 'passwordless': is_running_as_root() or passwordless_privileges()})
+
 @app.route('/auth/sudo', methods=['POST'])
 def authenticate_sudo():
     """Authenticate sudo password"""
     try:
-        # If already running as root, no password needed
-        if is_running_as_root():
+        # If already running as root (or the installed service, which has
+        # password-less access to its admin helper), no password needed
+        if is_running_as_root() or passwordless_privileges():
             session_id = str(uuid.uuid4())
             logger.info(f"Application running as root - sudo authentication bypassed for session {session_id}")
             return jsonify({
@@ -2081,9 +2140,7 @@ def authenticate_sudo():
         
         # Test sudo password by running a simple command
         import subprocess
-        result = subprocess.run(
-            ['sudo', '-S', '-k', 'true'],
-            input=password + '\n',
+        result = sudo_run(['-k', 'true'], password,
             capture_output=True,
             text=True,
             timeout=10
@@ -2133,7 +2190,7 @@ def get_system_info():
         logger.error(f"Error getting system info: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'config', 'settings.json')
+SETTINGS_FILE = os.path.join(DATA_DIR, 'config', 'settings.json')
 
 @app.route('/settings', methods=['GET'])
 def get_settings():
@@ -2233,15 +2290,13 @@ def reboot_system():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password:
+        if not sudo_password and not passwordless_privileges():
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         # Use a background process to delay reboot slightly to allow response
         def delayed_reboot():
             time.sleep(2)
-            subprocess.run(
-                ['sudo', '-S', 'reboot'],
-                input=sudo_password + '\n',
+            sudo_run(['reboot'], sudo_password,
                 capture_output=True,
                 text=True
             )
@@ -2264,7 +2319,7 @@ def shutdown_system():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password:
+        if not sudo_password and not passwordless_privileges():
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         logger.warning("System shutdown requested")
@@ -2272,9 +2327,7 @@ def shutdown_system():
         # Schedule shutdown in 5 seconds to allow response to be sent
         def delayed_shutdown():
             time.sleep(5)
-            subprocess.run(
-                ['sudo', '-S', 'shutdown', '-h', 'now'],
-                input=sudo_password + '\n',
+            sudo_run(['shutdown', '-h', 'now'], sudo_password,
                 capture_output=True,
                 text=True
             )
@@ -2300,7 +2353,7 @@ def clear_system_cache():
         data = request.json if request.json else {}
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password:
+        if not sudo_password and not passwordless_privileges():
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         logger.info("Clearing system cache")
@@ -2325,9 +2378,7 @@ def clear_system_cache():
                     result = subprocess.run(['sync'], capture_output=True, text=True, timeout=10)
                 else:
                     # Use sudo for cache clearing
-                    result = subprocess.run(
-                        ['sudo', '-S'] + ['sh', '-c', cmd],
-                        input=sudo_password + '\n',
+                    result = sudo_run(['sh', '-c', cmd], sudo_password,
                         capture_output=True,
                         text=True,
                         timeout=10
@@ -2369,15 +2420,13 @@ def install_jtop_service():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password:
+        if not sudo_password and not passwordless_privileges():
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         logger.info("Installing jtop service")
         
         # First, validate the sudo password using the same method as SettingsSection  
-        validate_result = subprocess.run(
-            ['sudo', '-S', '-k', 'true'],
-            input=sudo_password + '\n',
+        validate_result = sudo_run(['-k', 'true'], sudo_password,
             capture_output=True,
             text=True,
             timeout=10
@@ -2391,9 +2440,7 @@ def install_jtop_service():
             }), 401
         
         # Run jtop --install-service
-        result = subprocess.run(
-            ['sudo', '-S', 'jtop', '--install-service'],
-            input=sudo_password + '\n',
+        result = sudo_run(['jtop', '--install-service'], sudo_password,
             capture_output=True,
             text=True,
             timeout=30
@@ -2437,9 +2484,7 @@ def install_jtop_service():
                     })
             else:
                 # Try to start the service manually
-                start_result = subprocess.run(
-                    ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
-                    input=sudo_password + '\n',
+                start_result = sudo_run(['systemctl', 'start', 'jtop.service'], sudo_password,
                     capture_output=True,
                     text=True
                 )
@@ -2486,15 +2531,13 @@ def restart_jtop_service():
         data = request.json
         sudo_password = data.get('sudo_password', '')
         
-        if not sudo_password:
+        if not sudo_password and not passwordless_privileges():
             return jsonify({'success': False, 'error': 'Sudo password required'}), 400
         
         logger.info("Restarting jtop service to fix broken pipe")
         
         # First, validate the sudo password using the same method as SettingsSection
-        validate_result = subprocess.run(
-            ['sudo', '-S', '-k', 'true'],
-            input=sudo_password + '\n',
+        validate_result = sudo_run(['-k', 'true'], sudo_password,
             capture_output=True,
             text=True,
             timeout=10
@@ -2507,9 +2550,7 @@ def restart_jtop_service():
             }), 401
         
         # Stop the service first
-        stop_result = subprocess.run(
-            ['sudo', '-S', 'systemctl', 'stop', 'jtop.service'],
-            input=sudo_password + '\n',
+        stop_result = sudo_run(['systemctl', 'stop', 'jtop.service'], sudo_password,
             capture_output=True,
             text=True,
             timeout=10
@@ -2519,9 +2560,7 @@ def restart_jtop_service():
         time.sleep(2)
         
         # Start the service
-        start_result = subprocess.run(
-            ['sudo', '-S', 'systemctl', 'start', 'jtop.service'],
-            input=sudo_password + '\n',
+        start_result = sudo_run(['systemctl', 'start', 'jtop.service'], sudo_password,
             capture_output=True,
             text=True,
             timeout=10
@@ -3371,7 +3410,7 @@ def _handle_sigterm(signum, frame):
 if __name__ == '__main__':
     # Ensure directories exist
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs('../logs', exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
 
     # Remove files left by downloads/uploads interrupted by a crash or restart
     try:

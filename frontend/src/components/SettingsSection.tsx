@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { SettingsSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
 import { useNotifications } from '../contexts/NotificationContext';
 import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
@@ -619,6 +620,11 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
   };
 
   const requireSudo = async (action) => {
+    // The installed service needs no password for these actions
+    if (await isPasswordlessSudo()) {
+      return PASSWORDLESS;
+    }
+
     // Check if sudo session is still valid (15 minutes timeout)
     const currentTime = Date.now();
     const sudoTimeout = 15 * 60 * 1000; // 15 minutes

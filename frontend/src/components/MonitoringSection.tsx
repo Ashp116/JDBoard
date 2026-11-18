@@ -16,6 +16,7 @@ import {
 import { Line, Bar } from 'react-chartjs-2';
 import type { SystemData, BufferedData, BufferStats, MonitoringSectionProps } from '../types';
 import { getBackendUrl } from '../utils/api';
+import { isPasswordlessSudo, PASSWORDLESS } from '../utils/privileges';
 import { useNotifications } from '../contexts/NotificationContext';
 import Modal, { ModalHeader, ModalBody, ModalFooter, ModalCloseButton } from './shared/Modal';
 
@@ -429,11 +430,17 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
 
   // Cache clearing handler
   const handleClearCache = async () => {
+    // The installed service needs no password: clear straight away
+    if (await isPasswordlessSudo()) {
+      executeCacheClear(PASSWORDLESS);
+      return;
+    }
     setShowSudoModal(true);
   };
 
-  const executeCacheClear = async () => {
-    if (!sudoPassword.trim()) {
+  const executeCacheClear = async (passwordOverride?: string) => {
+    const password = passwordOverride ?? sudoPassword;
+    if (!password.trim()) {
       addNotification({
         type: 'error',
         title: 'Password Required',
@@ -452,7 +459,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sudo_password: sudoPassword
+          sudo_password: password
         })
       });
 
@@ -1270,7 +1277,7 @@ const MonitoringSection: React.FC<MonitoringSectionProps> = ({ systemData, socke
           <button
             type="button"
             className="confirm"
-            onClick={executeCacheClear}
+            onClick={() => executeCacheClear()}
             disabled={!sudoPassword.trim()}
           >
             Clear Cache

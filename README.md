@@ -18,29 +18,49 @@ JDBoard is a full-stack application that combines a React TypeScript frontend wi
 - [jetson-stats](https://github.com/rbonghi/jetson_stats) (`sudo pip3 install -U jetson-stats`)
 - Node.js 20+ only if you build the frontend yourself (otherwise the installer downloads a prebuilt one)
 
-### Run as a service (starts on boot)
+### Install (runs on boot, behind nginx)
 
 ```bash
 git clone https://github.com/Ashp116/JDBoard.git
 cd JDBoard
-sudo ./scripts/install-service.sh                 # dashboard on http://<jetson-ip>/
-sudo ./scripts/install-service.sh --with-pytorch  # also install PyTorch + Ultralytics (~3 GB) for model inference
+sudo ./scripts/install.sh                  # dashboard on http://<jetson-ip>/
+sudo ./scripts/install.sh --with-pytorch   # also install PyTorch + Ultralytics (~3 GB) for model inference
 ```
 
-The installer checks jtop, creates `.venv`, builds the frontend, asks you for a
-login, and installs `jdboard.service` (runs as your user, restarts on crash).
-Options: `--port N` (default 80), `--rebuild-frontend` (after pulling updates),
-`--no-password`, `--uninstall`.
+What it sets up:
+
+| Where | What |
+|---|---|
+| `/opt/jdboard` | The app: backend, built frontend, Python environment (owned by root) |
+| `/var/lib/jdboard` | Models, logs and settings (owned by the `jdboard` user) |
+| `/etc/jdboard` | `jdboard.env` (settings) and `htpasswd` (the dashboard login) |
+| `jdboard.service` | The backend, running as the unprivileged **`jdboard`** user on `127.0.0.1` only |
+| nginx | Serves the frontend, forwards `/api` to the backend, and checks the login |
+
+The `jdboard` user has no password or login shell and can't read your home folder.
+Its only root access is `/opt/jdboard/bin/jdboard-admin`, which can reboot, power off,
+drop caches and manage `jtop.service` and nothing else, so those dashboard actions
+don't ask for a password. The installer adds you to the `jdboard` group so you can
+reach the models folder over SSH (log in again first).
+
+If you already have a checkout with a `.venv` and models, the installer copies them
+(nothing is re-downloaded) and leaves the originals in place.
 
 ```bash
-journalctl -u jdboard -f                # logs
-sudo systemctl restart jdboard          # restart (e.g. after git pull)
-sudo ./scripts/set-password.sh          # change the login
+journalctl -u jdboard -f                              # logs
+sudo systemctl restart jdboard                        # restart
+sudo jdboard-passwd                                   # change the dashboard login
+sudo jdboard-pip install <package>                    # add a library for a custom script
+git pull && sudo ./scripts/install.sh --rebuild-frontend   # update
+sudo ./scripts/install.sh --uninstall                 # remove (keeps models; --purge removes them too)
 ```
 
-> **Security:** JDBoard has a web terminal and can kill processes and reboot the
-> device, so keep the password on. To reach it from outside your network, put it
-> behind HTTPS (e.g. nginx or a VPN) rather than forwarding the port.
+Other options: `--port N` (nginx port, default 80), `--backend-port N` (default 5001),
+`--fresh-venv`, `--no-migrate`.
+
+> **Security:** JDBoard has a web terminal and can reboot the device. Keep the login,
+> and to reach it from outside your network add HTTPS to the nginx site (or use a VPN)
+> rather than forwarding the port.
 
 ### Development
 

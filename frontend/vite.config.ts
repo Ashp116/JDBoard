@@ -15,7 +15,7 @@ export default defineConfig({
     // true allows any host - I use it for development/testing
     allowedHosts: true,
     // Serve the backend under /api on the same origin (same layout as
-    // nginx_proxy_TEMPLATE). The browser never talks to :5000 directly, which
+    // deploy/nginx-jdboard.conf). The browser never talks to :5000 directly, which
     // avoids CORS and Chrome's Private Network Access blocks.
     proxy: {
       '/api/socket.io': {

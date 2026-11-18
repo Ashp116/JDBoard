@@ -1,0 +1,28 @@
+# Installed by scripts/install.sh as /etc/systemd/system/jdboard.service
+[Unit]
+Description=JDBoard - Jetson dashboard (backend)
+Documentation=https://github.com/Ashp116/JDBoard
+After=network-online.target jtop.service
+Wants=network-online.target jtop.service
+
+[Service]
+Type=simple
+User=jdboard
+Group=jdboard
+# GPU (video, render), jtop's socket, and reading the system journal for the logs view
+SupplementaryGroups=video render jtop systemd-journal
+WorkingDirectory=/opt/jdboard/backend
+EnvironmentFile=/etc/jdboard/jdboard.env
+ExecStart=/opt/jdboard/venv/bin/python app.py
+# New files in /var/lib/jdboard stay group-writable for members of 'jdboard'
+UMask=0002
+# The service never needs anyone's home directory
+ProtectHome=yes
+PrivateTmp=yes
+Restart=on-failure
+RestartSec=5
+# Give running model exports time to stop cleanly
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

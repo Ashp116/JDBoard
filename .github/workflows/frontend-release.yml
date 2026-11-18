@@ -1,5 +1,5 @@
 # Builds the frontend and attaches it to GitHub releases as
-# jdboard-frontend.tar.gz, so scripts/install-service.sh works on a Jetson
+# jdboard-frontend.tar.gz, so scripts/install.sh works on a Jetson
 # without Node. Also runs on pull requests as a type-check/build test.
 name: Frontend build
 
