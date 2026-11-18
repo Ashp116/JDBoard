@@ -3298,8 +3298,9 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                       No logs yet for this download...
                     </div>
                   ) : (
+                    // Oldest first, newest at the bottom (the terminal auto-scrolls there)
                     logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name))
-                       .slice().reverse().map(log => (
+                       .map(log => (
                       <LogEntry key={log.id} className={log.type}>
                         <span style={{ opacity: 0.7, marginRight: '8px' }}>
                           [{log.timestamp}]
@@ -3310,7 +3311,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   )}
                   {/* Show all logs if no specific download logs found */}
                   {logs.filter(log => log.message.includes(downloadId) || log.message.includes(download.name)).length === 0 && logs.length > 0 && (
-                    logs.slice().reverse().map(log => (
+                    logs.map(log => (
                       <LogEntry key={log.id} className={log.type}>
                         <span style={{ opacity: 0.7, marginRight: '8px' }}>
                           [{log.timestamp}]
