@@ -19,6 +19,13 @@ interface ModelInfo {
   loaded?: boolean;
   status?: string;
   upload_date?: string;
+  created_at?: string;      // when it was added (registry)
+  last_used?: string | null;
+  inference_count?: number;
+  original_filename?: string;
+  file_hash?: string;
+  workspace?: number;
+  load_info?: { loaded_at?: string; load_time?: number };
   custom_script_path?: string | null;
   inference_handler?: 'default' | 'custom';
   script_status?: 'none' | 'pending' | 'active' | 'failed';
@@ -143,6 +150,64 @@ const PRECISION_OPTIONS: Record<string, { value: Precision; label: string; hint:
   ],
 };
 const DEFAULT_PRECISION: Record<string, Precision> = { PyTorch: 'fp32', TensorRT: 'fp16' };
+// Models tab: sort and filter options (remembered per browser)
+type ModelSort = 'newest' | 'oldest' | 'name-asc' | 'name-desc' | 'size-desc' | 'size-asc'
+               | 'recently-used' | 'most-used' | 'loaded-first';
+const MODEL_SORTS: { value: ModelSort; label: string }[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'name-asc', label: 'Name (A–Z)' },
+  { value: 'name-desc', label: 'Name (Z–A)' },
+  { value: 'size-desc', label: 'Largest first' },
+  { value: 'size-asc', label: 'Smallest first' },
+  { value: 'recently-used', label: 'Recently used' },
+  { value: 'most-used', label: 'Most used' },
+  { value: 'loaded-first', label: 'Loaded first' },
+];
+// Filters are checkbox lists; an empty list means "all"
+type ModelView = {
+  sort: ModelSort;
+  framework: string[];
+  status: ('loaded' | 'unloaded')[];
+  handler: ('custom' | 'default')[];
+};
+const DEFAULT_MODEL_VIEW: ModelView = { sort: 'newest', framework: [], status: [], handler: [] };
+const MODEL_VIEW_KEY = 'jdboard.models.view.v2';
+const FRAMEWORK_LABELS: Record<string, string> = { tensorrt: 'TensorRT', pytorch: 'PyTorch', onnx: 'ONNX', tensorflow: 'TensorFlow', keras: 'Keras' };
+
+const loadModelView = (): ModelView => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MODEL_VIEW_KEY) || '{}');
+    const list = (value: unknown) => (Array.isArray(value) ? value.filter(v => typeof v === 'string') : []);
+    return {
+      sort: MODEL_SORTS.some(o => o.value === saved.sort) ? saved.sort : DEFAULT_MODEL_VIEW.sort,
+      framework: list(saved.framework),
+      status: list(saved.status) as ModelView['status'],
+      handler: list(saved.handler) as ModelView['handler'],
+    };
+  } catch {
+    return DEFAULT_MODEL_VIEW;
+  }
+};
+
+const addedAt = (m: ModelInfo) => Date.parse(m.created_at || m.upload_date || '') || 0;
+
+const compareModels = (sort: ModelSort) => (a: ModelInfo, b: ModelInfo): number => {
+  const byName = a.id.localeCompare(b.id, undefined, { sensitivity: 'base', numeric: true });
+  switch (sort) {
+    case 'oldest': return addedAt(a) - addedAt(b) || byName;
+    case 'name-asc': return byName;
+    case 'name-desc': return -byName;
+    case 'size-desc': return (b.file_size || 0) - (a.file_size || 0) || byName;
+    case 'size-asc': return (a.file_size || 0) - (b.file_size || 0) || byName;
+    case 'recently-used': return (Date.parse(b.last_used || '') || 0) - (Date.parse(a.last_used || '') || 0) || byName;
+    case 'most-used': return (b.inference_count || 0) - (a.inference_count || 0) || byName;
+    case 'loaded-first': return Number(!!b.loaded) - Number(!!a.loaded) || byName;
+    case 'newest':
+    default: return addedAt(b) - addedAt(a) || byName;
+  }
+};
+
 // Background for selected options/buttons in the Add Model dialog. The theme's
 // NVIDIA green (#76B900) is too light for white text (2.4:1); this is 5.1:1.
 const SELECTED_GREEN = '#4E7A00';
@@ -214,16 +279,242 @@ const SectionHeader = styled.div`
   }
 `;
 
-const SearchAndActions = styled.div`
+const CardMenuWrapper = styled.div`
+  position: relative;
+`;
+
+const CardMenu = styled.div`
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  background: ${props => props.theme.colors.background.secondary};
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
   display: flex;
-  align-items: center;
-  gap: 15px;
-  
-  ${props => props.theme.media.mobile} {
-    flex-direction: column;
-    align-items: stretch;
+  flex-direction: column;
+
+  button {
+    display: flex;
+    align-items: center;
     gap: 10px;
     width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 5px;
+    background: none;
+    color: ${props => props.theme.colors.text.primary};
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+
+    i {
+      width: 14px;
+      color: ${props => props.theme.colors.nvidia.green};
+    }
+
+    &:hover, &:focus-visible {
+      background: ${props => props.theme.colors.background.tertiary};
+      outline: none;
+    }
+  }
+`;
+
+const InfoGrid = styled.dl`
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 9px 18px;
+  margin: 0;
+  font-size: 14px;
+
+  dt {
+    color: ${props => props.theme.colors.text.secondary};
+  }
+
+  dd {
+    margin: 0;
+    color: ${props => props.theme.colors.text.primary};
+    word-break: break-word;
+  }
+
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    color: #d4d4d4;
+    background: ${props => props.theme.colors.background.tertiary};
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
+    gap: 2px;
+
+    dd {
+      margin-bottom: 8px;
+    }
+  }
+`;
+
+const ModelsToolbar = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin: -10px 0 22px;
+
+  .count {
+    font-size: 13px;
+    color: ${props => props.theme.colors.text.secondary};
+    white-space: nowrap;
+  }
+
+  ${props => props.theme.media.mobile} {
+    margin-top: -4px;
+
+    .count {
+      order: 3;
+      width: 100%;
+    }
+  }
+`;
+
+const FiltersWrapper = styled.div`
+  position: relative;
+`;
+
+const FiltersButton = styled.button<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: 6px;
+  border: 1px solid ${props => props.$active ? props.theme.colors.nvidia.green : props.theme.colors.border.secondary};
+  background: ${props => props.theme.colors.background.secondary};
+  color: ${props => props.theme.colors.text.primary};
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+
+  i {
+    color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  .badge {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: #4E7A00;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+`;
+
+const FiltersPanel = styled.div`
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  width: min(460px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 8px;
+  background: ${props => props.theme.colors.background.secondary};
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+
+  fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  legend {
+    padding: 0;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: ${props => props.theme.colors.text.secondary};
+  }
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: ${props => props.theme.colors.text.primary};
+    cursor: pointer;
+  }
+
+  input {
+    accent-color: #4E7A00;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .none {
+    font-size: 12px;
+    color: ${props => props.theme.colors.text.secondary};
+  }
+
+  .footer {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px solid ${props => props.theme.colors.border.secondary};
+
+    button {
+      background: none;
+      border: none;
+      padding: 4px 0;
+      color: #76b900;
+      font-size: 13px;
+      cursor: pointer;
+
+      &:disabled {
+        color: ${props => props.theme.colors.text.secondary};
+        cursor: default;
+      }
+    }
+
+    .done {
+      padding: 6px 16px;
+      border-radius: 6px;
+      background: #4E7A00;
+      color: #fff;
+    }
+  }
+
+  ${props => props.theme.media.mobile} {
+    grid-template-columns: 1fr;
   }
 `;
 
@@ -2107,6 +2398,23 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [filteredModels, setFilteredModels] = useState<ModelInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [modelView, setModelView] = useState<ModelView>(loadModelView);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Card "..." menu (model id whose menu is open) and the Info dialog
+  const [cardMenu, setCardMenu] = useState<string | null>(null);
+  const [infoModel, setInfoModel] = useState<string | null>(null);
+  const filtersRef = useRef<HTMLDivElement>(null);
+  const toggleInList = <K extends 'framework' | 'status' | 'handler'>(key: K, value: ModelView[K][number]) => {
+    const current = modelView[key] as string[];
+    updateModelView({ [key]: current.includes(value) ? current.filter(v => v !== value) : [...current, value] } as Partial<ModelView>);
+  };
+  const updateModelView = (change: Partial<ModelView>) => {
+    setModelView(prev => {
+      const next = { ...prev, ...change };
+      try { localStorage.setItem(MODEL_VIEW_KEY, JSON.stringify(next)); } catch { /* private mode etc. */ }
+      return next;
+    });
+  };
   const [loading, setLoading] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(true); // Track initial model fetch
   const [dragOver, setDragOver] = useState(false);
@@ -2578,19 +2886,58 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
     };
   }, [activeDownloads.size > 0, socket]);
 
-  // Filter models based on search query
+  // Search, filter and sort the model list
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFilteredModels(models);
-    } else {
-      const filtered = models.filter(model => 
-        model.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        model.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        model.framework.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredModels(filtered);
-    }
-  }, [models, searchQuery]);
+    const query = searchQuery.trim().toLowerCase();
+    const filtered = models.filter(model => {
+      if (query && ![model.id, model.type, model.framework, FRAMEWORK_LABELS[model.framework],
+                     model.original_filename, model.precision]
+            .some(field => field && field.toLowerCase().includes(query))) {
+        return false;
+      }
+      if (modelView.framework.length && !modelView.framework.includes(model.framework)) return false;
+      if (modelView.status.length && !modelView.status.includes(model.loaded ? 'loaded' : 'unloaded')) return false;
+      if (modelView.handler.length && !modelView.handler.includes(model.custom_script_path ? 'custom' : 'default')) return false;
+      return true;
+    });
+    filtered.sort(compareModels(modelView.sort));
+    setFilteredModels(filtered);
+  }, [models, searchQuery, modelView]);
+
+  const frameworksPresent = Array.from(new Set(models.map(m => m.framework))).sort();
+  const activeFilterCount = modelView.framework.length + modelView.status.length + modelView.handler.length;
+  const viewIsFiltered = activeFilterCount > 0;
+  const clearFilters = () => updateModelView({ framework: [], status: [], handler: [] });
+
+  // Close a card's "..." menu on an outside click or Escape
+  useEffect(() => {
+    if (!cardMenu) return undefined;
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as Element).closest?.('[data-card-menu]')) setCardMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCardMenu(null); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [cardMenu]);
+
+  // Close the filters panel on an outside click or Escape
+  useEffect(() => {
+    if (!filtersOpen) return undefined;
+    const onClick = (e: MouseEvent) => {
+      if (filtersRef.current && !filtersRef.current.contains(e.target as Node)) setFiltersOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFiltersOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [filtersOpen]);
 
   // Search handlers
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3588,30 +3935,109 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
           <i className="fas fa-brain"></i>
           AI Models
         </h2>
-        <SearchAndActions>
-          <SearchContainer>
-            <SearchInput
-              type="text"
-              placeholder="Search models by name, type, or framework..."
-              value={searchQuery}
-              onChange={handleSearchChange}
-            />
-            {searchQuery ? (
-              <ClearSearch onClick={clearSearch}>
-                <i className="fas fa-times"></i>
-              </ClearSearch>
-            ) : (
-              <SearchIcon>
-                <i className="fas fa-search"></i>
-              </SearchIcon>
-            )}
-          </SearchContainer>
-          <AddButton onClick={() => setShowModal(true)}>
-            <i className="fas fa-plus"></i>
-            Add Model
-          </AddButton>
-        </SearchAndActions>
       </SectionHeader>
+
+      <ModelsToolbar>
+        <FiltersWrapper ref={filtersRef}>
+          <FiltersButton
+            type="button"
+            $active={filtersOpen || viewIsFiltered}
+            onClick={() => setFiltersOpen(open => !open)}
+            aria-expanded={filtersOpen}
+            aria-label="Sort and filter models"
+            title="Sort and filter"
+          >
+            <i className="fas fa-sliders-h"></i>
+            {activeFilterCount > 0 && <span className="badge">{activeFilterCount}</span>}
+          </FiltersButton>
+          {filtersOpen && (
+            <FiltersPanel role="dialog" aria-label="Sort and filter models">
+              <fieldset>
+                <legend>Sort by</legend>
+                {MODEL_SORTS.map(option => (
+                  <label key={option.value}>
+                    <input type="radio" name="model-sort" checked={modelView.sort === option.value}
+                           onChange={() => updateModelView({ sort: option.value })} />
+                    {option.label}
+                  </label>
+                ))}
+              </fieldset>
+              <div className="filters">
+                <fieldset>
+                  <legend>Framework</legend>
+                  {frameworksPresent.length === 0 && <span className="none">No models yet</span>}
+                  {frameworksPresent.map(fw => (
+                    <label key={fw}>
+                      <input type="checkbox" checked={modelView.framework.includes(fw)}
+                             onChange={() => toggleInList('framework', fw)} />
+                      {FRAMEWORK_LABELS[fw] || fw}
+                    </label>
+                  ))}
+                </fieldset>
+                <fieldset>
+                  <legend>Status</legend>
+                  <label>
+                    <input type="checkbox" checked={modelView.status.includes('loaded')}
+                           onChange={() => toggleInList('status', 'loaded')} />
+                    Loaded
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={modelView.status.includes('unloaded')}
+                           onChange={() => toggleInList('status', 'unloaded')} />
+                    Not loaded
+                  </label>
+                </fieldset>
+                <fieldset>
+                  <legend>Inference</legend>
+                  <label>
+                    <input type="checkbox" checked={modelView.handler.includes('custom')}
+                           onChange={() => toggleInList('handler', 'custom')} />
+                    Custom script
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={modelView.handler.includes('default')}
+                           onChange={() => toggleInList('handler', 'default')} />
+                    Default
+                  </label>
+                </fieldset>
+              </div>
+              <div className="footer">
+                <button type="button" onClick={clearFilters} disabled={!viewIsFiltered}>Clear filters</button>
+                <button type="button" className="done" onClick={() => setFiltersOpen(false)}>Done</button>
+              </div>
+            </FiltersPanel>
+          )}
+        </FiltersWrapper>
+
+        <SearchContainer>
+          <SearchInput
+            type="text"
+            placeholder="Search models by name, file, framework..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+          />
+          {searchQuery ? (
+            <ClearSearch onClick={clearSearch}>
+              <i className="fas fa-times"></i>
+            </ClearSearch>
+          ) : (
+            <SearchIcon>
+              <i className="fas fa-search"></i>
+            </SearchIcon>
+          )}
+        </SearchContainer>
+
+        <AddButton onClick={() => setShowModal(true)}>
+          <i className="fas fa-plus"></i>
+          Add Model
+        </AddButton>
+        <div className="count">
+          {filteredModels.length === models.length
+            ? `${models.length} model${models.length === 1 ? '' : 's'}`
+            : `Showing ${filteredModels.length} of ${models.length}`}
+        </div>
+
+      </ModelsToolbar>
 
       {/* Active Downloads Section */}
       {activeDownloads.size > 0 && (
@@ -3727,13 +4153,22 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
       ) : filteredModels.length === 0 ? (
         <EmptyState>
           <i className="fas fa-search"></i>
-          <h3>No Models Match Your Search</h3>
-          <p>Try adjusting your search terms or clear the search to see all models</p>
+          <h3>No Models Match</h3>
+          <p>No model matches your search{viewIsFiltered ? ' and filters' : ''}.</p>
+          <button
+            type="button"
+            onClick={() => { setSearchQuery(''); clearFilters(); }}
+            style={{ marginTop: '12px', background: 'none', border: '1px solid #76b900', color: '#76b900',
+                     padding: '8px 14px', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            Show all models
+          </button>
         </EmptyState>
       ) : (
         <ModelsList>
           {filteredModels.map((model) => (
-            <ModelCard key={model.id}>
+            <ModelCard key={model.id}
+              style={cardMenu === model.id ? { position: 'relative', zIndex: 30 } : undefined}>
               <div className="model-header">
                 {editingModel === model.id ? (
                   <EditNameContainer>
@@ -3788,14 +4223,28 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                           <><i className="fas fa-spinner fa-spin"></i> {BUSY_LABEL[modelBusy.get(model.id)!]}</>
                         ) : (model.loaded ? 'Loaded' : 'Not Loaded')}
                       </span>
-                      <button 
-                        className="edit-header"
-                        onClick={() => handleEditModelName(model.id, model.id)}
-                        disabled={editingModel !== null}
-                        title="Edit model ID"
-                      >
-                        <i className="fas fa-ellipsis-h"></i>
-                      </button>
+                      <CardMenuWrapper data-card-menu>
+                        <button
+                          className="edit-header"
+                          onClick={() => setCardMenu(open => (open === model.id ? null : model.id))}
+                          disabled={editingModel !== null}
+                          title="More"
+                          aria-haspopup="menu"
+                          aria-expanded={cardMenu === model.id}
+                        >
+                          <i className="fas fa-ellipsis-h"></i>
+                        </button>
+                        {cardMenu === model.id && (
+                          <CardMenu role="menu">
+                            <button role="menuitem" onClick={() => { setCardMenu(null); handleEditModelName(model.id, model.id); }}>
+                              <i className="fas fa-pen"></i> Rename
+                            </button>
+                            <button role="menuitem" onClick={() => { setCardMenu(null); setInfoModel(model.id); }}>
+                              <i className="fas fa-info-circle"></i> Info
+                            </button>
+                          </CardMenu>
+                        )}
+                      </CardMenuWrapper>
                     </div>
                   </>
                 )}
@@ -3853,12 +4302,6 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   >
                     <span className="label"><i className="fas fa-exclamation-circle"></i> Can't load:</span>
                     <span className="value" style={{ whiteSpace: 'normal', textAlign: 'right' }}>{model.load_problem}</span>
-                  </div>
-                )}
-                {model.upload_date && (
-                  <div className="info-row">
-                    <span className="label">Added:</span>
-                    <span className="value">{new Date(model.upload_date).toLocaleDateString()}</span>
                   </div>
                 )}
               </div>
@@ -4151,7 +4594,7 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
                   <option value="">Select YOLO Version</option>
                   {YOLO_VERSIONS.map((version) => (
                     <option key={version.version} value={version.version}>
-                      {version.version} - {version.description}
+                      {version.version}
                     </option>
                   ))}
                 </select>
@@ -4457,6 +4900,88 @@ const ModelsSection: React.FC<ModelsSectionProps> = ({ systemData, socket, isCon
         </Modal>
       )}
       
+      {/* Model Info Modal */}
+      {infoModel && (() => {
+        const m = models.find(x => x.id === infoModel);
+        if (!m) return null;
+        const when = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : 'Never');
+        const fileName = (path?: string | null) => (path ? path.split('/').pop() : '');
+        const handlerText = m.script_status === 'failed'
+          ? 'Custom script failed (using default)'
+          : m.custom_script_path ? 'Custom script' : 'Default';
+        const rows: [string, React.ReactNode][] = [
+          ['Model ID', m.id],
+          ['Status', m.loaded ? 'Loaded' : 'Not loaded'],
+          ['Framework', FRAMEWORK_LABELS[m.framework] || m.framework],
+          ['Type', m.type],
+          ['Inference', handlerText],
+          ...(m.precision ? [['Precision', m.precision.toUpperCase()] as [string, React.ReactNode]] : []),
+          ...(m.imgsz ? [['Image size', `${m.imgsz}px`] as [string, React.ReactNode]] : []),
+          ...(m.workspace ? [['TensorRT workspace', `${m.workspace} GB`] as [string, React.ReactNode]] : []),
+          ...(m.calibration ? [['INT8 calibration', m.calibration === 'coco' ? 'COCO sample' : 'Custom images'] as [string, React.ReactNode]] : []),
+          ['Size', formatFileSize(m.file_size)],
+          ['Added', when(m.created_at || m.upload_date)],
+          ['Runs', String(m.inference_count || 0)],
+          ['Last used', when(m.last_used)],
+          ...(m.loaded && m.load_info?.loaded_at
+            ? [['Loaded at', `${when(m.load_info.loaded_at)}${m.load_info.load_time != null ? ` (took ${m.load_info.load_time.toFixed(1)} s)` : ''}`] as [string, React.ReactNode]]
+            : []),
+          ...(m.original_filename ? [['Original file', m.original_filename] as [string, React.ReactNode]] : []),
+          ['Model file', <code key="f" title={m.file_path}>{fileName(m.file_path)}</code>],
+          ...(m.custom_script_path ? [['Script file', <code key="s" title={m.custom_script_path}>{fileName(m.custom_script_path)}</code>] as [string, React.ReactNode]] : []),
+          ...(m.file_hash ? [['SHA-256', <code key="h" title={m.file_hash}>{m.file_hash.slice(0, 16)}…</code>] as [string, React.ReactNode]] : []),
+        ];
+        return (
+          <Modal isOpen={true} onClose={() => setInfoModel(null)} maxWidth="520px">
+            <ModalHeader>
+              <h3>
+                <i className="fas fa-info-circle"></i>
+                {m.id}
+              </h3>
+              <ModalCloseButton onClick={() => setInfoModel(null)}>
+                <i className="fas fa-times"></i>
+              </ModalCloseButton>
+            </ModalHeader>
+            <ModalBody>
+              <InfoGrid>
+                {rows.map(([label, value]) => (
+                  <React.Fragment key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </React.Fragment>
+                ))}
+              </InfoGrid>
+              {m.script_status === 'failed' && m.script_error && (
+                <ScriptErrorPanel style={{ marginTop: '14px' }}>
+                  <div className="message">
+                    <i className="fas fa-exclamation-triangle"></i>
+                    <span>{m.script_error}</span>
+                  </div>
+                </ScriptErrorPanel>
+              )}
+              {m.load_problem && !m.loaded && (
+                <ScriptErrorPanel style={{ marginTop: '14px' }}>
+                  <div className="message">
+                    <i className="fas fa-exclamation-circle"></i>
+                    <span>{m.load_problem}</span>
+                  </div>
+                </ScriptErrorPanel>
+              )}
+            </ModalBody>
+            <ModalFooter>
+              <ActionButtons>
+                <Button variant="secondary" onClick={() => { setInfoModel(null); openScriptEditor(m); }}>
+                  Inference Script
+                </Button>
+                <Button variant="primary" onClick={() => setInfoModel(null)}>
+                  Close
+                </Button>
+              </ActionButtons>
+            </ModalFooter>
+          </Modal>
+        );
+      })()}
+
       {/* Rename Confirmation Modal */}
       {showRenameConfirm && pendingRename && (
         <Modal isOpen={true} onClose={handleCancelRename} maxWidth="450px">
