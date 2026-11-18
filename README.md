@@ -69,6 +69,36 @@ your own certificate at `/etc/jdboard/tls/jdboard.crt` / `jdboard.key` and reloa
 > **Security:** JDBoard has a web terminal and can reboot the device. Keep the login,
 > and to reach it from outside your network use a VPN rather than forwarding the port.
 
+### API keys (bots and scripts)
+
+Programs use an API key instead of the dashboard login. Create one in
+**Settings → API Keys** (it's shown once), choosing what it may do:
+
+| Scope | Allows |
+|---|---|
+| Inference only | list models, load/unload them, run inference |
+| Read only | every read (monitoring, models, logs, live Socket.IO updates); no changes |
+| Full access | everything except the web terminal and managing keys (admin actions still need the admin password) |
+
+Send it as a Bearer token, and trust the Jetson's certificate
+(copy `/etc/jdboard/tls/jdboard.crt` to the machine running the bot):
+
+```bash
+curl --cacert jdboard.crt -H "Authorization: Bearer jdb_..." https://jetson.local/api/models/list
+curl --cacert jdboard.crt -H "Authorization: Bearer jdb_..." -F image=@photo.jpg https://jetson.local/api/inference/YOLOv11n
+```
+
+```python
+import requests
+r = requests.post("https://jetson.local/api/inference/YOLOv11n",
+                  headers={"Authorization": "Bearer jdb_..."},
+                  files={"image": open("photo.jpg", "rb")}, verify="jdboard.crt")
+print(r.json()["data"]["result"]["predictions"])
+```
+
+Keys are stored hashed in `/var/lib/jdboard/config/api_keys.json` and can be revoked
+any time; a client sending 10 wrong keys in a minute has its keys refused for 10 minutes.
+
 ### Development
 
 ```bash
