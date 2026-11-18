@@ -55,7 +55,7 @@ sudo systemctl restart jdboard                        # restart
 sudo jdboard-passwd                                   # change the dashboard login
 sudo jdboard-passwd --admin                           # set the admin password (--admin --remove to drop it)
 sudo jdboard-pip install <package>                    # add a library for a custom script
-git pull && sudo ./scripts/install.sh --rebuild-frontend   # update
+git pull && sudo ./scripts/install.sh                     # update (rebuilds the frontend if it changed)
 sudo ./scripts/install.sh --uninstall                 # remove (keeps models; --purge removes them too)
 ```
 

@@ -230,11 +230,33 @@ NODE_MAJOR=""
 if [ -n "$ADMIN_USER" ] && [ "$ADMIN_USER" != root ]; then
     NODE_MAJOR="$(as_admin "$NODE_ENV_CMD; node -p 'process.versions.node.split(\".\")[0]' 2>/dev/null" || true)"
 fi
-if [ -f "$DIST/index.html" ] && [ "$REBUILD_FRONTEND" -eq 0 ]; then
-    echo "Using the existing build in frontend/dist (--rebuild-frontend to rebuild)"
-elif [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -ge 20 ]; then
-    echo "Building with Node $NODE_MAJOR"
+# Which frontend source a build came from: the git tree of frontend/ plus any
+# uncommitted changes there. A build is only reused if it matches, so an old
+# build lying in frontend/dist (another branch, before a git pull) is never installed.
+STAMP_FILE=".jdboard-source"
+SOURCE_ID="$(git -c safe.directory="$REPO" -C "$REPO" rev-parse HEAD:frontend 2>/dev/null || true)"
+if [ -n "$SOURCE_ID" ]; then
+    DIRTY="$(git -c safe.directory="$REPO" -C "$REPO" status --porcelain -- frontend 2>/dev/null || true)"
+    if [ -n "$DIRTY" ]; then
+        SOURCE_ID="$SOURCE_ID+$( (git -c safe.directory="$REPO" -C "$REPO" diff HEAD -- frontend; echo "$DIRTY") | sha256sum | cut -c1-12)"
+    fi
+fi
+BUILT_FROM="$(cat "$DIST/$STAMP_FILE" 2>/dev/null || true)"
+HAVE_NODE=0
+[ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -ge 20 ] && HAVE_NODE=1
+
+if [ -f "$DIST/index.html" ] && [ "$REBUILD_FRONTEND" -eq 0 ] && [ -n "$SOURCE_ID" ] && [ "$BUILT_FROM" = "$SOURCE_ID" ]; then
+    echo "frontend/dist is up to date with the source"
+elif [ "$HAVE_NODE" -eq 1 ]; then
+    if [ -f "$DIST/index.html" ] && [ "$REBUILD_FRONTEND" -eq 0 ]; then
+        echo "frontend/dist was built from different source - rebuilding with Node $NODE_MAJOR"
+    else
+        echo "Building with Node $NODE_MAJOR"
+    fi
     as_admin "$NODE_ENV_CMD; cd '$REPO/frontend' && npm ci --no-audit --no-fund && npm run build"
+    [ -n "$SOURCE_ID" ] && as_admin "printf '%s\n' '$SOURCE_ID' > '$DIST/$STAMP_FILE'"
+elif [ -f "$DIST/index.html" ]; then
+    echo "⚠️  Node 20+ not found, so using the existing frontend/dist - it may not match this version."
 else
     echo "Node 20+ not found; downloading the prebuilt frontend from github.com/$RELEASE_REPO"
     TMP="$(mktemp -d)"
@@ -246,7 +268,7 @@ else
     DIST="$TMP/dist"
 fi
 [ -f "$DIST/index.html" ] || { echo "❌ frontend build is missing index.html"; exit 1; }
-rsync -a --delete --no-owner --no-group --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r "$DIST/" "$APP/frontend/"
+rsync -a --delete --no-owner --no-group --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r --exclude "$STAMP_FILE" "$DIST/" "$APP/frontend/"
 chown -R root:root "$APP/frontend"
 
 # --- 6. move existing models/data from the repo checkout -------------------------------
@@ -446,6 +468,6 @@ Restart:           sudo systemctl restart jdboard
 Change login:      sudo jdboard-passwd
 Admin password:    sudo jdboard-passwd --admin   (asked before reboot/shutdown/...; --admin --remove to drop)
 Add a library:     sudo jdboard-pip install <package> && sudo systemctl restart jdboard
-Update:            git pull && sudo ./scripts/install.sh --rebuild-frontend
+Update:            git pull && sudo ./scripts/install.sh
 Models/data:       $DATA (you're in the 'jdboard' group after logging in again)
 EOF
