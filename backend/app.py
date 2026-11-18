@@ -2280,7 +2280,7 @@ SETTINGS_FILE = os.path.join(DATA_DIR, 'config', 'settings.json')
 
 # Dashboard settings saved on the Jetson (Settings > JDBoard Settings).
 # Hardware settings (clocks, power, fan) and start-on-boot live in jtop/systemd.
-UPDATE_INTERVALS = {'0.5s': 0.5, '1s': 1.0, '2s': 2.0, '5s': 5.0}
+UPDATE_INTERVALS = {'1s': 1.0, '2s': 2.0, '5s': 5.0}
 DASHBOARD_SETTING_DEFAULTS = {'updateInterval': '1s', 'enableNotifications': True}
 _settings_cache = {'mtime': None, 'values': dict(DASHBOARD_SETTING_DEFAULTS)}
 
@@ -2298,6 +2298,9 @@ def load_dashboard_settings():
                 values.update(json.load(f))
         except (OSError, ValueError) as e:
             logger.warning(f"Could not read {SETTINGS_FILE}: {e}")
+        # An interval that's no longer offered (e.g. the old 0.5 s) falls back to the default
+        if values.get('updateInterval') not in UPDATE_INTERVALS:
+            values['updateInterval'] = DASHBOARD_SETTING_DEFAULTS['updateInterval']
         _settings_cache.update(mtime=mtime, values=values)
     return dict(_settings_cache['values'])
 
@@ -3427,7 +3430,7 @@ def background_system_updates():
             except Exception:
                 pass  # If we can't even emit this, just continue
         
-        # Settings > Update Interval (0.5-5 s); jtop itself samples every 0.5 s
+        # Settings > Update Interval (1-5 s); jtop itself samples every 0.5 s
         socketio.sleep(update_interval_seconds())
 
 @app.route('/system/processes', methods=['GET'])

@@ -1102,7 +1102,6 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
               onChange={(e) => saveDashboardSetting('updateInterval', e.target.value)}
               disabled={loading.updateInterval}
             >
-              <option value="0.5s">0.5 Second</option>
               <option value="1s">1 Second</option>
               <option value="2s">2 Seconds</option>
               <option value="5s">5 Seconds</option>
