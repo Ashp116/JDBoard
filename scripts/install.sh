@@ -96,6 +96,9 @@ if [ "$UNINSTALL" -eq 1 ]; then
         systemctl reload fail2ban 2>/dev/null || true
     fi
     systemctl daemon-reload
+    rm -f /etc/systemd/system/nginx.service.d/jdboard.conf
+    rmdir /etc/systemd/system/nginx.service.d 2>/dev/null || true
+    systemctl daemon-reload
     if [ -L /etc/nginx/sites-enabled/jdboard ] || [ -f "$NGINX_SITE" ]; then
         rm -f /etc/nginx/sites-enabled/jdboard "$NGINX_SITE"
         systemctl reload nginx 2>/dev/null || true
@@ -174,6 +177,7 @@ rsync -a --delete --no-owner --no-group --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
       --exclude '__pycache__' --exclude '*.pyc' "$REPO/backend/" "$APP/backend/"
 chown -R root:root "$APP/backend"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-admin" "$APP/bin/jdboard-admin"
+install -m 755 -o root -g root "$REPO/deploy/jdboard-web" "$APP/bin/jdboard-web"
 install -m 755 -o root -g root "$REPO/deploy/jdboard-pip" /usr/local/bin/jdboard-pip
 install -m 755 -o root -g root "$REPO/deploy/jdboard-passwd" /usr/local/bin/jdboard-passwd
 install -m 644 -o root -g root "$REPO/requirements.txt" "$APP/requirements.txt"
@@ -298,9 +302,15 @@ else
 fi
 rm -f "$TMP_SUDOERS"
 
+# Start on boot: on for a first install; after that keep what the user chose
+# (Settings > Auto-start JDBoard) instead of switching it back on every update
+FIRST_INSTALL=0
+[ -f "$UNIT" ] || FIRST_INSTALL=1
 install -m 644 -o root -g root "$REPO/deploy/jdboard.service" "$UNIT"
 systemctl daemon-reload
-systemctl enable "$SERVICE" >/dev/null
+if [ "$FIRST_INSTALL" -eq 1 ]; then
+    systemctl enable "$SERVICE" >/dev/null
+fi
 
 # --- 8. login and nginx ----------------------------------------------------------------
 step "Login"
@@ -358,7 +368,13 @@ if [ "$HTTPS" -eq 1 ]; then
 fi
 python3 "$REPO/deploy/render-nginx-site.py" "$REPO/deploy/nginx-jdboard.conf" "$NGINX_SITE" \
     "$HTTPS" "$PORT" "$HTTPS_PORT" "$BACKEND_PORT" "$ETC/tls"
+# Enabled now for the config test; from then on jdboard.service turns the site on
+# when it starts and off when it stops (deploy/jdboard-web), so the website is
+# only up while JDBoard runs
 ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/jdboard
+install -d -m 755 /etc/systemd/system/nginx.service.d
+install -m 644 -o root -g root "$REPO/deploy/nginx-jdboard-dropin.conf" /etc/systemd/system/nginx.service.d/jdboard.conf
+systemctl daemon-reload
 # nginx's stock welcome site also claims the default server on port 80
 if [ "$PORT" = 80 ] && [ -L /etc/nginx/sites-enabled/default ]; then
     rm -f /etc/nginx/sites-enabled/default
@@ -405,7 +421,12 @@ fi
 
 echo
 if [ "$BACKEND" = 200 ] && [ "$FRONT" = 401 ]; then
-    echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")) and starts on boot."
+    if systemctl is-enabled --quiet "$SERVICE"; then
+        echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")) and starts on boot."
+    else
+        echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")). Auto-start is off, so after a"
+        echo "   reboot it (and the website) stays off until: sudo systemctl start jdboard"
+    fi
     for ip in $(hostname -I); do
         [[ "$ip" == *:* || "$ip" == 169.254.* || "$ip" == 172.17.* ]] && continue
         echo "   $SCHEME://$ip$URL_PORT"

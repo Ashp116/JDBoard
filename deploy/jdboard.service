@@ -13,7 +13,11 @@ Group=jdboard
 SupplementaryGroups=video render jtop systemd-journal
 WorkingDirectory=/opt/jdboard/backend
 EnvironmentFile=/etc/jdboard/jdboard.env
+# The website is only served while JDBoard runs (deploy/jdboard-web): '+' runs
+# these two as root, outside the sandbox below
+ExecStartPre=+/opt/jdboard/bin/jdboard-web on
 ExecStart=/opt/jdboard/venv/bin/python app.py
+ExecStopPost=+/opt/jdboard/bin/jdboard-web off
 # New files in /var/lib/jdboard stay group-writable for members of 'jdboard'
 UMask=0002
 # The service never needs anyone's home directory
