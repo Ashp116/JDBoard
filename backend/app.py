@@ -470,9 +470,27 @@ def get_gpu_memory():
             'error': str(e)
         }), 500
 
+def tensorrt_size_problem(source_name):
+    """Error message if building a TensorRT engine for this YOLO size is likely
+    to run out of memory on this board, else None.
+
+    Measured on an Orin Nano 8GB: YOLOv11x ran out of memory both as FP32 (after
+    ~2-4 min) and as FP16 with a 2 GB workspace (after ~10 min)."""
+    import re
+    size_match = re.search(r'yolo\D*\d*([nsmlx])u?\.pt$', source_name.split('?')[0].lower())
+    total_ram_gb = psutil.virtual_memory().total / 1024 ** 3
+    if size_match and size_match.group(1) in ('l', 'x') and total_ram_gb < TENSORRT_LARGE_MODEL_MIN_RAM_GB:
+        return (f"Building a TensorRT engine for this model size ('{size_match.group(1)}') is likely to run "
+                f"out of memory on this device ({total_ram_gb:.1f} GB RAM; about "
+                f"{TENSORRT_LARGE_MODEL_MIN_RAM_GB} GB is needed). Use size n, s or m for TensorRT, "
+                f"or keep this size in PyTorch format.")
+    return None
+
+
 @app.route('/models/upload', methods=['POST'])
 def upload_model():
-    """Upload a new AI model with optional custom inference script and real-time progress updates"""
+    """Upload a model, optionally converting an Ultralytics .pt file to ONNX or
+    TensorRT (same options as the YOLO download), with progress over Socket.IO."""
     client_ip = get_client_ip()
     user_agent = request.headers.get('User-Agent', 'Unknown')
     
@@ -481,7 +499,8 @@ def upload_model():
         client_ip=client_ip,
         user_agent=user_agent,
         method=request.method,
-        data={'files': len(request.files)}
+        data={'files': len(request.files),
+              **{k: v for k, v in request.form.items() if k in ('target_format', 'precision', 'imgsz', 'workspace', 'calibration')}}
     )
     
     if 'file' not in request.files:
@@ -494,6 +513,7 @@ def upload_model():
     model_name = request.form.get('model_name', '')
     model_type = request.form.get('model_type', 'vision')
     download_id = request.form.get('download_id', str(uuid.uuid4()))
+    target_format = request.form.get('target_format') or 'PyTorch'
     
     # Optional custom inference script; without one the built-in (default) handler is used
     custom_script = request.files.get('custom_script')
@@ -504,159 +524,201 @@ def upload_model():
             'error': 'No file selected'
         }), 400
     
-    if file and allowed_file(file.filename):
-        # Resolved here, not inside upload_async: assigning model_name in the
-        # thread made it a local there, so every upload crashed on first use.
-        filename = secure_filename(file.filename)
-        if not model_name:
-            model_name = filename.rsplit('.', 1)[0]
-
-        # Save the uploaded files now: Flask closes the request's file streams
-        # once this handler returns, so the background thread can't read them.
-        if custom_script and custom_script.filename and not custom_script.filename.endswith('.py'):
-            return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
-        try:
-            os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-            saved_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{filename}")
-            file.save(saved_file_path)
-            saved_file_size = os.path.getsize(saved_file_path)
-            saved_script_path = None
-            if custom_script and custom_script.filename:
-                saved_script_path = os.path.join(app.config['UPLOAD_FOLDER'],
-                                                 f"{uuid.uuid4().hex}_{secure_filename(custom_script.filename)}")
-                custom_script.save(saved_script_path)
-        except Exception as e:
-            logger.error(f"Error saving uploaded model {model_name}: {e}")
-            return jsonify({'success': False, 'error': f'Could not save uploaded file: {e}'}), 500
-        try:
-            def progress_callback(progress, status):
-                # Update persistent state
-                if download_id in active_downloads:
-                    active_downloads[download_id]['progress'] = progress
-                    active_downloads[download_id]['status'] = status
-                
-                socketio.emit('download_progress', {
-                    'download_id': download_id,
-                    'progress': progress,
-                    'status': status,
-                    'stage': 'upload'
-                })
-            
-            # Start async upload process
-            def discard_saved_files():
-                for path in (saved_file_path, saved_script_path):
-                    try:
-                        if path and os.path.exists(path):
-                            os.remove(path)
-                    except OSError:
-                        pass
-
-            def upload_async():
-                # Files were saved by the request handler (see above)
-                file_path = saved_file_path
-                custom_script_path = saved_script_path
-                try:
-                    # Track this download with persistent information
-                    active_downloads[download_id] = {
-                        'type': 'upload',
-                        'download_type': 'upload',
-                        'model_name': model_name,
-                        'started_at': datetime.now().isoformat(),
-                        'progress': 0,
-                        'status': 'Preparing upload...',
-                        'file_size': saved_file_size
-                    }
-                    
-                    progress_callback(10, 'Preparing upload...')
-                    
-                    # Check for cancellation
-                    if is_download_cancelled(download_id):
-                        discard_saved_files()
-                        cleanup_download(download_id)
-                        return
-                    
-                    progress_callback(30, 'Saving file...')
-                    
-                    # Check for cancellation
-                    if is_download_cancelled(download_id):
-                        discard_saved_files()
-                        cleanup_download(download_id)
-                        return
-                    
-                    if custom_script_path:
-                        progress_callback(50, 'Custom inference script received...')
-                        logger.info(f"Custom script saved: {os.path.basename(custom_script_path)}")
-                    
-                    progress_callback(70, 'Registering model...')
-                    
-                    # Check for cancellation
-                    if is_download_cancelled(download_id):
-                        # Clean up uploaded files if cancelled
-                        try:
-                            os.remove(file_path)
-                            if custom_script_path:
-                                os.remove(custom_script_path)
-                        except:
-                            pass
-                        cleanup_download(download_id)
-                        return
-                    
-                    # Register the model with absolute path and custom script
-                    model_info = ai_manager.register_model(
-                        model_name=model_name,
-                        file_path=os.path.abspath(file_path),
-                        model_type=model_type,
-                        original_filename=filename,
-                        custom_script_path=os.path.abspath(custom_script_path) if custom_script_path else None
-                    )
-                    
-                    progress_callback(100, 'Upload complete')
-                    
-                    logger.info(f"Model uploaded successfully: {model_name} from {client_ip}" +
-                               (' (with custom script)' if custom_script_path else ' (default handler)'))
-                    
-                    load_problem = ai_manager.missing_requirement(model_info.get('framework'))
-                    finish_download(
-                        download_id, True, model_name,
-                        message=(f'Model {model_name} uploaded, but it cannot be loaded yet.' if load_problem else
-                                 f'Model {model_name} uploaded and ready for use!' +
-                                 (' Custom inference script loaded.' if custom_script_path else '')),
-                        warning=load_problem,
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Error uploading model: {str(e)}")
-                    # Clean up on error
-                    try:
-                        if 'file_path' in locals() and os.path.exists(file_path):
-                            os.remove(file_path)
-                        if custom_script_path and os.path.exists(custom_script_path):
-                            os.remove(custom_script_path)
-                    except:
-                        pass
-                    finish_download(download_id, False, model_name, error=str(e))
-            
-            # Start upload in background thread
-            threading.Thread(target=upload_async, daemon=True).start()
-            
-            return jsonify({
-                'success': True,
-                'download_started': True,
-                'download_id': download_id,
-                'message': f'Upload started for {model_name}'
-            })
-            
-        except Exception as e:
-            logger.error(f"Error starting upload: {str(e)}")
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            }), 500
-    else:
+    if not (file and allowed_file(file.filename)):
         return jsonify({
             'success': False,
             'error': 'Invalid file type'
         }), 400
+
+    # Resolved here, not inside upload_async: assigning model_name in the
+    # thread made it a local there, so every upload crashed on first use.
+    filename = secure_filename(file.filename)
+    if not model_name:
+        model_name = filename.rsplit('.', 1)[0]
+    is_pt = filename.lower().endswith('.pt')
+    converting = target_format != 'PyTorch'
+
+    if custom_script and custom_script.filename and not custom_script.filename.endswith('.py'):
+        return jsonify({'success': False, 'error': 'Custom script must be a Python (.py) file'}), 400
+
+    # Export settings only apply to .pt files (the format Ultralytics converts from)
+    export_options = None
+    calibration_zip = request.files.get('calibration_zip')
+    if is_pt:
+        if converting:
+            missing = ai_manager.missing_requirement(yolo=True, target_format=target_format)
+            if missing:
+                logger.error(f"Upload of {model_name} rejected: {missing}")
+                return jsonify({'success': False, 'error': missing}), 400
+            size_problem = target_format == 'TensorRT' and tensorrt_size_problem(filename)
+            if size_problem:
+                logger.error(f"Upload of {model_name} rejected: {size_problem}")
+                return jsonify({'success': False, 'error': size_problem}), 400
+        calibration = request.form.get('calibration') or None   # 'coco' | 'upload'
+        try:
+            if calibration == 'upload' and not (calibration_zip and calibration_zip.filename):
+                raise ValueError("Choose a .zip of calibration images to upload")
+            export_options = normalize_export_options(
+                target_format,
+                precision=request.form.get('precision'),
+                imgsz=request.form.get('imgsz'),
+                workspace=request.form.get('workspace'),
+                calibration=calibration,
+            )
+        except ValueError as e:
+            return jsonify({'success': False, 'error': str(e)}), 400
+    elif converting:
+        return jsonify({'success': False,
+                        'error': 'Only Ultralytics YOLO .pt files can be converted. Upload this file as-is, '
+                                 'or upload the .pt it was trained as.'}), 400
+
+    # Save the uploaded files now: Flask closes the request's file streams
+    # once this handler returns, so the background thread can't read them.
+    saved_file_path = saved_script_path = calibration_dir = None
+
+    def discard_saved_files():
+        for path in (saved_file_path, saved_script_path):
+            try:
+                if path and os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        if calibration_dir:
+            shutil.rmtree(os.path.dirname(calibration_dir), ignore_errors=True)
+
+    try:
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        saved_file_path = os.path.abspath(os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{filename}"))
+        file.save(saved_file_path)
+        saved_file_size = os.path.getsize(saved_file_path)
+        if custom_script and custom_script.filename:
+            saved_script_path = os.path.abspath(os.path.join(
+                app.config['UPLOAD_FOLDER'], f"{uuid.uuid4().hex}_{secure_filename(custom_script.filename)}"))
+            custom_script.save(saved_script_path)
+    except Exception as e:
+        discard_saved_files()
+        logger.error(f"Error saving uploaded model {model_name}: {e}")
+        return jsonify({'success': False, 'error': f'Could not save uploaded file: {e}'}), 500
+
+    if is_pt and export_options is not None:
+        if not ai_manager.is_ultralytics_checkpoint(saved_file_path):
+            if converting:
+                discard_saved_files()
+                return jsonify({'success': False,
+                                'error': "This .pt file isn't an Ultralytics YOLO model, so JDBoard can't convert it. "
+                                         "Choose 'PyTorch' to upload it as-is."}), 400
+            export_options = None   # plain PyTorch file: keep the old behaviour, no YOLO settings
+        elif export_options.get('calibration') == 'upload':
+            # Unpack calibration images last, after every other check has passed
+            calibration_dir, error = extract_calibration_zip(calibration_zip)
+            if error:
+                discard_saved_files()
+                return jsonify({'success': False, 'error': error}), 400
+            export_options['calibration'] = calibration_dir
+
+    def progress_callback(progress, status):
+        # Update persistent state
+        if download_id in active_downloads:
+            active_downloads[download_id]['progress'] = progress
+            active_downloads[download_id]['status'] = status
+        
+        socketio.emit('download_progress', {
+            'download_id': download_id,
+            'progress': progress,
+            'status': status,
+            'stage': 'upload'
+        })
+
+    def upload_async():
+        try:
+            # Track this upload with persistent information
+            active_downloads[download_id] = {
+                'type': 'upload',
+                'download_type': 'upload',
+                'model_name': model_name,
+                'target_format': target_format,
+                'started_at': datetime.now().isoformat(),
+                'progress': 0,
+                'status': 'Preparing upload...',
+                'file_size': saved_file_size
+            }
+            progress_callback(30, 'File received...')
+            if saved_script_path:
+                logger.info(f"Custom script saved: {os.path.basename(saved_script_path)}")
+
+            if is_download_cancelled(download_id):
+                discard_saved_files()
+                cleanup_download(download_id)
+                return
+
+            if export_options is not None:
+                # Ultralytics .pt: convert (if asked) and register with its settings
+                result = ai_manager.convert_uploaded_model(
+                    saved_file_path, model_name, target_format, filename,
+                    custom_script_path=saved_script_path,
+                    progress_callback=progress_callback,
+                    cancel_check_callback=lambda: is_download_cancelled(download_id),
+                    export_options=export_options,
+                    model_type=model_type,
+                )
+                model_info = result['model_info']
+                # Cancelled just as it finished: remove the registered model
+                if is_download_cancelled(download_id):
+                    try:
+                        ai_manager.delete_model(result['model_id'])
+                        logger.info(f"Removed {model_name}: upload was cancelled as it completed")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Could not remove cancelled model {model_name}: {cleanup_error}")
+                    cleanup_download(download_id)
+                    return
+            else:
+                progress_callback(70, 'Registering model...')
+                model_info = ai_manager.register_model(
+                    model_name=model_name,
+                    file_path=saved_file_path,
+                    model_type=model_type,
+                    original_filename=filename,
+                    custom_script_path=saved_script_path
+                )
+                progress_callback(100, 'Upload complete')
+
+            logger.info(f"Model uploaded: {model_name} from {client_ip}" +
+                        (f", converted to {target_format}" if converting else '') +
+                        (' (with custom script)' if saved_script_path else ' (default handler)'))
+
+            load_problem = ai_manager.missing_requirement(model_info.get('framework'))
+            finish_download(
+                download_id, True, model_name,
+                message=(f'Model {model_name} uploaded, but it cannot be loaded yet.' if load_problem else
+                         f'Model {model_name} ' + (f'converted to {target_format} and ' if converting else 'uploaded and ') +
+                         'ready for use!' + (' Custom inference script loaded.' if saved_script_path else '')),
+                warning=load_problem,
+            )
+
+        except Exception as e:
+            log_failure("Error uploading model", e)
+            # convert_uploaded_model already removed the model file and its byproducts
+            discard_saved_files()
+            if is_download_cancelled(download_id):
+                logger.info(f"Upload {model_name} stopped after cancel")
+                cleanup_download(download_id)
+            else:
+                finish_download(download_id, False, model_name, error=str(e))
+        finally:
+            # Uploaded calibration images are only needed for the build
+            if calibration_dir:
+                shutil.rmtree(os.path.dirname(calibration_dir), ignore_errors=True)
+
+    upload_thread = threading.Thread(target=upload_async, daemon=True)
+    download_threads[download_id] = upload_thread
+    upload_thread.start()
+
+    return jsonify({
+        'success': True,
+        'download_started': True,
+        'download_id': download_id,
+        'message': f'Upload started for {model_name}'
+    })
 
 @app.route('/models/<model_id>/load', methods=['POST'])
 def load_model(model_id):
@@ -1051,17 +1113,10 @@ def download_yolo_model():
     # so refuse up front instead of failing partway through.
     # Measured on an Orin Nano 8GB: YOLOv11x ran out of memory both as FP32 (after
     # ~2-4 min) and as FP16 with a 2 GB workspace (after ~10 min).
-    if target_format == 'TensorRT':
-        import re
-        size_match = re.search(r'yolo\D*\d*([nsmlx])u?\.pt$', model_url.split('?')[0].lower())
-        total_ram_gb = psutil.virtual_memory().total / 1024 ** 3
-        if size_match and size_match.group(1) in ('l', 'x') and total_ram_gb < TENSORRT_LARGE_MODEL_MIN_RAM_GB:
-            error = (f"Building a TensorRT engine for this model size ('{size_match.group(1)}') is likely to run "
-                     f"out of memory on this device ({total_ram_gb:.1f} GB RAM; about "
-                     f"{TENSORRT_LARGE_MODEL_MIN_RAM_GB} GB is needed). Use size n, s or m for TensorRT, "
-                     f"or download this size in PyTorch format.")
-            logger.error(f"YOLO download of {model_name} rejected: {error}")
-            return jsonify({'success': False, 'error': error}), 400
+    size_problem = target_format == 'TensorRT' and tensorrt_size_problem(model_url)
+    if size_problem:
+        logger.error(f"YOLO download of {model_name} rejected: {size_problem}")
+        return jsonify({'success': False, 'error': size_problem}), 400
 
     # Save an uploaded custom script now; the request's file stream is closed
     # by the time the background thread runs.

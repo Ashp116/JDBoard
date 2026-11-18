@@ -243,6 +243,22 @@ _ACTIVE_EXPORTS = set()
 _ACTIVE_EXPORTS_LOCK = threading.Lock()
 
 
+def is_ultralytics_checkpoint(path):
+    """True if a .pt file is an Ultralytics model checkpoint (what `yolo export`
+    can convert). Reads the pickle bytes inside the zip without unpickling
+    anything, so it is safe on untrusted uploads."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as zf:
+            pkl = next((n for n in zf.namelist() if n.endswith('data.pkl')), None)
+            if not pkl:
+                return False
+            with zf.open(pkl) as f:
+                return b'ultralytics' in f.read(8 * 1024 * 1024)
+    except (zipfile.BadZipFile, OSError):
+        return False
+
+
 def log_failure(context, error):
     """Log an exception as an error - or as info when it is a user cancel."""
     if 'cancelled by user' in str(error).lower():
@@ -1758,57 +1774,105 @@ class AIModelManager:
             update_progress(75, 'Processing model file...')
             check_cancelled()
             
-            # Handle format conversion if needed
-            final_path = download_path
-            final_format = 'pytorch'  # Default for .pt files
-            
-            if target_format != 'PyTorch':
-                logger.info(f"Converting model to {target_format}")
-                update_progress(80, f'Converting to {target_format} format...')
-                check_cancelled()
-                final_path, final_format = self._convert_yolo_model(download_path, target_format, progress_callback, cancel_check_callback, export_options)
-            
-            update_progress(90, 'Registering model...')
-            check_cancelled()
-            
-            # Register the model with custom script if provided
-            model_info = self.register_model(
-                model_name=model_name,
-                file_path=final_path.resolve(),  # Use absolute path
-                model_type='vision',
-                original_filename=url_filename,
+            return self._convert_and_register(
+                download_path, model_name, target_format, url_filename,
                 custom_script_path=custom_script_path,
-                model_meta={k: v for k, v in (export_options or {}).items() if k in ('precision', 'imgsz', 'workspace')}
-                           | ({'calibration': 'coco' if (export_options or {}).get('calibration') == 'coco' else 'custom'}
-                              if (export_options or {}).get('precision') == 'int8' else {})
+                progress_callback=progress_callback,
+                cancel_check_callback=cancel_check_callback,
+                export_options=export_options,
             )
-            
-            update_progress(100, 'Model ready for use!')
-            
-            logger.info(f"YOLO model {model_name} successfully downloaded and registered" + 
-                       (" with custom script" if custom_script_path else ""))
-            
-            return {
-                'model_id': model_info['id'],
-                'model_info': model_info,
-                'download_path': str(final_path),
-                'format': final_format
-            }
             
         except Exception as e:
             log_failure(f"Error downloading YOLO model", e)
-            # Clean up this download's files: the source and anything converted
-            # from it (.onnx, partial .engine, ...) - they all share its unique stem.
             if 'download_path' in locals():  # not set if it failed very early
-                for leftover in download_path.parent.glob(download_path.stem + '*'):
-                    try:
-                        if leftover.is_file():
-                            leftover.unlink()
-                            logger.info(f"Removed leftover file: {leftover.name}")
-                        elif leftover.is_dir():
-                            shutil.rmtree(leftover, ignore_errors=True)
-                    except OSError as cleanup_error:
-                        logger.warning(f"Could not remove {leftover}: {cleanup_error}")
+                self._remove_files_with_stem(download_path)
+            raise
+
+    def _remove_files_with_stem(self, source_path):
+        """Remove a model file and everything converted from it (.onnx, partial
+        .engine, calibration yaml/cache, ...) - they all share its unique stem."""
+        import shutil
+        source_path = Path(source_path)
+        for leftover in source_path.parent.glob(source_path.stem + '*'):
+            try:
+                if leftover.is_file():
+                    leftover.unlink()
+                    logger.info(f"Removed leftover file: {leftover.name}")
+                elif leftover.is_dir():
+                    shutil.rmtree(leftover, ignore_errors=True)
+            except OSError as cleanup_error:
+                logger.warning(f"Could not remove {leftover}: {cleanup_error}")
+
+    def _convert_and_register(self, source_path, model_name, target_format, original_filename,
+                              custom_script_path=None, progress_callback=None,
+                              cancel_check_callback=None, export_options=None, model_type='vision'):
+        """Convert an Ultralytics .pt file (if target_format isn't PyTorch) and
+        register the result. Shared by YOLO downloads and file uploads."""
+        def update_progress(progress, status):
+            if progress_callback:
+                progress_callback(progress, status)
+
+        def check_cancelled():
+            if cancel_check_callback and cancel_check_callback():
+                raise Exception("Conversion cancelled by user")
+
+        source_path = Path(source_path)
+        final_path = source_path
+        final_format = 'pytorch'
+
+        if target_format != 'PyTorch':
+            logger.info(f"Converting model to {target_format}")
+            update_progress(80, f'Converting to {target_format} format...')
+            check_cancelled()
+            final_path, final_format = self._convert_yolo_model(source_path, target_format, progress_callback, cancel_check_callback, export_options)
+
+        update_progress(90, 'Registering model...')
+        check_cancelled()
+
+        opts = export_options or {}
+        model_info = self.register_model(
+            model_name=model_name,
+            file_path=Path(final_path).resolve(),  # Use absolute path
+            model_type=model_type,
+            original_filename=original_filename,
+            custom_script_path=custom_script_path,
+            model_meta={k: v for k, v in opts.items() if k in ('precision', 'imgsz', 'workspace')}
+                       | ({'calibration': 'coco' if opts.get('calibration') == 'coco' else 'custom'}
+                          if opts.get('precision') == 'int8' else {})
+        )
+
+        update_progress(100, 'Model ready for use!')
+        logger.info(f"Model {model_name} registered as {final_format}" +
+                    (" with custom script" if custom_script_path else ""))
+
+        return {
+            'model_id': model_info['id'],
+            'model_info': model_info,
+            'download_path': str(final_path),
+            'format': final_format
+        }
+
+    @staticmethod
+    def is_ultralytics_checkpoint(path):
+        return is_ultralytics_checkpoint(path)
+
+    def convert_uploaded_model(self, source_path, model_name, target_format, original_filename,
+                               custom_script_path=None, progress_callback=None,
+                               cancel_check_callback=None, export_options=None, model_type='vision'):
+        """Convert (optionally) and register an uploaded Ultralytics .pt file.
+        On failure the upload and any partial conversion output are removed."""
+        try:
+            return self._convert_and_register(
+                source_path, model_name, target_format, original_filename,
+                custom_script_path=custom_script_path,
+                progress_callback=progress_callback,
+                cancel_check_callback=cancel_check_callback,
+                export_options=export_options,
+                model_type=model_type,
+            )
+        except Exception as e:
+            log_failure("Error converting uploaded model", e)
+            self._remove_files_with_stem(source_path)
             raise
     
     def _prepare_calibration_data(self, source_path, opts, model=None):
