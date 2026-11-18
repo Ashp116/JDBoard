@@ -27,7 +27,11 @@ const Card = styled.div`
   border: 1px solid ${props => props.theme.colors.border.secondary};
   border-radius: 12px;
   padding: 24px;
-  grid-column: 1 / -1;
+  transition: border-color 0.2s ease;
+
+  &:hover {
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
 
   ${props => props.theme.media.mobile} {
     padding: 18px;
@@ -49,14 +53,14 @@ const Card = styled.div`
 
 const CreateRow = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 18px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
   margin-bottom: 18px;
 
   input[type='text'] {
-    flex: 1 1 200px;
-    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
     padding: 9px 12px;
     border: 1px solid ${props => props.theme.colors.border.secondary};
     border-radius: 6px;
@@ -73,7 +77,12 @@ const CreateRow = styled.div`
   .scopes {
     display: flex;
     flex-wrap: wrap;
-    gap: 14px;
+    gap: 8px 16px;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
   }
 
   label {
@@ -179,24 +188,41 @@ const KeyList = styled.div`
 
   .key {
     display: grid;
-    grid-template-columns: minmax(120px, 1.2fr) auto minmax(110px, 1fr) minmax(150px, 1.3fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title revoke'
+      'meta  revoke';
     align-items: center;
-    gap: 12px;
+    gap: 4px 12px;
     padding: 10px 12px;
     border: 1px solid ${props => props.theme.colors.border.secondary};
     border-radius: 8px;
     font-size: 13px;
     color: ${props => props.theme.colors.text.primary};
+  }
 
-    ${props => props.theme.media.mobile} {
-      grid-template-columns: 1fr auto;
-    }
+  .title {
+    grid-area: title;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .meta {
+    grid-area: meta;
+    font-size: 12px;
+    color: ${props => props.theme.colors.text.secondary};
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .name {
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .scope {
@@ -209,14 +235,10 @@ const KeyList = styled.div`
 
   .prefix {
     font-family: 'Courier New', monospace;
-    color: ${props => props.theme.colors.text.secondary};
-  }
-
-  .used {
-    color: ${props => props.theme.colors.text.secondary};
   }
 
   button.revoke {
+    grid-area: revoke;
     background: none;
     border: 1px solid rgba(255, 82, 82, 0.6);
     color: #ff6b6b;
@@ -325,10 +347,12 @@ const ApiKeysCard: React.FC = () => {
             </label>
           ))}
         </div>
-        <PrimaryButton onClick={createKey} disabled={!name.trim() || creating}>
-          <i className={creating ? 'fas fa-spinner fa-spin' : 'fas fa-plus'}></i>
-          Create Key
-        </PrimaryButton>
+        <div className="actions">
+          <PrimaryButton onClick={createKey} disabled={!name.trim() || creating}>
+            <i className={creating ? 'fas fa-spinner fa-spin' : 'fas fa-plus'}></i>
+            Create Key
+          </PrimaryButton>
+        </div>
       </CreateRow>
 
       {created && (
@@ -350,14 +374,17 @@ const ApiKeysCard: React.FC = () => {
         {loaded && keys.length === 0 && <div className="empty">No API keys yet.</div>}
         {keys.map(key => (
           <div className="key" key={key.id}>
-            <span className="name" title={key.name}>{key.name}</span>
-            <span className="scope" title={SCOPE_INFO[key.scope]?.hint}>{SCOPE_INFO[key.scope]?.label || key.scope}</span>
-            <span className="prefix">{key.prefix}…</span>
-            <span className="used">
+            <div className="title">
+              <span className="name" title={key.name}>{key.name}</span>
+              <span className="scope" title={SCOPE_INFO[key.scope]?.hint}>{SCOPE_INFO[key.scope]?.label || key.scope}</span>
+            </div>
+            <div className="meta">
+              <span className="prefix">{key.prefix}…</span>
+              {' · '}
               {key.last_used_at
-                ? `Used ${new Date(key.last_used_at).toLocaleString()}${key.last_used_ip ? ` from ${key.last_used_ip}` : ''}`
-                : 'Never used'}
-            </span>
+                ? `used ${new Date(key.last_used_at).toLocaleString()}${key.last_used_ip ? ` from ${key.last_used_ip}` : ''}`
+                : 'never used'}
+            </div>
             <button className="revoke" onClick={() => revokeKey(key)} disabled={revoking === key.id}>
               {revoking === key.id ? <i className="fas fa-spinner fa-spin"></i> : 'Revoke'}
             </button>
