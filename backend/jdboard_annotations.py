@@ -24,8 +24,8 @@ Shapes (every shape may also set ``"color": "#rrggbb"``, and ``"label"``):
 
 Without a ``bbox``, no box outline is drawn, but the label shows above the
 shapes and hovering or clicking around them works the same. A prediction
-without ``bbox`` or ``shapes`` (e.g. image classification) is still listed in
-the results, just not drawn.
+without ``bbox`` or ``shapes`` (e.g. image classification) is about the whole
+image: its label is shown in the image's top-left corner, in order.
 
 Custom inference scripts can build these by hand, or use ``from_ultralytics``
 for any Ultralytics result (detect, segment, pose, OBB, classify):

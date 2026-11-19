@@ -829,6 +829,39 @@ const BoundingBox = styled.div<{
   }
 `;
 
+const ImageLevelTags = styled.div`
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  z-index: 16;
+  max-width: calc(100% - 16px);
+`;
+
+const ImageLevelTag = styled.div<{ $color: string; $focused: boolean; $faded: boolean }>`
+  background: ${props => props.$color};
+  color: #fff;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  cursor: pointer;
+  pointer-events: all;
+  opacity: ${props => props.$faded ? 0.25 : 1};
+  transform: ${props => props.$focused ? 'scale(1.05)' : 'none'};
+  transform-origin: left center;
+  box-shadow: ${props => props.$focused ? `0 2px 8px ${props.$color}80` : '0 1px 3px rgba(0,0,0,0.4)'};
+  transition: opacity 0.2s ease, transform 0.2s ease;
+`;
+
 const BoundingBoxLabel = styled.div<{ 
   confidence: number; 
   classColor: string;
@@ -4563,6 +4596,39 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                         </BoundingBox>
                       );
                     })}
+
+                    {/* Whole-image results (classification, or anything without a box
+                        or shapes): tags in the corner, hover/click like boxes */}
+                    {(() => {
+                      const imageLevel = getFilteredPredictions(getPredictions(results))
+                        .map((pred: any, index: number) => ({ pred, index }))
+                        .filter(({ pred }: { pred: any }) => !pred.bbox && !shapesBounds(pred.shapes));
+                      if (imageLevel.length === 0 || imageNaturalDimensions.width === 0) return null;
+                      return (
+                        <ImageLevelTags>
+                          {imageLevel.map(({ pred, index }: { pred: any; index: number }) => {
+                            const className = pred.class || pred.label || `Class ${index}`;
+                            const classColor = pred.color || classColors[className] || '#00ff00';
+                            const confidence = pred.confidence || pred.score || 0;
+                            return (
+                              <ImageLevelTag
+                                key={index}
+                                $color={classColor}
+                                $focused={focusedDetection === index}
+                                $faded={focusedDetection !== null && focusedDetection !== index}
+                                data-detection-box
+                                onMouseEnter={() => setHoveredDetection(index)}
+                                onMouseLeave={() => setHoveredDetection(prev => (prev === index ? null : prev))}
+                                onClick={(e) => handleDetectionClick(index, e)}
+                                title="Click for details"
+                              >
+                                {className} {formatConfidence(confidence)}
+                              </ImageLevelTag>
+                            );
+                          })}
+                        </ImageLevelTags>
+                      );
+                    })()}
                   </AnnotatedImageContainer>
                 )}
               </ImageOnlyContainer>
