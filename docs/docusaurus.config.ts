@@ -38,13 +38,15 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          // "main" is docs/ as it is on the main branch, shown by default.
-          // Each GitHub release adds a snapshot (versioned_docs/version-<tag>),
-          // chosen from the version dropdown: see .github/workflows/docs.yml.
-          lastVersion: 'current',
+          // Each release tag adds a snapshot (versioned_docs/version-<tag>, see
+          // .github/workflows/docs.yml). The newest one is shown by default at
+          // /docs; "main" (docs/ on the main branch, the unreleased development
+          // version) is at /docs/next, picked from the version menu.
           versions: {
             current: {
               label: 'main',
+              path: 'next',
+              banner: 'unreleased',
             },
           },
           editUrl: 'https://github.com/Ashp116/JDBoard/tree/main/docs/',

@@ -56,11 +56,11 @@ GitHub Actions workflow.
 
 ### Versions
 
-The site shows **main** (`docs/docs/` on the main branch) by default. The version menu
-in the top bar also lists every release: pushing a version tag makes the Docs workflow
-snapshot the docs under that tag (`versioned_docs/version-<tag>`), commit the snapshot
-to `main` and republish. Each version is served at
-`/docs/<tag>/…`, for example `/docs/v1.2.0/intro`.
+The site shows the **newest release** by default, at `/docs/…`. Pushing a version tag
+makes the Docs workflow snapshot the docs under that tag (`versioned_docs/version-<tag>`),
+commit the snapshot to `main` and republish, so the new release becomes the default.
+**main** (`docs/docs/` on the main branch, the unreleased development version) is at
+`/docs/next/…`, and older releases at `/docs/<tag>/…`; all are in the version menu.
 
 To change an older version's docs, edit its copy in `versioned_docs/`. To make a
 snapshot by hand:
