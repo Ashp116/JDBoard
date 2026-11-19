@@ -76,6 +76,7 @@ TORCH_IMPORTED = IN_INFERENCE_WORKER and TORCH_AVAILABLE
 
 # Import garbage collection for memory management
 import gc
+from jdboard_annotations import from_ultralytics
 
 # Create a specific logger for model operations
 logger = logging.getLogger('ai_inference')
@@ -1322,7 +1323,11 @@ class AIModelManager:
                     result = self._run_yolo_inference(
                         model, processed_image, original_width, original_height,
                         half=(framework == 'pytorch' and model_info.get('precision') == 'fp16'),
-                        imgsz=model_info.get('imgsz') if framework == 'pytorch' else None)
+                        # 640 is just the upload dialog's default: let the model use the size it
+                        # was trained at (classification 224, OBB 1024, ...); a size chosen
+                        # under Advanced is used
+                        imgsz=(model_info.get('imgsz') if framework == 'pytorch'
+                               and model_info.get('imgsz') not in (None, DEFAULT_IMGSZ) else None))
                 elif framework == 'onnx':
                     result = self._run_onnx_inference(model, processed_image)
                 elif framework == 'pytorch':
@@ -1441,45 +1446,10 @@ class AIModelManager:
                     predict_kwargs['imgsz'] = imgsz
                 results = model(image, **predict_kwargs)
             
-            # Extract predictions
-            predictions = []
-            
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    # Convert to CPU immediately to free GPU memory
-                    boxes_cpu = boxes.cpu()
-                    
-                    for i in range(len(boxes_cpu)):
-                        # Get box coordinates, confidence, and class
-                        box = boxes_cpu.xywh[i].numpy()  # Raw x, y, w, h from YOLO
-                        conf = float(boxes_cpu.conf[i].numpy())
-                        cls = int(boxes_cpu.cls[i].numpy())
-                        
-                        # Use raw coordinates from YOLO
-                        x_center = float(box[0])
-                        y_center = float(box[1])
-                        width = float(box[2])
-                        height = float(box[3])
-                        
-                        # Get class name if available
-                        class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
-                        
-                        predictions.append({
-                            'class_id': cls,
-                            'class': class_name,
-                            'confidence': conf,
-                            'bbox': {
-                                'x': x_center,
-                                'y': y_center,
-                                'width': width,
-                                'height': height
-                            }
-                        })
-            
-            # Sort by confidence
-            predictions.sort(key=lambda x: x['confidence'], reverse=True)
-            
+            # Boxes, segmentation polygons, pose keypoints, oriented boxes or
+            # classes - whatever this model produces (see jdboard_annotations)
+            predictions = from_ultralytics(results, getattr(model, 'names', None))
+
             # Clear any temporary GPU tensors
             if TORCH_AVAILABLE and torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -1502,41 +1472,7 @@ class AIModelManager:
             # Force CPU inference
             results = model(image, device='cpu', verbose=False, half=False)
             
-            # Extract predictions (same logic as GPU version)
-            predictions = []
-            
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for i in range(len(boxes)):
-                        # Get box coordinates, confidence, and class
-                        box = boxes.xywh[i].numpy()  # Raw x, y, w, h from YOLO
-                        conf = float(boxes.conf[i].numpy())
-                        cls = int(boxes.cls[i].numpy())
-                        
-                        # Use raw coordinates from YOLO
-                        x_center = float(box[0])
-                        y_center = float(box[1])
-                        width = float(box[2])
-                        height = float(box[3])
-                        
-                        # Get class name if available
-                        class_name = model.names.get(cls, f'class_{cls}') if hasattr(model, 'names') else f'class_{cls}'
-                        
-                        predictions.append({
-                            'class_id': cls,
-                            'class': class_name,
-                            'confidence': conf,
-                            'bbox': {
-                                'x': x_center,
-                                'y': y_center,
-                                'width': width,
-                                'height': height
-                            }
-                        })
-            
-            # Sort by confidence
-            predictions.sort(key=lambda x: x['confidence'], reverse=True)
+            predictions = from_ultralytics(results, getattr(model, 'names', None))
             
             logger.info(f"CPU inference generated {len(predictions)} predictions")
             

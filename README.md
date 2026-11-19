@@ -183,9 +183,13 @@ talking to *your* Jetson, copy `/etc/jdboard/tls/jdboard.crt` to the client and 
 | PyTorch | `.pt` (Ultralytics YOLO) | PyTorch on the GPU (FP32 or FP16); can be converted to TensorRT |
 | ONNX | `.onnx` | Converted to TensorRT on upload (trtexec, FP32/FP16); not run directly, since ONNX Runtime is disabled on Jetson |
 
-Ultralytics YOLO models get detection boxes with the built-in handler. Other models (e.g.
-an RF-DETR TensorRT engine) need a custom inference script, which you edit from the
-model's card.
+Ultralytics models work with the built-in handler for every task: detection boxes,
+segmentation masks, pose keypoints with skeletons, oriented boxes and classification are
+drawn on the Inference page. Other models (e.g. an RF-DETR TensorRT engine) need a custom
+inference script, edited from the model's card. A script returns predictions with an
+optional `bbox` and a list of `shapes` (polygon, keypoints, polyline, circle, text,
+image) in original-image pixels, and the dashboard draws them; the template and
+`backend/jdboard_annotations.py` describe the format.
 
 ## Architecture
 

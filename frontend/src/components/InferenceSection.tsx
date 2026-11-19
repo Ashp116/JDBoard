@@ -21,6 +21,7 @@ import { InferenceSectionProps } from '../types';
 import Modal, { ModalHeader, ModalBody, ModalCloseButton } from './shared/Modal';
 import { getBackendUrl } from '../utils/api';
 import InferenceApiTab from './InferenceApiTab';
+import PredictionShapes from './PredictionShapes';
 import { useNotifications } from '../contexts/NotificationContext';
 
 // Register Chart.js components
@@ -4424,6 +4425,15 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       onLoad={handleImageLoad}
                     />
                     
+                    {/* Shapes the model returned: masks, keypoints, lines, ... */}
+                    <PredictionShapes
+                      predictions={getFilteredPredictions(getPredictions(results))}
+                      imageWidth={imageNaturalDimensions.width}
+                      imageHeight={imageNaturalDimensions.height}
+                      colorFor={(pred: any, index: number) => classColors[pred.class || pred.label || `Class ${index}`] || '#00ff00'}
+                      hovered={hoveredDetection}
+                    />
+
                     {/* Render bounding boxes */}
                     {getFilteredPredictions(getPredictions(results)).map((pred: any, index: number) => {
                       // Ensure we have valid dimensions before attempting to render bounding boxes

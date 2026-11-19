@@ -22,27 +22,46 @@ Contract
       output = inference(data)
       preds  = postprocess(output, original_width=..., original_height=...)
   ``image`` is an OpenCV BGR ``numpy.ndarray`` (H x W x 3, uint8).
-* ``postprocess`` must return a list of prediction dicts. To get boxes drawn in
-  the dashboard, use the same shape as the built-in handler:
+* ``postprocess`` must return a list of prediction dicts. All coordinates are
+  pixels in the ORIGINAL image. The dashboard draws whatever they contain:
 
       {
           'class_id':   int,
           'class':      str,
-          'confidence': float,          # 0..1
-          'bbox': {                     # pixels in the ORIGINAL image,
-              'x': float, 'y': float,   # box centre
-              'width': float, 'height': float,
-          },
+          'confidence': float,                      # 0..1
+          'bbox': {'x': cx, 'y': cy,                # optional: a box with a label
+                   'width': w, 'height': h},        # (x/y is the box centre)
+          'shapes': [ ... ],                        # optional: anything else to draw
+          'color': '#ff8800',                       # optional colour override
       }
+
+  Shapes (each may also set its own 'color'):
+
+      {'type': 'polygon',   'points': [[x, y], ...], 'fill': True}      # segmentation, regions
+      {'type': 'keypoints', 'points': [[x, y, conf], ...],                # pose / landmarks
+                            'edges': [[i, j], ...], 'names': [...]}       #   edges = skeleton lines
+      {'type': 'polyline',  'points': [[x, y], ...]}                      # lanes, tracks
+      {'type': 'circle',    'x': x, 'y': y, 'radius': r}
+      {'type': 'text',      'x': x, 'y': y, 'text': '...'}
+      {'type': 'image',     'x': x, 'y': y, 'width': w, 'height': h,      # masks, heatmaps,
+                            'src': 'data:image/png;base64,...'}           #   depth maps
+
+  A prediction with neither (e.g. classification) is listed but not drawn. The
+  full description is in backend/jdboard_annotations.py.
+
+* For Ultralytics models (detect, segment, pose, OBB, classify) the helper
+  ``from_ultralytics`` builds all of this for you - see ``postprocess`` below.
 
 * If any method raises, JDBoard logs the error and falls back to the default
   handler for that request; the model card shows "Custom script failed".
 
-The example below works as-is for Ultralytics YOLO models and shows where to
-plug in your own pre/post-processing.
+The example below works as-is for Ultralytics models of any task and shows
+where to plug in your own pre/post-processing.
 """
 
 import numpy as np
+
+from jdboard_annotations import from_ultralytics
 
 
 class CustomModelInference:
@@ -80,24 +99,19 @@ class CustomModelInference:
 
     def postprocess(self, output, original_width=None, original_height=None):
         """Convert raw output into JDBoard prediction dicts (see module docstring)."""
-        predictions = []
-        for result in output:
-            boxes = getattr(result, 'boxes', None)
-            if boxes is None:
-                continue
-            boxes = boxes.cpu()
-            for xywh, conf, cls in zip(boxes.xywh.numpy(), boxes.conf.numpy(), boxes.cls.numpy()):
-                class_id = int(cls)
-                predictions.append({
-                    'class_id': class_id,
-                    'class': self.class_names.get(class_id, f'class_{class_id}'),
-                    'confidence': float(conf),
-                    'bbox': {
-                        'x': float(xywh[0]),
-                        'y': float(xywh[1]),
-                        'width': float(xywh[2]),
-                        'height': float(xywh[3]),
-                    },
-                })
-        predictions.sort(key=lambda p: p['confidence'], reverse=True)
-        return predictions
+        # Ultralytics results -> boxes, masks, keypoints, oriented boxes or classes
+        return from_ultralytics(output, self.class_names)
+
+        # For any other model, build the dicts yourself, e.g. a pose model with
+        # its own output layout (people = [(score, box_xywh, [(x, y, conf), ...]), ...]):
+        #
+        # predictions = []
+        # for score, (cx, cy, w, h), points in people:
+        #     predictions.append({
+        #         'class_id': 0, 'class': 'person', 'confidence': float(score),
+        #         'bbox': {'x': cx, 'y': cy, 'width': w, 'height': h},
+        #         'shapes': [{'type': 'keypoints',
+        #                     'points': [[x, y, c] for x, y, c in points],
+        #                     'edges': [[5, 7], [7, 9], [6, 8], [8, 10]]}],   # which points to join
+        #     })
+        # return predictions
