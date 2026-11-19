@@ -31,7 +31,7 @@ TAG=v1.2.0-beta.1
 You can also download **Source code (tar.gz)** from the release page in a browser and
 copy it to the Jetson.
 
-:::tip You don't need Node.js
+:::tip[You don't need Node.js]
 Each release has the dashboard already built (`jdboard-frontend.tar.gz`). If Node.js
 isn't installed, the installer downloads that instead of building the dashboard on
 the Jetson. If Node.js 20+ is installed, it builds the dashboard itself.

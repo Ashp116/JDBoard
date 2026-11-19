@@ -18,7 +18,7 @@ Ultralytics models work without any extra code for every task: detection,
 segmentation, pose, oriented boxes (OBB) and classification. Anything else needs a
 [custom inference script](../custom-models/custom-scripts.md).
 
-:::warning TensorRT engines are tied to the device
+:::warning[TensorRT engines are tied to the device]
 A `.engine` file only works on the same kind of device and TensorRT version it was
 built on. An engine built on another computer fails to load with *"plan files are only
 supported on the target runtime platform"*. Upload the `.pt` or `.onnx` instead and
