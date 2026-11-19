@@ -2749,7 +2749,11 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [imageContainerDimensions, setImageContainerDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [showDetails, setShowDetails] = useState(false);
+  // Clicked box (shows its details) and hovered box (highlighted, others faded)
   const [selectedDetection, setSelectedDetection] = useState<number | null>(null);
+  const [hoveredDetection, setHoveredDetection] = useState<number | null>(null);
+  // What's highlighted: the box under the mouse, else the clicked one
+  const focusedDetection = hoveredDetection ?? selectedDetection;
   const [tooltipPosition, setTooltipPosition] = useState<{x: number, y: number}>({x: 0, y: 0});
   const [classColors, setClassColors] = useState<{[key: string]: string}>({});
   const [selectedClasses, setSelectedClasses] = useState<Set<string>>(new Set());
@@ -3494,7 +3498,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   };
 
   // A new result has different boxes: close any open details
-  useEffect(() => { setSelectedDetection(null); }, [results]);
+  useEffect(() => { setSelectedDetection(null); setHoveredDetection(null); }, [results]);
 
   // Close the details on a click outside the boxes, Escape, or scrolling
   useEffect(() => {
@@ -4448,7 +4452,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       imageWidth={imageNaturalDimensions.width}
                       imageHeight={imageNaturalDimensions.height}
                       colorFor={(pred: any, index: number) => classColors[pred.class || pred.label || `Class ${index}`] || '#00ff00'}
-                      hovered={selectedDetection}
+                      hovered={focusedDetection}
                     />
 
                     {/* Render bounding boxes */}
@@ -4480,16 +4484,18 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           height={bbox.height}
                           confidence={pred.confidence || pred.score || 0}
                           classColor={classColor}
-                          isHovered={selectedDetection === index}
-                          anyHovered={selectedDetection !== null}
+                          isHovered={focusedDetection === index}
+                          anyHovered={focusedDetection !== null}
                           data-detection-box
+                          onMouseEnter={() => setHoveredDetection(index)}
+                          onMouseLeave={() => setHoveredDetection(prev => (prev === index ? null : prev))}
                           onClick={(e) => handleDetectionClick(index, e)}
                           title="Click for details"
                         >
                           <BoundingBoxLabel 
                             confidence={pred.confidence || pred.score || 0}
                             classColor={classColor}
-                            isHovered={selectedDetection === index}
+                            isHovered={focusedDetection === index}
                             x={bbox.x}
                             y={bbox.y}
                             containerWidth={imageContainerDimensions.width}
