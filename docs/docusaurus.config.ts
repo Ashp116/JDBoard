@@ -125,6 +125,16 @@ const config: Config = {
     },
     mermaid: {
       theme: {light: 'neutral', dark: 'dark'},
+      options: {
+        // Measure labels in the same font the page draws them in; Mermaid's
+        // default (Trebuchet) is narrower, so the text was cut off
+        fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif',
+        flowchart: {
+          padding: 16,
+          nodeSpacing: 40,
+          rankSpacing: 60,
+        },
+      },
     },
     prism: {
       theme: prismThemes.github,

@@ -41,3 +41,17 @@
 .method--post { background: #3d8b00; }
 .method--put { background: #b57600; }
 .method--delete { background: #c43c3c; }
+
+/* Mermaid diagrams: draw labels in the font they were measured with, and
+   never clip them */
+.docusaurus-mermaid-container {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+}
+.docusaurus-mermaid-container svg foreignObject {
+  overflow: visible;
+}
+.docusaurus-mermaid-container .nodeLabel,
+.docusaurus-mermaid-container .edgeLabel {
+  font-family: inherit;
+  white-space: nowrap;
+}
