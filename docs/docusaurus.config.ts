@@ -41,6 +41,15 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
+          // "main" is docs/ as it is on the main branch, shown by default.
+          // Each GitHub release adds a snapshot (versioned_docs/version-<tag>),
+          // chosen from the version dropdown: see .github/workflows/docs.yml.
+          lastVersion: 'current',
+          versions: {
+            current: {
+              label: 'main',
+            },
+          },
           editUrl: 'https://github.com/Ashp116/JDBoard/tree/main/docs/',
         },
         blog: false,
@@ -74,6 +83,10 @@ const config: Config = {
           sidebarId: 'apiSidebar',
           position: 'left',
           label: 'API',
+        },
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
         },
         {
           href: 'https://github.com/Ashp116/JDBoard',

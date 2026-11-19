@@ -1,6 +1,12 @@
 # Builds the documentation site (docs/, Docusaurus) and publishes it to
-# GitHub Pages at https://ashp116.github.io/JDBoard/ when docs change on main.
-# Pull requests only build it, as a check.
+# GitHub Pages at https://ashp116.github.io/JDBoard/.
+#
+# - Push to main touching docs/: rebuild and publish ("main" in the version menu).
+# - Release published: snapshot docs/ as a version named after the tag
+#   (versioned_docs/version-<tag>), commit it to main, and start this workflow
+#   on main to publish it, so the tag appears in the version menu. (Pages only
+#   deploys from main, and pushes made with GITHUB_TOKEN don't start workflows.)
+# - Pull requests touching docs/: build only, as a check.
 name: Docs
 
 on:
@@ -9,13 +15,52 @@ on:
     paths: ['docs/**', '.github/workflows/docs.yml']
   pull_request:
     paths: ['docs/**', '.github/workflows/docs.yml']
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  snapshot:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Snapshot the docs as ${{ github.event.release.tag_name }}
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f versions.json ] && node -e "process.exit(require('./versions.json').includes(process.env.TAG) ? 0 : 1)"; then
+            echo "Docs version $TAG already exists"
+          else
+            npm run docusaurus -- docs:version "$TAG"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add versions.json versioned_docs versioned_sidebars
+            git commit -m "DOCS: Snapshot the docs for $TAG"
+            git push origin HEAD:main
+          fi
+          gh workflow run docs.yml --ref main
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,8 +82,8 @@ jobs:
           path: docs/build
 
   deploy:
-    if: github.event_name != 'pull_request'
     needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       pages: write

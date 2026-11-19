@@ -53,3 +53,18 @@ npm run build      # static site in docs/build
 Changes to `docs/` merged into `main` are published to
 [ashp116.github.io/JDBoard](https://ashp116.github.io/JDBoard/) by the **Docs**
 GitHub Actions workflow.
+
+### Versions
+
+The site shows **main** (`docs/docs/` on the main branch) by default. The version menu
+in the top bar also lists every release: publishing a GitHub release makes the Docs
+workflow snapshot the docs under the release's tag (`versioned_docs/version-<tag>`),
+commit the snapshot to `main` and republish. Each version is served at
+`/docs/<tag>/…`, for example `/docs/v1.2.0/intro`.
+
+To change an older version's docs, edit its copy in `versioned_docs/`. To make a
+snapshot by hand:
+
+```bash
+npm run docusaurus -- docs:version v1.2.0
+```
