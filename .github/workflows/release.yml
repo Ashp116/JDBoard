@@ -1,0 +1,81 @@
+# Releases. Pushing a version tag (v1.2.0, v1.3.0-beta.1, v0.1.0beta, ...):
+#   1. builds the dashboard (frontend),
+#   2. creates the GitHub release for the tag, with notes from the commits since
+#      the previous tag; tags with anything after the numbers (beta, rc, -alpha.1)
+#      become pre-releases,
+#   3. attaches the built dashboard as jdboard-frontend.tar.gz, which
+#      scripts/install.sh downloads on Jetsons without Node.js.
+# The Docs workflow snapshots the docs for the same tag.
+#
+# Pull requests touching frontend/ only build it, as a check. Run it by hand
+# (Actions > Release > Run workflow) with a tag to release a tag that's already pushed.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['frontend/**', '.github/workflows/release.yml']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (already pushed), e.g. v1.2.0'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || '' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: Package
+        run: tar -czf ../jdboard-frontend.tar.gz -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jdboard-frontend
+          path: jdboard-frontend.tar.gz
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || '' }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: jdboard-frontend
+      - name: Create the release and attach the dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          # v1.2.0 is a release; v1.2.0-beta.1, v0.1.0beta, v2.0.0rc1 are pre-releases
+          PRERELEASE=()
+          if ! [[ "$TAG" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; then
+            PRERELEASE=(--prerelease)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes "${PRERELEASE[@]}"
+          fi
+          gh release upload "$TAG" jdboard-frontend.tar.gz --clobber

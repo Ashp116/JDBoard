@@ -2,29 +2,33 @@
 # GitHub Pages at https://ashp116.github.io/JDBoard/.
 #
 # - Push to main touching docs/: rebuild and publish ("main" in the version menu).
-# - Release published: snapshot docs/ as a version named after the tag
-#   (versioned_docs/version-<tag>), commit it to main, and start this workflow
-#   on main to publish it, so the tag appears in the version menu. (Pages only
-#   deploys from main, and pushes made with GITHUB_TOKEN don't start workflows.)
+# - Version tag pushed (v1.2.0, v0.1.0beta, ...): snapshot docs/ as a version
+#   named after the tag (versioned_docs/version-<tag>), commit it to main, and
+#   start this workflow on main to publish it, so the tag appears in the version
+#   menu. (Pages only deploys from main, and pushes made with GITHUB_TOKEN don't
+#   start workflows.) Run it by hand with a tag to snapshot a tag already pushed.
 # - Pull requests touching docs/: build only, as a check.
 name: Docs
 
 on:
   push:
     branches: [main]
+    tags: ['v*']          # path filters don't apply to tags
     paths: ['docs/**', '.github/workflows/docs.yml']
   pull_request:
     paths: ['docs/**', '.github/workflows/docs.yml']
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Snapshot the docs for this tag (leave empty to just republish main)'
+        required: false
 
 permissions:
   contents: read
 
 jobs:
   snapshot:
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -42,9 +46,9 @@ jobs:
           cache: npm
           cache-dependency-path: docs/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - name: Snapshot the docs as ${{ github.event.release.tag_name }}
+      - name: Snapshot the docs as ${{ inputs.tag || github.ref_name }}
         env:
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -f versions.json ] && node -e "process.exit(require('./versions.json').includes(process.env.TAG) ? 0 : 1)"; then
@@ -60,7 +64,7 @@ jobs:
           gh workflow run docs.yml --ref main
 
   build:
-    if: github.event_name != 'release'
+    if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.tag }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -83,7 +87,7 @@ jobs:
 
   deploy:
     needs: build
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       pages: write
