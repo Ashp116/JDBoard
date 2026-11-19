@@ -68,19 +68,3 @@ snapshot by hand:
 ```bash
 npm run docusaurus -- docs:version v1.2.0
 ```
-
-## Releasing
-
-Push a version tag; GitHub Actions does the rest:
-
-```bash
-git tag v1.2.0
-git push origin v1.2.0
-```
-
-The **Release** workflow builds the dashboard, creates the GitHub release with notes
-from the commits since the previous tag, and attaches the built dashboard
-(`jdboard-frontend.tar.gz`) that the installer uses on Jetsons without Node.js. Tags
-with anything after the numbers (`v1.3.0-beta.1`, `v0.1.0beta`, `v2.0.0rc1`) become
-pre-releases. The **Docs** workflow adds the tag to the docs' version menu.
-
