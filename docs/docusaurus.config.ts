@@ -1,8 +1,16 @@
 import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
+import fs from 'fs';
+import path from 'path';
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
+
+// Release snapshots (versioned_docs/version-<tag>), made by the Docs workflow
+// for each release tag; pre-releases don't get one
+const versionsFile = path.join(__dirname, 'versions.json');
+const hasReleases = fs.existsSync(versionsFile)
+  && JSON.parse(fs.readFileSync(versionsFile, 'utf8')).length > 0;
 
 const config: Config = {
   title: 'JDBoard',
@@ -38,16 +46,14 @@ const config: Config = {
       {
         docs: {
           sidebarPath: './sidebars.ts',
-          // Each release tag adds a snapshot (versioned_docs/version-<tag>, see
-          // .github/workflows/docs.yml). The newest one is shown by default at
-          // /docs; "main" (docs/ on the main branch, the unreleased development
-          // version) is at /docs/next, picked from the version menu.
+          // The newest release is shown by default at /docs; "main" (docs/ on the
+          // main branch, the unreleased development version) is at /docs/next,
+          // picked from the version menu. Before the first release, main is all
+          // there is, so it's the default.
           versions: {
-            current: {
-              label: 'main',
-              path: 'next',
-              banner: 'unreleased',
-            },
+            current: hasReleases
+              ? {label: 'main', path: 'next', banner: 'unreleased'}
+              : {label: 'main'},
           },
           editUrl: 'https://github.com/Ashp116/JDBoard/tree/main/docs/',
         },

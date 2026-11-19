@@ -2,7 +2,7 @@
 # GitHub Pages at https://ashp116.github.io/JDBoard/.
 #
 # - Push to main touching docs/: rebuild and publish ("main" in the version menu).
-# - Version tag pushed (v1.2.0, v0.1.0beta, ...): snapshot docs/ as a version
+# - Release tag pushed (v1.2.0; not pre-releases like v1.3.0-beta.1): snapshot docs/ as a version
 #   named after the tag (versioned_docs/version-<tag>), commit it to main, and
 #   start this workflow on main to publish it, so the tag appears in the version
 #   menu. (Pages only deploys from main, and pushes made with GITHUB_TOKEN don't
@@ -51,6 +51,11 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Only real releases get a snapshot: v1.2.0 yes; v1.2.0-beta.1, v0.1.0beta, v2.0.0rc1 no
+          if ! [[ "$TAG" =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; then
+            echo "$TAG is a pre-release: no docs snapshot"
+            exit 0
+          fi
           if [ -f versions.json ] && node -e "process.exit(require('./versions.json').includes(process.env.TAG) ? 0 : 1)"; then
             echo "Docs version $TAG already exists"
           else
