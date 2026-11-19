@@ -7,12 +7,35 @@ sidebar_position: 2
 The installer sets JDBoard up as a system service that starts on boot, behind nginx
 with HTTPS and a login.
 
-## 1. Download JDBoard
+## 1. Download a release
+
+Download the latest release from
+[GitHub Releases](https://github.com/Ashp116/JDBoard/releases) and unpack it:
 
 ```bash
-git clone https://github.com/Ashp116/JDBoard.git
-cd JDBoard
+TAG=$(curl -fsSL https://api.github.com/repos/Ashp116/JDBoard/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+curl -fsSL -o jdboard.tar.gz https://github.com/Ashp116/JDBoard/archive/refs/tags/$TAG.tar.gz
+mkdir jdboard && tar -xzf jdboard.tar.gz -C jdboard --strip-components=1
+cd jdboard
 ```
+
+The first line looks up the newest release's tag (for example `v1.2.0`); the others
+download that release's source and unpack it into a folder called `jdboard`.
+
+To install a specific release, such as a beta, set the tag yourself instead:
+
+```bash
+TAG=v1.2.0-beta.1
+```
+
+You can also download **Source code (tar.gz)** from the release page in a browser and
+copy it to the Jetson.
+
+:::tip You don't need Node.js
+Each release has the dashboard already built (`jdboard-frontend.tar.gz`). If Node.js
+isn't installed, the installer downloads that instead of building the dashboard on
+the Jetson. If Node.js 20+ is installed, it builds the dashboard itself.
+:::
 
 ## 2. Run the installer
 
@@ -67,11 +90,19 @@ The installer also adds you to the `jdboard` group, so you can read
 `/var/lib/jdboard` (models, logs) over SSH. Log out and back in for that to take
 effect.
 
-## Coming from a development checkout
+## Installing from a git clone
 
-If you've been running JDBoard with `./backend.sh` and the folder has a `.venv` and
-models, the installer copies them to the installed layout, so nothing is downloaded
-again. The originals are left in place. Pass `--no-migrate` to skip this.
+Developers can install from a clone instead of a release; the installer works the same:
+
+```bash
+git clone https://github.com/Ashp116/JDBoard.git
+cd JDBoard
+sudo ./scripts/install.sh --with-pytorch
+```
+
+If you've been running JDBoard from that folder with `./backend.sh` and it has a
+`.venv` and models, the installer copies them to the installed layout, so nothing is
+downloaded again. The originals are left in place. Pass `--no-migrate` to skip this.
 
 ## Options
 

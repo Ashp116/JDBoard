@@ -5,7 +5,8 @@ sidebar_position: 1
 # install.sh
 
 `scripts/install.sh` installs, updates and uninstalls JDBoard. Run it with `sudo`,
-from the folder you cloned, in a terminal (it asks questions).
+from the [downloaded release](../getting-started/installation.md#1-download-a-release)
+(or a git clone), in a terminal (it asks questions).
 
 ```bash
 sudo ./scripts/install.sh                      # install, or update an existing install

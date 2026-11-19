@@ -94,12 +94,14 @@ export default function Home(): ReactNode {
             <Heading as="h2">Install in a few minutes</Heading>
             <p>
               On a Jetson with JetPack 6 or 7 and{' '}
-              <Link to="/docs/getting-started/prerequisites">jtop installed</Link>, run this in a terminal:
+              <Link to="/docs/getting-started/prerequisites">jtop installed</Link>, download the latest
+              release and run its installer in a terminal:
             </p>
             <CodeBlock language="bash">
-              {`git clone https://github.com/Ashp116/JDBoard.git
-cd JDBoard
-sudo ./scripts/install.sh --with-pytorch`}
+              {`TAG=$(curl -fsSL https://api.github.com/repos/Ashp116/JDBoard/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+curl -fsSL -o jdboard.tar.gz https://github.com/Ashp116/JDBoard/archive/refs/tags/$TAG.tar.gz
+mkdir jdboard && tar -xzf jdboard.tar.gz -C jdboard --strip-components=1
+cd jdboard && sudo ./scripts/install.sh --with-pytorch`}
             </CodeBlock>
             <p>
               Then open <code>https://&lt;jetson-ip&gt;/</code> and log in.{' '}

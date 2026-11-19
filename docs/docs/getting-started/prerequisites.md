@@ -10,7 +10,7 @@ sidebar_position: 1
 |---|---|---|
 | **Device** | An NVIDIA Jetson with **JetPack 6 or 7** | Tested on a Jetson Orin Nano 8GB with JetPack 7.2 (L4T R39.2, CUDA 13.2, TensorRT 10.16). |
 | **jtop** | [jetson-stats](https://github.com/rbonghi/jetson_stats) | Required: all system data and hardware controls come from it. [Install it below](#install-jtop). |
-| **git** | To download JDBoard | Included with JetPack. |
+| **curl** | To download JDBoard | Included with JetPack. |
 | **Internet** | During installation | For nginx and fail2ban packages, Python packages, and PyTorch if you choose it. |
 | **Disk space** | About 1 GB, or about 4 GB with PyTorch | Plus the models you add. |
 | **Node.js 20+** | Optional | Only to build the dashboard yourself. Without it, the installer downloads a prebuilt dashboard from GitHub. |

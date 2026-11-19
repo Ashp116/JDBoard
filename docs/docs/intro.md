@@ -24,12 +24,13 @@ you, in any browser on your network:
 
 ## How it fits together
 
-```text
- Browser ──HTTPS──▶ nginx ──▶ JDBoard backend (Flask, 127.0.0.1:5001)
-                    │  login,        │
-                    │  API keys,     ├──▶ jtop.service      (system data, hardware controls)
-                    │  frontend      ├──▶ inference worker   (PyTorch / TensorRT, only while a model is loaded)
-                    │                └──▶ jdboard-admin      (reboot, shutdown, cache: the only root access)
+```mermaid
+flowchart LR
+    browser["Browser or API client"] -- HTTPS --> nginx["<b>nginx</b><br/>login, API keys,<br/>dashboard files"]
+    nginx -- "/api" --> backend["<b>JDBoard backend</b><br/>Flask, 127.0.0.1:5001<br/>runs as user jdboard"]
+    backend --> jtop["<b>jtop.service</b><br/>system data,<br/>hardware controls"]
+    backend --> worker["<b>Inference worker</b><br/>PyTorch / TensorRT,<br/>only while a model is loaded"]
+    backend --> admin["<b>jdboard-admin</b><br/>reboot, shutdown, cache:<br/>the only root access"]
 ```
 
 - **nginx** serves the dashboard over HTTPS, checks the login and API keys, and forwards
