@@ -2749,7 +2749,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
   const [imageNaturalDimensions, setImageNaturalDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [imageContainerDimensions, setImageContainerDimensions] = useState<{width: number, height: number}>({width: 0, height: 0});
   const [showDetails, setShowDetails] = useState(false);
-  const [hoveredDetection, setHoveredDetection] = useState<number | null>(null);
+  const [selectedDetection, setSelectedDetection] = useState<number | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{x: number, y: number}>({x: 0, y: 0});
   const [classColors, setClassColors] = useState<{[key: string]: string}>({});
   const [selectedClasses, setSelectedClasses] = useState<Set<string>>(new Set());
@@ -3482,15 +3482,37 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     }
   };
 
-  // Handle detection hover
-  const handleDetectionHover = (index: number | null, event?: React.MouseEvent) => {
-    if (hoveredDetection !== index) {
-      setHoveredDetection(index);
+  // Clicking a box opens its details; clicking it again (or anywhere else) closes them
+  const handleDetectionClick = (index: number, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (selectedDetection === index) {
+      setSelectedDetection(null);
+      return;
     }
-    if (event && index !== null) {
-      updateTooltipPosition(event);
-    }
+    setSelectedDetection(index);
+    updateTooltipPosition(event);
   };
+
+  // A new result has different boxes: close any open details
+  useEffect(() => { setSelectedDetection(null); }, [results]);
+
+  // Close the details on a click outside the boxes, Escape, or scrolling
+  useEffect(() => {
+    if (selectedDetection === null) return undefined;
+    const onMouseDown = (e: MouseEvent) => {
+      if (!(e.target as Element).closest?.('[data-detection-box]')) setSelectedDetection(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedDetection(null); };
+    const onScroll = () => setSelectedDetection(null);
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [selectedDetection]);
 
   // Update tooltip position helper
   const updateTooltipPosition = (event: React.MouseEvent) => {
@@ -3530,11 +3552,6 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     }
     
     setTooltipPosition({ x, y });
-  };
-
-  // Handle mouse leave to clear tooltip
-  const handleDetectionLeave = () => {
-    setHoveredDetection(null);
   };
 
   // Analytics functions
@@ -4431,7 +4448,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       imageWidth={imageNaturalDimensions.width}
                       imageHeight={imageNaturalDimensions.height}
                       colorFor={(pred: any, index: number) => classColors[pred.class || pred.label || `Class ${index}`] || '#00ff00'}
-                      hovered={hoveredDetection}
+                      hovered={selectedDetection}
                     />
 
                     {/* Render bounding boxes */}
@@ -4463,20 +4480,16 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           height={bbox.height}
                           confidence={pred.confidence || pred.score || 0}
                           classColor={classColor}
-                          isHovered={hoveredDetection === index}
-                          anyHovered={hoveredDetection !== null}
-                          onMouseEnter={(e) => handleDetectionHover(index, e)}
-                          onMouseLeave={handleDetectionLeave}
-                          onMouseMove={(e) => {
-                            if (hoveredDetection === index) {
-                              updateTooltipPosition(e);
-                            }
-                          }}
+                          isHovered={selectedDetection === index}
+                          anyHovered={selectedDetection !== null}
+                          data-detection-box
+                          onClick={(e) => handleDetectionClick(index, e)}
+                          title="Click for details"
                         >
                           <BoundingBoxLabel 
                             confidence={pred.confidence || pred.score || 0}
                             classColor={classColor}
-                            isHovered={hoveredDetection === index}
+                            isHovered={selectedDetection === index}
                             x={bbox.x}
                             y={bbox.y}
                             containerWidth={imageContainerDimensions.width}
@@ -5192,19 +5205,19 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
         </TabContent>
       </TabSection>
       
-      {/* Hover Tooltip */}
-      {hoveredDetection !== null && results && (
+      {/* Details of the clicked box */}
+      {selectedDetection !== null && results && (
         <HoverTooltip 
           x={tooltipPosition.x} 
           y={tooltipPosition.y} 
-          visible={hoveredDetection !== null}
+          visible={selectedDetection !== null}
         >
           {(() => {
             const filteredPredictions = getFilteredPredictions(getPredictions(results));
-            const pred = filteredPredictions[hoveredDetection];
+            const pred = filteredPredictions[selectedDetection];
             if (!pred) return null;
             
-            const className = pred.class || pred.label || `Class ${hoveredDetection}`;
+            const className = pred.class || pred.label || `Class ${selectedDetection}`;
             const classColor = classColors[className] || '#00ff00';
             
             return (
