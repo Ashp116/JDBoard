@@ -8,6 +8,13 @@
 A dashboard for NVIDIA Jetson devices: live system monitoring, model management and
 inference, in the browser.
 
+
+
+
+https://github.com/user-attachments/assets/727d1302-b247-477f-800d-a43a4ae81cda
+
+
+
 ## Features
 
 - **Monitoring** – CPU, GPU, memory, temperatures, power and fan from jtop, live over
