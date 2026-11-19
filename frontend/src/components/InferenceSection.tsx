@@ -4516,7 +4516,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                       }
                       
                       // No bbox (e.g. keypoints or masks only): an invisible box around
-                      // its shapes still gives hover and click
+                      // its shapes still gives a label, hover and click
                       const ghost = !pred.bbox;
                       const bbox = convertBboxToPercentage(
                         pred.bbox || shapesBounds(pred.shapes), 
@@ -4549,19 +4549,17 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           onClick={(e) => handleDetectionClick(index, e)}
                           title="Click for details"
                         >
-                          {(!ghost || focusedDetection === index) && (
-                            <BoundingBoxLabel 
-                              confidence={pred.confidence || pred.score || 0}
-                              classColor={classColor}
-                              isHovered={focusedDetection === index}
-                              x={bbox.x}
-                              y={bbox.y}
-                              containerWidth={imageContainerDimensions.width}
-                              containerHeight={imageContainerDimensions.height}
-                            >
-                              {className} {formatConfidence(pred.confidence || pred.score || 0)}
-                            </BoundingBoxLabel>
-                          )}
+                          <BoundingBoxLabel 
+                            confidence={pred.confidence || pred.score || 0}
+                            classColor={classColor}
+                            isHovered={focusedDetection === index}
+                            x={bbox.x}
+                            y={bbox.y}
+                            containerWidth={imageContainerDimensions.width}
+                            containerHeight={imageContainerDimensions.height}
+                          >
+                            {className} {formatConfidence(pred.confidence || pred.score || 0)}
+                          </BoundingBoxLabel>
                         </BoundingBox>
                       );
                     })}

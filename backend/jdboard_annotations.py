@@ -22,8 +22,8 @@ Shapes (every shape may also set ``"color": "#rrggbb"``, and ``"label"``):
                           "src": "data:image/png;base64,...", "opacity": 0.5}
         raster overlays: masks, heatmaps, depth maps
 
-Without a ``bbox``, no box is drawn: hovering or clicking anywhere around the
-prediction's shapes still highlights it and opens its details. A prediction
+Without a ``bbox``, no box outline is drawn, but the label shows above the
+shapes and hovering or clicking around them works the same. A prediction
 without ``bbox`` or ``shapes`` (e.g. image classification) is still listed in
 the results, just not drawn.
 
