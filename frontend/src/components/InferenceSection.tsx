@@ -21,7 +21,7 @@ import { InferenceSectionProps } from '../types';
 import Modal, { ModalHeader, ModalBody, ModalCloseButton } from './shared/Modal';
 import { getBackendUrl } from '../utils/api';
 import InferenceApiTab from './InferenceApiTab';
-import PredictionShapes from './PredictionShapes';
+import PredictionShapes, { shapesBounds } from './PredictionShapes';
 import { useNotifications } from '../contexts/NotificationContext';
 
 // Register Chart.js components
@@ -398,6 +398,37 @@ const ImageUploadArea = styled.div<{ isDragOver: boolean }>`
   }
 `;
 
+const ModelSelectRow = styled.div`
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+
+  select {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+  }
+`;
+
+const ReloadModelsButton = styled.button`
+  flex: 0 0 auto;
+  width: 44px;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 6px;
+  background: ${props => props.theme.colors.background.primary};
+  color: ${props => props.theme.colors.nvidia.green};
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+`;
+
 const ModelSelector = styled.select`
   width: 100%;
   padding: 12px;
@@ -765,9 +796,10 @@ const BoundingBox = styled.div<{
   classColor: string;
   isHovered: boolean;
   anyHovered: boolean;
+  $ghost?: boolean;   // no bbox from the model: an invisible hover/click target
 }>`
   position: absolute;
-  border: 2px solid ${props => props.classColor};
+  border: 2px solid ${props => props.$ghost ? 'transparent' : props.classColor};
   background: transparent;
   left: ${props => props.x}%;
   top: ${props => props.y}%;
@@ -780,8 +812,8 @@ const BoundingBox = styled.div<{
   opacity: ${props => props.anyHovered ? (props.isHovered ? '1' : '0.1') : '1'};
   
   &:hover {
-    border-width: 3px;
-    box-shadow: 0 0 10px ${props => props.classColor}80;
+    border-width: ${props => props.$ghost ? '2px' : '3px'};
+    box-shadow: ${props => props.$ghost ? 'none' : `0 0 10px ${props.classColor}80`};
   }
   
   &::before {
@@ -3952,6 +3984,16 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
     }
   }, [filters, searchQuery]);
 
+  const [reloadingModels, setReloadingModels] = useState(false);
+  const reloadModels = async () => {
+    setReloadingModels(true);
+    try {
+      await fetchModels();
+    } finally {
+      setReloadingModels(false);
+    }
+  };
+
   const fetchModels = async () => {
     try {
       const response = await fetch(`${getBackendUrl()}/models`);
@@ -4351,17 +4393,28 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             style={{ display: 'none' }}
           />
 
-          <ModelSelector
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-          >
-            <option value="">Select a model...</option>
-            {models.map((model) => (
-              <option key={model.id} value={model.id} disabled={model.status !== 'loaded'}>
-                {model.id} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
-              </option>
-            ))}
-          </ModelSelector>
+          <ModelSelectRow>
+            <ModelSelector
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              <option value="">Select a model...</option>
+              {models.map((model) => (
+                <option key={model.id} value={model.id} disabled={model.status !== 'loaded'}>
+                  {model.id} ({model.framework}) {model.status !== 'loaded' && '- Not Loaded'}
+                </option>
+              ))}
+            </ModelSelector>
+            <ReloadModelsButton
+              type="button"
+              onClick={reloadModels}
+              disabled={reloadingModels}
+              title="Reload the model list (e.g. after loading a model on the Models page)"
+              aria-label="Reload models"
+            >
+              <i className={`fas fa-sync-alt${reloadingModels ? ' fa-spin' : ''}`}></i>
+            </ReloadModelsButton>
+          </ModelSelectRow>
           <RunButton
             onClick={runInference}
             disabled={!selectedImage || !selectedModel || isRunning}
@@ -4462,8 +4515,11 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                         return null;
                       }
                       
+                      // No bbox (e.g. keypoints or masks only): an invisible box around
+                      // its shapes still gives hover and click
+                      const ghost = !pred.bbox;
                       const bbox = convertBboxToPercentage(
-                        pred.bbox, 
+                        pred.bbox || shapesBounds(pred.shapes), 
                         imageNaturalDimensions.width, 
                         imageNaturalDimensions.height,
                         imageContainerDimensions.width,
@@ -4486,23 +4542,26 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                           classColor={classColor}
                           isHovered={focusedDetection === index}
                           anyHovered={focusedDetection !== null}
+                          $ghost={ghost}
                           data-detection-box
                           onMouseEnter={() => setHoveredDetection(index)}
                           onMouseLeave={() => setHoveredDetection(prev => (prev === index ? null : prev))}
                           onClick={(e) => handleDetectionClick(index, e)}
                           title="Click for details"
                         >
-                          <BoundingBoxLabel 
-                            confidence={pred.confidence || pred.score || 0}
-                            classColor={classColor}
-                            isHovered={focusedDetection === index}
-                            x={bbox.x}
-                            y={bbox.y}
-                            containerWidth={imageContainerDimensions.width}
-                            containerHeight={imageContainerDimensions.height}
-                          >
-                            {className} {formatConfidence(pred.confidence || pred.score || 0)}
-                          </BoundingBoxLabel>
+                          {(!ghost || focusedDetection === index) && (
+                            <BoundingBoxLabel 
+                              confidence={pred.confidence || pred.score || 0}
+                              classColor={classColor}
+                              isHovered={focusedDetection === index}
+                              x={bbox.x}
+                              y={bbox.y}
+                              containerWidth={imageContainerDimensions.width}
+                              containerHeight={imageContainerDimensions.height}
+                            >
+                              {className} {formatConfidence(pred.confidence || pred.score || 0)}
+                            </BoundingBoxLabel>
+                          )}
                         </BoundingBox>
                       );
                     })}
@@ -5224,6 +5283,7 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
             if (!pred) return null;
             
             const className = pred.class || pred.label || `Class ${selectedDetection}`;
+            const box = pred.bbox || shapesBounds(pred.shapes);   // around keypoints/masks when there's no bbox
             const classColor = classColors[className] || '#00ff00';
             
             return (
@@ -5244,15 +5304,15 @@ const InferenceSection: React.FC<InferenceSectionProps> = ({ systemData, socket,
                   <div className="tooltip-stat">
                     <div className="label">Center (X,Y)</div>
                     <div className="value">
-                      {pred.bbox ? 
-                        `${Math.round(pred.bbox.x)}, ${Math.round(pred.bbox.y)}` : 'N/A'}
+                      {box ? 
+                        `${Math.round(box.x)}, ${Math.round(box.y)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">
                     <div className="label">Size (W,H)</div>
                     <div className="value">
-                      {pred.bbox ? 
-                        `${Math.round(pred.bbox.width)}, ${Math.round(pred.bbox.height)}` : 'N/A'}
+                      {box ? 
+                        `${Math.round(box.width)}, ${Math.round(box.height)}` : 'N/A'}
                     </div>
                   </div>
                   <div className="tooltip-stat">

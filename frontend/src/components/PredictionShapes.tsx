@@ -37,6 +37,53 @@ const visible = (point: number[] | undefined, minConfidence: number) =>
   && (point.length < 3 || point[2] >= minConfidence)
   && !(point[0] === 0 && point[1] === 0);   // Ultralytics uses (0, 0) for "not detected"
 
+/** Box (centre x/y, width, height) around a prediction's shapes, for
+ *  predictions that come without a bbox: hovering/clicking uses it as an
+ *  invisible target. Null when there's nothing positioned to go round. */
+export const shapesBounds = (shapes: Shape[] | undefined): { x: number; y: number; width: number; height: number } | null => {
+  if (!Array.isArray(shapes)) return null;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const add = (x?: number, y?: number) => {
+    if (Number.isFinite(x) && Number.isFinite(y)) { xs.push(x as number); ys.push(y as number); }
+  };
+  for (const shape of shapes) {
+    switch (shape.type) {
+      case 'polygon':
+      case 'polyline':
+        (shape.points || []).forEach(p => add(p[0], p[1]));
+        break;
+      case 'keypoints': {
+        const minConf = shape.min_confidence ?? 0.5;
+        (shape.points || []).forEach(p => { if (visible(p, minConf)) add(p[0], p[1]); });
+        break;
+      }
+      case 'circle': {
+        const r = shape.radius ?? 0;
+        add((shape.x ?? NaN) - r, (shape.y ?? NaN) - r);
+        add((shape.x ?? NaN) + r, (shape.y ?? NaN) + r);
+        break;
+      }
+      case 'image':
+        add(shape.x, shape.y);
+        add((shape.x ?? NaN) + (shape.width ?? NaN), (shape.y ?? NaN) + (shape.height ?? NaN));
+        break;
+      case 'text':
+        add(shape.x, shape.y);
+        break;
+      default:
+        break;
+    }
+  }
+  if (xs.length === 0) return null;
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  // A single point (or a straight line) still needs something to hover
+  const pad = 12;
+  const width = Math.max(maxX - minX, pad);
+  const height = Math.max(maxY - minY, pad);
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, width, height };
+};
+
 const PredictionShapes: React.FC<Props> = ({ predictions, imageWidth, imageHeight, colorFor, hovered }) => {
   if (!imageWidth || !imageHeight) return null;
   const withShapes = predictions.map((p, i) => ({ p, i })).filter(({ p }) => Array.isArray(p?.shapes) && p.shapes.length);
