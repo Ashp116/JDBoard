@@ -2341,6 +2341,22 @@ def get_ml_libraries():
                     'tensorrt': version('tensorrt')})
 
 
+@app.route('/system/serial-number', methods=['GET'])
+def get_serial_number():
+    """The Jetson's serial number, from the device tree. Separate from the
+    other system information so the dashboard only asks for it when you
+    click to reveal it."""
+    for path in ('/proc/device-tree/serial-number', '/sys/firmware/devicetree/base/serial-number'):
+        try:
+            with open(path, 'rb') as f:
+                serial = f.read().replace(b'\0', b'').decode('ascii', 'replace').strip()
+            if serial:
+                return jsonify({'success': True, 'serial_number': serial})
+        except OSError:
+            continue
+    return jsonify({'success': False, 'error': 'This device does not report a serial number'}), 404
+
+
 @app.route('/system/privileges', methods=['GET'])
 def get_privileges():
     """Whether admin actions (reboot, shutdown, jtop service, cache) need a

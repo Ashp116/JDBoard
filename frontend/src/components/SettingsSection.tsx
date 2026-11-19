@@ -322,6 +322,46 @@ const InfoItem = styled.div`
   }
 `;
 
+const SerialValue = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+
+  .serial {
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .masked {
+    letter-spacing: 1px;
+    color: ${props => props.theme.colors.text.secondary};
+  }
+`;
+
+const SerialButton = styled.button`
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid ${props => props.theme.colors.border.secondary};
+  border-radius: 4px;
+  color: ${props => props.theme.colors.nvidia.green};
+  width: 28px;
+  height: 26px;
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover:not(:disabled) {
+    border-color: ${props => props.theme.colors.nvidia.green};
+  }
+
+  &:disabled {
+    cursor: wait;
+    opacity: 0.6;
+  }
+`;
+
 const DropdownContainer = styled.div`
   position: relative;
   display: inline-block;
@@ -418,6 +458,54 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
       .then(data => { if (data.success) setJdVersion(data); })
       .catch(() => { /* leave unknown */ });
   }, []);
+
+  // Serial number: hidden until revealed, and only fetched then
+  const [serialNumber, setSerialNumber] = useState<string | null>(null);
+  const [serialVisible, setSerialVisible] = useState(false);
+  const [serialLoading, setSerialLoading] = useState(false);
+  const [serialError, setSerialError] = useState<string | null>(null);
+  const [serialCopied, setSerialCopied] = useState(false);
+  const toggleSerial = async () => {
+    if (serialVisible) {
+      setSerialVisible(false);
+      return;
+    }
+    if (serialNumber === null) {
+      setSerialLoading(true);
+      setSerialError(null);
+      try {
+        const response = await fetch(`${getBackendUrl()}/system/serial-number`);
+        const data = await response.json();
+        if (!data.success) {
+          setSerialError(data.error || 'Not available');
+          return;
+        }
+        setSerialNumber(data.serial_number);
+      } catch {
+        setSerialError('Could not read it');
+        return;
+      } finally {
+        setSerialLoading(false);
+      }
+    }
+    setSerialVisible(true);
+  };
+  const copySerial = async () => {
+    if (!serialNumber) return;
+    try {
+      await navigator.clipboard.writeText(serialNumber);
+    } catch {
+      // Plain-HTTP pages have no clipboard API: fall back to a hidden textarea
+      const area = document.createElement('textarea');
+      area.value = serialNumber;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    }
+    setSerialCopied(true);
+    setTimeout(() => setSerialCopied(false), 1500);
+  };
 
   // Installed ML libraries (manage PyTorch with: sudo jdboard-pytorch)
   const [mlLibs, setMlLibs] = useState<{ torch: string | null; torch_cuda: string | null; tensorrt: string | null } | null>(null);
@@ -1021,6 +1109,29 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <InfoItem>
             <div className="label">Kernel Version</div>
             <div className="value">{systemInfo.kernelVersion}</div>
+          </InfoItem>
+          <InfoItem>
+            <div className="label">Serial Number</div>
+            <SerialValue className="value">
+              <span className={serialVisible ? 'serial' : 'serial masked'}>
+                {serialError ? serialError : serialVisible && serialNumber ? serialNumber : '•••••••••••••'}
+              </span>
+              <SerialButton
+                type="button"
+                onClick={toggleSerial}
+                disabled={serialLoading}
+                title={serialVisible ? 'Hide serial number' : 'Show serial number'}
+                aria-label={serialVisible ? 'Hide serial number' : 'Show serial number'}
+              >
+                <i className={serialLoading ? 'fas fa-spinner fa-spin' : serialVisible ? 'fas fa-eye-slash' : 'fas fa-eye'}></i>
+              </SerialButton>
+              {serialVisible && serialNumber && (
+                <SerialButton type="button" onClick={copySerial}
+                  title={serialCopied ? 'Copied' : 'Copy serial number'} aria-label="Copy serial number">
+                  <i className={serialCopied ? 'fas fa-check' : 'fas fa-copy'}></i>
+                </SerialButton>
+              )}
+            </SerialValue>
           </InfoItem>
           <InfoItem>
             <div className="label">JDBoard</div>
