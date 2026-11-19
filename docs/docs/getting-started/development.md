@@ -49,3 +49,7 @@ npm install
 npm start          # live preview on http://localhost:3000/JDBoard/
 npm run build      # static site in docs/build
 ```
+
+Changes to `docs/` merged into `main` are published to
+[ashp116.github.io/JDBoard](https://ashp116.github.io/JDBoard/) by the **Docs**
+GitHub Actions workflow.
