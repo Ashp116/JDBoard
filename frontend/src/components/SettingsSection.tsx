@@ -409,6 +409,16 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
     uptime: '00:00:00',
     kernelVersion: 'Unknown'
   });
+  // Running JDBoard version: version · commit · branch
+  const [jdVersion, setJdVersion] = useState<{ version: string | null; commit: string | null; branch: string | null;
+                                              installed_at: string | null } | null>(null);
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/system/version`)
+      .then(response => response.json())
+      .then(data => { if (data.success) setJdVersion(data); })
+      .catch(() => { /* leave unknown */ });
+  }, []);
+
   // Installed ML libraries (manage PyTorch with: sudo jdboard-pytorch)
   const [mlLibs, setMlLibs] = useState<{ torch: string | null; torch_cuda: string | null; tensorrt: string | null } | null>(null);
   useEffect(() => {
@@ -1011,6 +1021,16 @@ const SettingsSection: React.FC<SettingsSectionProps> = ({ systemData, socket, i
           <InfoItem>
             <div className="label">Kernel Version</div>
             <div className="value">{systemInfo.kernelVersion}</div>
+          </InfoItem>
+          <InfoItem>
+            <div className="label">JDBoard</div>
+            <div
+              className="value"
+              title={jdVersion?.installed_at ? `Installed ${new Date(jdVersion.installed_at).toLocaleString()}` : undefined}
+            >
+              {!jdVersion ? 'Unknown'
+                : [jdVersion.version, jdVersion.commit, jdVersion.branch].filter(Boolean).join(' · ') || 'Unknown'}
+            </div>
           </InfoItem>
           <InfoItem>
             <div className="label">PyTorch</div>

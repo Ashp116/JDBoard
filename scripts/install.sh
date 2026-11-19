@@ -182,7 +182,25 @@ install -m 755 -o root -g root "$REPO/deploy/jdboard-pip" /usr/local/bin/jdboard
 install -m 755 -o root -g root "$REPO/deploy/jdboard-pytorch" /usr/local/bin/jdboard-pytorch
 install -m 755 -o root -g root "$REPO/deploy/jdboard-passwd" /usr/local/bin/jdboard-passwd
 install -m 644 -o root -g root "$REPO/requirements.txt" "$APP/requirements.txt"
-git -C "$REPO" rev-parse --short HEAD > "$APP/VERSION" 2>/dev/null || echo unknown > "$APP/VERSION"
+# What's installed: version (frontend/package.json), git commit and branch
+GIT=(git -c safe.directory="$REPO" -C "$REPO")
+COMMIT="$("${GIT[@]}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ -n "$("${GIT[@]}" status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
+    COMMIT="$COMMIT-modified"
+fi
+echo "$COMMIT" > "$APP/VERSION"
+python3 - "$REPO" "$COMMIT" "$("${GIT[@]}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)" > "$APP/version.json" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+repo, commit, branch = sys.argv[1:4]
+try:
+    version = json.load(open(f"{repo}/frontend/package.json"))["version"]
+except Exception:
+    version = None
+print(json.dumps({"version": version, "commit": commit, "branch": branch or None,
+                  "installed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+PY
+chmod 644 "$APP/version.json"
 
 # --- 4. Python environment -------------------------------------------------------------
 step "Python environment ($APP/venv)"
@@ -429,6 +447,7 @@ fi
 
 # --- 9. start and check ----------------------------------------------------------------
 step "Starting JDBoard"
+VERSION_TEXT="$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(" · ".join(x for x in (v.get("version"), v.get("commit"), v.get("branch")) if x))' "$APP/version.json" 2>/dev/null || cat "$APP/VERSION")"
 systemctl restart "$SERVICE"
 for _ in $(seq 1 40); do
     BACKEND="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$BACKEND_PORT/api/system/privileges" || true)"
@@ -446,9 +465,9 @@ fi
 echo
 if [ "$BACKEND" = 200 ] && [ "$FRONT" = 401 ]; then
     if systemctl is-enabled --quiet "$SERVICE"; then
-        echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")) and starts on boot."
+        echo "✅ JDBoard $VERSION_TEXT is running and starts on boot."
     else
-        echo "✅ JDBoard is running (backend $(cat "$APP/VERSION")). Auto-start is off, so after a"
+        echo "✅ JDBoard $VERSION_TEXT is running. Auto-start is off, so after a"
         echo "   reboot it (and the website) stays off until: sudo systemctl start jdboard"
     fi
     for ip in $(hostname -I); do

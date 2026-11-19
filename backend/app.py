@@ -2282,6 +2282,42 @@ def revoke_api_key(key_id):
     return jsonify({'success': True})
 
 
+@app.route('/system/version', methods=['GET'])
+def get_jdboard_version():
+    """JDBoard version, git commit and branch of what's running."""
+    info = None
+    version_file = os.environ.get('JDBOARD_VERSION_FILE', '/opt/jdboard/version.json')
+    if os.path.exists(version_file):
+        try:
+            with open(version_file) as f:
+                info = json.load(f)
+            info['source'] = 'installed'
+        except (OSError, ValueError):
+            info = None
+    if info is None:
+        # Development checkout: ask git and package.json directly
+        repo = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+        def git(*args):
+            try:
+                out = subprocess.run(['git', '-C', repo, *args], capture_output=True, text=True, timeout=5)
+                return out.stdout.strip() or None if out.returncode == 0 else None
+            except (OSError, subprocess.TimeoutExpired):
+                return None
+
+        try:
+            with open(os.path.join(repo, 'frontend', 'package.json')) as f:
+                version = json.load(f).get('version')
+        except (OSError, ValueError):
+            version = None
+        commit = git('rev-parse', '--short', 'HEAD')
+        if commit and git('status', '--porcelain', '--untracked-files=no'):
+            commit += '-modified'
+        info = {'version': version, 'commit': commit, 'branch': git('rev-parse', '--abbrev-ref', 'HEAD'),
+                'installed_at': None, 'source': 'checkout'}
+    return jsonify({'success': True, **info})
+
+
 @app.route('/system/ml-libraries', methods=['GET'])
 def get_ml_libraries():
     """Installed PyTorch / TensorRT / Ultralytics versions (read from package
