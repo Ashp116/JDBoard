@@ -3,6 +3,8 @@ sidebar_position: 1
 slug: /intro
 ---
 
+import ArchitectureDiagram from '@site/src/components/ArchitectureDiagram';
+
 # Introduction
 
 JDBoard is a web dashboard for NVIDIA Jetson devices. It runs on the Jetson and gives
@@ -24,14 +26,7 @@ you, in any browser on your network:
 
 ## How it fits together
 
-```mermaid
-flowchart LR
-    browser["Browser or API client"] -- HTTPS --> nginx["<b>nginx</b><br/>login, API keys,<br/>dashboard files"]
-    nginx -- "/api" --> backend["<b>JDBoard backend</b><br/>Flask, 127.0.0.1:5001<br/>runs as user jdboard"]
-    backend --> jtop["<b>jtop.service</b><br/>system data,<br/>hardware controls"]
-    backend --> worker["<b>Inference worker</b><br/>PyTorch / TensorRT,<br/>only while a model is loaded"]
-    backend --> admin["<b>jdboard-admin</b><br/>reboot, shutdown, cache:<br/>the only root access"]
-```
+<ArchitectureDiagram />
 
 - **nginx** serves the dashboard over HTTPS, checks the login and API keys, and forwards
   `/api` to the backend.
