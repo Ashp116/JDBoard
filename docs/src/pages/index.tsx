@@ -9,6 +9,9 @@ import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
 
+// The demo video from the README (a GitHub attachment, 44 MB, so it isn't in the repo)
+const DEMO_VIDEO = 'https://github.com/user-attachments/assets/727d1302-b247-477f-800d-a43a4ae81cda';
+
 const features: {title: string; body: ReactNode; to: string}[] = [
   {
     title: 'Live monitoring',
@@ -75,6 +78,14 @@ export default function Home(): ReactNode {
       description="JDBoard: monitoring, model management and inference for NVIDIA Jetson, in the browser.">
       <Hero />
       <main>
+        <section className={styles.demo}>
+          <div className="container">
+            <Heading as="h2" className={styles.demoTitle}>See it in action</Heading>
+            <video className={styles.video} src={DEMO_VIDEO} controls muted playsInline preload="metadata">
+              <a href={DEMO_VIDEO}>Watch the JDBoard demo</a>
+            </video>
+          </div>
+        </section>
         <section className={styles.section}>
           <div className="container">
             <div className="row">
